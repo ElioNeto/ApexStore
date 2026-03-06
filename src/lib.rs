@@ -45,19 +45,19 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create engine with default configuration
 //! let config = LsmConfig::default();
-//! let mut engine = LsmEngine::new(config)?;
+//! let engine = LsmEngine::new(config)?;
 //!
 //! // Write data
-//! engine.put("user:1", b"Alice")?;
-//! engine.put("user:2", b"Bob")?;
+//! engine.set("user:1".to_string(), b"Alice".to_vec())?;
+//! engine.set("user:2".to_string(), b"Bob".to_vec())?;
 //!
 //! // Read data
-//! if let Some(record) = engine.get("user:1")? {
-//!     println!("Value: {:?}", record.value);
+//! if let Some(value) = engine.get("user:1")? {
+//!     println!("Value: {:?}", value);
 //! }
 //!
 //! // Delete data
-//! engine.delete("user:1")?;
+//! engine.delete("user:1".to_string())?;
 //! # Ok(())
 //! # }
 //! ```
