@@ -34,6 +34,12 @@ thiserror = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 
+# Authentication (optional, enabled with api feature)
+uuid = { version = "1.6", features = ["v4", "serde"], optional = true }
+sha2 = { version = "0.10", optional = true }
+base64 = { version = "0.21", optional = true }
+rand = { version = "0.8", optional = true }
+
 # HTTP Server (opcionais)
 actix-web = { version = "4", optional = true }
 actix-cors = { version = "0.7", optional = true }
@@ -64,4 +70,4 @@ required-features = ["api"]
 
 [features]
 default = []
-api = ["actix-web", "actix-cors", "tokio", "dotenvy"]
+api = ["actix-web", "actix-cors", "tokio", "dotenvy", "uuid", "sha2", "base64", "rand"]
