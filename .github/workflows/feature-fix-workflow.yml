@@ -10,6 +10,7 @@ on:
       - opened
       - synchronize
       - reopened
+      - closed
     branches:
       - develop
 
@@ -23,6 +24,7 @@ concurrency:
 
 jobs:
   build-and-test:
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
 
     steps:
@@ -216,3 +218,81 @@ jobs:
           done
 
           echo "✅ Issue comment processing complete"
+
+  close-issues-on-merge:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.base_ref == 'develop'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+      pull-requests: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: develop
+
+      - name: Extract and close issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          echo "PR #$PR_NUMBER merged from $HEAD_REF into develop"
+          
+          # Get commits from the merged PR
+          COMMITS=$(gh pr view "$PR_NUMBER" --json commits --jq '.commits[].messageHeadline')
+          
+          if [ -z "$COMMITS" ]; then
+            echo "ℹ️ No commits found in PR"
+            exit 0
+          fi
+          
+          echo "Commits in PR:"
+          echo "$COMMITS"
+          
+          # Extract all issue references (Closes #123, Fixes #456, #789)
+          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]*#[0-9]+' | grep -oE '#[0-9]+' | sort -u || echo "")
+          
+          if [ -z "$ISSUES" ]; then
+            echo "ℹ️ No issues referenced with close/fix/resolve keywords"
+            exit 0
+          fi
+          
+          echo "Found issues to close: $ISSUES"
+          
+          for ISSUE in $ISSUES; do
+            ISSUE_NUM=${ISSUE#\#}
+            echo "Processing issue #$ISSUE_NUM"
+            
+            # Check if issue exists and is open
+            ISSUE_STATE=$(gh issue view "$ISSUE_NUM" --json state --jq .state 2>/dev/null || echo "NOT_FOUND")
+            
+            if [ "$ISSUE_STATE" = "OPEN" ]; then
+              # Add completion comment
+              gh issue comment "$ISSUE_NUM" --body "✅ **Completed and merged to develop**
+
+          This issue has been resolved and merged into the \`develop\` branch.
+
+          **Merge Details:**
+          - 🔀 PR: #$PR_NUMBER
+          - 🌿 Branch: \`$HEAD_REF\`
+          - 👤 Merged by: @${{ github.event.pull_request.merged_by.login }}
+          - 📅 Merged at: ${{ github.event.pull_request.merged_at }}
+
+          This fix will be included in the next release.
+          
+          ---
+          _Automatically closed by feature-fix workflow_" 2>/dev/null && echo "✅ Comment added to issue #$ISSUE_NUM" || echo "⚠️ Could not comment on issue #$ISSUE_NUM"
+              
+              # Close the issue
+              gh issue close "$ISSUE_NUM" --reason completed 2>/dev/null && echo "✅ Issue #$ISSUE_NUM closed" || echo "⚠️ Could not close issue #$ISSUE_NUM"
+            elif [ "$ISSUE_STATE" = "CLOSED" ]; then
+              echo "ℹ️ Issue #$ISSUE_NUM already closed"
+            else
+              echo "⚠️ Issue #$ISSUE_NUM not found"
+            fi
+          done
+          
+          echo "✅ Issue closure processing complete"

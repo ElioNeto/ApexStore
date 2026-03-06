@@ -7,10 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ✨ Added
+
+#### Docker Support & Deployment (2026-03-06)
+
+**docker-compose.yml** (Commit `fe15ca8`):
+- Created `docker-compose.yml` for simplified deployment
+- Single-command deployment: `docker-compose up -d`
+- Automatic environment variable mapping from `.env` file
+- Configured persistent volume (`apexstore-data`) for data durability
+- Built-in health checks with configurable intervals
+- Resource limits (CPU, memory) for production deployments
+- Restart policy: `unless-stopped` for high availability
+
+**README Docker Section** (Commit `edf2ee4`):
+- Added comprehensive "🐳 Docker Deployment" section
+- Quick Start with Docker Compose (recommended method)
+- Standalone Docker commands for custom setups
+- Configuration via environment variables guide
+- Health check instructions and verification
+- Data persistence documentation (backup/restore)
+- Added Docker badge to README header
+
+### 🔄 Changed
+
+#### Branding Updates (2026-03-06)
+
+**Dockerfile Rebrand** (Commit `a96144d`):
+- Renamed binary from `lsm-server` → `apexstore-server`
+- Updated comments and metadata with ApexStore identity
+- Added maintainer label: `Elio Neto <netoo.elio@hotmail.com>`
+- Added description label: "ApexStore - High-performance LSM-Tree key-value store built with Rust"
+- Added version label: `1.4.0`
+- Added automated health check using curl
+- Maintained multi-stage build optimization with cargo-chef
+
+**Project Structure**:
+- Updated README.md project structure to include Docker files
+- Added `docker-compose.yml` to documentation
+- Added `Dockerfile` documentation reference
+
+### 📚 Documentation
+
+**Deployment Options**:
+- Docker Compose (recommended): Single command deployment
+- Standalone Docker: Custom configuration flexibility
+- Native Cargo: Development and testing
+
+**Docker Features Documented**:
+- Environment variable configuration (35+ parameters)
+- Volume mounting for data persistence
+- Health checks and monitoring
+- Resource management (CPU/memory limits)
+- Backup and restore procedures
+- Port mapping and networking
+
+### 🎯 Benefits
+
+**Operational**:
+- ✅ One-command deployment (`docker-compose up -d`)
+- ✅ Zero-config local development
+- ✅ Production-ready container with health checks
+- ✅ Easy horizontal scaling preparation
+
+**Development**:
+- ✅ Consistent environment across team
+- ✅ No Rust toolchain required for deployment
+- ✅ Fast iteration with volume mounting
+
+**Production**:
+- ✅ Resource limits prevent runaway processes
+- ✅ Automatic restarts on failure
+- ✅ Health checks for load balancer integration
+- ✅ Data persistence with backup/restore support
+
 ### Planned
 - Task 1.3: SSTable Reader with Sparse Index
 - Task 1.4: Engine Integration with new SSTable format
 - Multi-instance support
+- Kubernetes deployment manifests
 
 ---
 
@@ -333,6 +408,47 @@ let sstable_path = builder.finish()?;  // Writes MetaBlock + Footer
 
 ## Migration Guide
 
+### Migrating to Latest (Unreleased)
+
+#### Using Docker (Recommended)
+
+**Quick Start**:
+```bash
+# Clone repository
+git clone https://github.com/ElioNeto/ApexStore.git
+cd ApexStore
+
+# Copy environment file
+cp .env.example .env
+
+# Start with Docker Compose
+docker-compose up -d
+
+# Verify health
+curl http://localhost:8080/health
+```
+
+**Custom Configuration**:
+```bash
+# Edit .env file
+nano .env
+
+# Restart to apply changes
+docker-compose restart
+```
+
+**Production Deployment**:
+```bash
+# Set resource limits in docker-compose.yml
+docker-compose up -d
+
+# Monitor logs
+docker-compose logs -f apexstore
+
+# Scale (future support)
+docker-compose up -d --scale apexstore=3
+```
+
 ### Migrating to v1.3.0
 
 #### 1. Using New Configuration System
@@ -346,7 +462,7 @@ cp .env.example .env
 nano .env
 
 # Run without recompiling
-cargo run --release --features api --bin lsm-server
+cargo run --release --features api --bin apexstore-server
 ```
 
 **Example Configuration**:
@@ -398,10 +514,10 @@ config.bloom_false_positive_rate = 0.001;  // 0.1% FP
 
 ## Next Steps (Roadmap)
 
-### v1.3.x (Current Release)
-- ✅ Task 1.2: SSTable Builder with Sparse Index
-- ✅ Comprehensive Configuration System
-- ⏳ Task 1.3: SSTable Reader (Next)
+### v1.4.x (Next Release)
+- 🚧 Docker production deployment
+- 🚧 Kubernetes manifests
+- ⏳ Task 1.3: SSTable Reader
 - ⏳ Task 1.4: Engine Integration
 
 ### v2.0 (Future)
