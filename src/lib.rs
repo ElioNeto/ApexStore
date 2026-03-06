@@ -45,7 +45,7 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create engine with default configuration
 //! let config = LsmConfig::default();
-//! let mut engine = LsmEngine::open(config)?;
+//! let mut engine = LsmEngine::new(config)?;
 //!
 //! // Write data
 //! engine.put("user:1", b"Alice")?;
