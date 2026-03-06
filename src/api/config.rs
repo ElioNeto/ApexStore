@@ -24,8 +24,8 @@ impl Default for ServerConfig {
         Self {
             host: "0.0.0.0".to_string(),
             port: 8080,
-            max_json_payload_size: 50 * 1024 * 1024,  // 50MB
-            max_raw_payload_size: 50 * 1024 * 1024,   // 50MB
+            max_json_payload_size: 50 * 1024 * 1024, // 50MB
+            max_raw_payload_size: 50 * 1024 * 1024,  // 50MB
             feature_cache_ttl_secs: 10,
             auth: AuthConfig::default(),
         }
@@ -44,7 +44,7 @@ impl Default for AuthConfig {
 impl ServerConfig {
     pub fn from_env() -> Self {
         let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-        
+
         let port = env::var("PORT")
             .unwrap_or_else(|_| "8080".to_string())
             .parse::<u16>()
@@ -91,10 +91,23 @@ impl ServerConfig {
         println!("📋 Server Configuration:");
         println!("   Host: {}", self.host);
         println!("   Port: {}", self.port);
-        println!("   JSON Payload Limit: {} MB", self.max_json_payload_size / 1024 / 1024);
-        println!("   Raw Payload Limit: {} MB", self.max_raw_payload_size / 1024 / 1024);
+        println!(
+            "   JSON Payload Limit: {} MB",
+            self.max_json_payload_size / 1024 / 1024
+        );
+        println!(
+            "   Raw Payload Limit: {} MB",
+            self.max_raw_payload_size / 1024 / 1024
+        );
         println!("   Feature Cache TTL: {}s", self.feature_cache_ttl_secs);
-        println!("   Authentication: {}", if self.auth.enabled { "Enabled" } else { "Disabled" });
+        println!(
+            "   Authentication: {}",
+            if self.auth.enabled {
+                "Enabled"
+            } else {
+                "Disabled"
+            }
+        );
         if let Some(days) = self.auth.token_expiry_days {
             println!("   Token Expiry: {} days", days);
         } else {

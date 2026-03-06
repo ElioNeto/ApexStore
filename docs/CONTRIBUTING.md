@@ -70,18 +70,18 @@ We are committed to providing a welcoming and inspiring community for all. We pl
 ### Initial Setup
 
 1. **Fork the Repository**
-   - Visit [https://github.com/ElioNeto/lsm-kv-store](https://github.com/ElioNeto/lsm-kv-store)
+   - Visit [https://github.com/ElioNeto/ApexStore](https://github.com/ElioNeto/ApexStore)
    - Click the "Fork" button in the top-right corner
 
 2. **Clone Your Fork**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/lsm-kv-store.git
-   cd lsm-kv-store
+   git clone https://github.com/YOUR_USERNAME/ApexStore.git
+   cd ApexStore
    ```
 
 3. **Add Upstream Remote**
    ```bash
-   git remote add upstream https://github.com/ElioNeto/lsm-kv-store.git
+   git remote add upstream https://github.com/ElioNeto/ApexStore.git
    ```
 
 4. **Install Dependencies**
@@ -94,20 +94,30 @@ We are committed to providing a welcoming and inspiring community for all. We pl
    cargo test
    ```
 
-For detailed setup instructions, see [SETUP.md](docs/SETUP.md).
+For detailed setup instructions, see [SETUP.md](SETUP.md).
 
 ---
 
 ## 🔄 Development Workflow
 
+### Automated Workflow Overview
+
+ApexStore uses GitHub Actions to automate the development workflow:
+
+- **Feature/Fix branches** → Auto-create PR to `develop` + run tests
+- **Develop** → Auto-create release PR to `main`
+- **Main** → Create release tag + close related issues
+
+See [WORKFLOWS.md](WORKFLOWS.md) for complete documentation.
+
 ### 1. Create a Feature Branch
 
 ```bash
 # Update your fork
-git checkout develop
-git pull upstream develop
+git checkout main
+git pull upstream main
 
-# Create a new branch
+# Create a new branch from main
 git checkout -b feature/your-feature-name
 ```
 
@@ -126,21 +136,23 @@ git checkout -b feature/your-feature-name
 vim src/core/engine.rs
 
 # Test your changes
-cargo test
+cargo test --all-features
 
 # Format code
 cargo fmt
 
 # Check for issues
-cargo clippy -- -D warnings
+cargo clippy --all-features -- -D warnings
 ```
 
 ### 3. Commit Your Changes
 
 ```bash
 git add .
-git commit -m "feat: add compaction strategy interface"
+git commit -m "feat: add compaction strategy interface (#55)"
 ```
+
+**Important**: Reference issues in commit messages using `#issue_number` for automatic tracking.
 
 See [Commit Messages](#commit-messages) for formatting guidelines.
 
@@ -150,13 +162,22 @@ See [Commit Messages](#commit-messages) for formatting guidelines.
 git push origin feature/your-feature-name
 ```
 
-### 5. Create a Pull Request
+**What Happens Next:**
+- ✅ GitHub Actions automatically runs tests
+- ✅ Auto-creates PR to `develop` branch
+- ✅ Adds comment to referenced issues (if any)
+- ✅ Runs Clippy and format checks
 
-1. Go to your fork on GitHub
-2. Click "New Pull Request"
-3. Select `develop` as the base branch
-4. Fill out the PR template
-5. Submit the PR
+### 5. Pull Request Review
+
+Once the automated PR is created:
+
+1. Review the PR description
+2. Wait for CI checks to pass
+3. Address any reviewer feedback
+4. PR will be merged to `develop` once approved
+
+**Note**: You don't need to manually create PRs - the workflow handles this automatically!
 
 ---
 
@@ -175,7 +196,7 @@ We follow the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
 
 2. **Pass `cargo clippy`** - Zero warnings policy
    ```bash
-   cargo clippy -- -D warnings
+   cargo clippy --all-features -- -D warnings
    ```
 
 3. **Write Documentation** - Public APIs must have doc comments
@@ -333,7 +354,7 @@ pub struct LsmEngine {
 
 ```bash
 # Run all tests
-cargo test
+cargo test --all-features
 
 # Run specific test
 cargo test test_memtable_insert
@@ -357,7 +378,7 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/) speci
 ### Format
 
 ```
-<type>(<scope>): <subject>
+<type>(<scope>): <subject> (#issue)
 
 <body>
 
@@ -374,6 +395,7 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/) speci
 - `perf` - Performance improvements
 - `test` - Test additions/modifications
 - `chore` - Build process, dependencies, tooling
+- `ci` - CI/CD changes
 
 ### Examples
 
@@ -382,20 +404,20 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/) speci
 feat: add bloom filter to SSTable reader
 ```
 
-**With scope**:
+**With scope and issue**:
 ```
-fix(wal): prevent corruption on unclean shutdown
+fix(wal): prevent corruption on unclean shutdown (#42)
 ```
 
 **With body**:
 ```
-feat(compaction): implement leveled compaction strategy
+feat(compaction): implement leveled compaction strategy (#47)
 
 Adds a new LeveledCompaction struct that implements the Compaction
 trait. This strategy reduces read amplification by maintaining
 sorted levels with exponentially increasing sizes.
 
-Closes #42
+Closes #47
 ```
 
 **Breaking change**:
@@ -406,23 +428,46 @@ BREAKING CHANGE: SSTable V2 is incompatible with V1.
 Migration tool will be provided in v1.4.
 ```
 
+**Referencing Issues**:
+- `#123` - Reference issue
+- `fixes #123`, `closes #123` - Will auto-close issue when PR merges
+- `resolves #123` - Alternative close syntax
+
 ---
 
 ## 🔍 Pull Request Process
 
-### Before Submitting
+### Before Pushing
 
 - [ ] Code compiles without errors
-- [ ] All tests pass (`cargo test`)
-- [ ] No clippy warnings (`cargo clippy -- -D warnings`)
+- [ ] All tests pass (`cargo test --all-features`)
+- [ ] No clippy warnings (`cargo clippy --all-features -- -D warnings`)
 - [ ] Code is formatted (`cargo fmt`)
 - [ ] Documentation is updated (if applicable)
-- [ ] CHANGELOG.md is updated (for user-facing changes)
 - [ ] Tests are added for new functionality
+
+### Automated PR Creation
+
+When you push to a `feature/*` or `fix/*` branch:
+
+1. ✅ **Tests run automatically** (CI/CD)
+2. ✅ **PR is auto-created** to `develop` branch
+3. ✅ **Issues are commented** (if referenced in commits)
+4. ✅ **Checks must pass** before merge
+
+### Manual Steps (If Needed)
+
+If you need to create a PR manually:
+
+1. Go to your fork on GitHub
+2. Click "New Pull Request"
+3. Select `develop` as the base branch
+4. Fill out the PR template
+5. Submit the PR
 
 ### PR Template
 
-When creating a PR, use this template:
+When creating a PR manually, use this template:
 
 ```markdown
 ## Description
@@ -455,7 +500,6 @@ Describe how you tested your changes:
 - [ ] Clippy checks pass
 - [ ] Code is formatted
 - [ ] Documentation updated
-- [ ] CHANGELOG updated
 
 ## Screenshots (if applicable)
 
@@ -481,7 +525,7 @@ Describe how you tested your changes:
 ## 📁 Project Structure
 
 ```
-lsm-kv-store/
+ApexStore/
 ├── src/
 │   ├── core/              # Core domain logic
 │   │   ├── engine.rs      # LSM engine orchestration
@@ -516,40 +560,37 @@ lsm-kv-store/
 
 ### High Priority
 
-1. **Compaction Implementation**
+1. **CI/CD Testing Pipeline** (#55)
+   - Difficulty: Easy
+   - Impact: High
+   - Skills: GitHub Actions, YAML
+
+2. **Compaction Implementation** (#47)
    - Difficulty: Hard
    - Impact: High
-   - Issue: #TBD
    - Skills: Rust, algorithms, file I/O
 
-2. **Efficient Iterators**
+3. **Efficient Iterators** (#21, #22, #23)
    - Difficulty: Medium
    - Impact: High
-   - Issue: #TBD
    - Skills: Rust, data structures
-
-3. **SSTable Reader V2**
-   - Difficulty: Medium
-   - Impact: High
-   - Issue: #TBD (Task 1.3)
-   - Skills: Rust, compression, binary formats
 
 ### Medium Priority
 
-4. **Benchmarking Suite**
+4. **Benchmarking Suite** (#48)
    - Difficulty: Easy
    - Impact: Medium
    - Skills: Rust, criterion
 
-5. **Performance Profiling**
+5. **CLI Command Equalization** (#65)
    - Difficulty: Medium
    - Impact: Medium
-   - Skills: Profiling tools (perf, flamegraph)
+   - Skills: Rust, CLI design
 
-6. **Documentation Improvements**
+6. **Checksums & Integrity** (#25)
    - Difficulty: Easy
-   - Impact: Medium
-   - Skills: Technical writing
+   - Impact: High
+   - Skills: Rust, CRC32
 
 ### Good First Issues
 
@@ -558,15 +599,15 @@ lsm-kv-store/
    - Impact: Medium
    - Skills: Rust, testing
 
-8. **CLI Improvements**
-   - Difficulty: Easy
-   - Impact: Low
-   - Skills: Rust, UX
-
-9. **Configuration Validation**
+8. **Binary Search Optimization** (#37)
    - Difficulty: Easy
    - Impact: Medium
-   - Skills: Rust, validation
+   - Skills: Rust, algorithms
+
+9. **Documentation Improvements**
+   - Difficulty: Easy
+   - Impact: Medium
+   - Skills: Technical writing
 
 ### Advanced Topics
 
@@ -584,8 +625,9 @@ lsm-kv-store/
 
 ## ❓ Questions?
 
-- **Issues**: [GitHub Issues](https://github.com/ElioNeto/lsm-kv-store/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/ElioNeto/lsm-kv-store/discussions)
+- **Issues**: [GitHub Issues](https://github.com/ElioNeto/ApexStore/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/ElioNeto/ApexStore/discussions)
+- **Documentation**: [docs/](docs/)
 - **Email**: netoo.elio@hotmail.com
 
 ---
@@ -594,12 +636,13 @@ lsm-kv-store/
 
 1. Find an issue or create one
 2. Comment that you're working on it
-3. Fork the repo and create a branch
-4. Make your changes
-5. Submit a PR
+3. Fork the repo and create a branch from `main`
+4. Make your changes with tests
+5. Push to your fork (automated PR will be created)
+6. Wait for review and address feedback
 
 **Thank you for contributing!** 🎉
 
 ---
 
-*Last updated: February 2026*
+*Last updated: March 2026*

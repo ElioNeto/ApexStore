@@ -132,7 +132,9 @@ impl SstableBuilder {
 
         let key_len = u16::from_le_bytes([encoded[0], encoded[1]]) as usize;
         if encoded.len() < 2 + key_len {
-            return Err(LsmError::CompactionFailed("Corrupted block data".to_string()));
+            return Err(LsmError::CompactionFailed(
+                "Corrupted block data".to_string(),
+            ));
         }
 
         Ok(encoded[2..2 + key_len].to_vec())
@@ -205,9 +207,15 @@ mod tests {
 
         let mut builder = SstableBuilder::new(path.clone(), config, 123).unwrap();
 
-        builder.add(b"key1", &create_test_record("key1", b"value1")).unwrap();
-        builder.add(b"key2", &create_test_record("key2", b"value2")).unwrap();
-        builder.add(b"key3", &create_test_record("key3", b"value3")).unwrap();
+        builder
+            .add(b"key1", &create_test_record("key1", b"value1"))
+            .unwrap();
+        builder
+            .add(b"key2", &create_test_record("key2", b"value2"))
+            .unwrap();
+        builder
+            .add(b"key3", &create_test_record("key3", b"value3"))
+            .unwrap();
 
         let result_path = builder.finish().unwrap();
         assert_eq!(result_path, path);
@@ -218,15 +226,19 @@ mod tests {
     fn test_builder_multiple_blocks() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test_multi.sst");
-        let mut config = StorageConfig::default();
-        config.block_size = 256;
+        let config = StorageConfig {
+            block_size: 256,
+            ..Default::default()
+        };
 
         let mut builder = SstableBuilder::new(path.clone(), config, 456).unwrap();
 
         for i in 0..50 {
             let key = format!("key_{:03}", i);
             let value = vec![b'x'; 20];
-            builder.add(key.as_bytes(), &create_test_record(&key, &value)).unwrap();
+            builder
+                .add(key.as_bytes(), &create_test_record(&key, &value))
+                .unwrap();
         }
 
         let result_path = builder.finish().unwrap();
@@ -254,7 +266,9 @@ mod tests {
         let mut builder = SstableBuilder::new(path, config, 999).unwrap();
 
         let large_value = vec![b'x'; 1000];
-        builder.add(b"large_key", &create_test_record("large_key", &large_value)).unwrap();
+        builder
+            .add(b"large_key", &create_test_record("large_key", &large_value))
+            .unwrap();
 
         let result = builder.finish();
         assert!(result.is_ok());

@@ -89,8 +89,12 @@ impl Block {
         }
 
         let num_elements_start = data.len() - U32_SIZE;
-        let num_elements =
-            u32::from_le_bytes([data[num_elements_start], data[num_elements_start + 1], data[num_elements_start + 2], data[num_elements_start + 3]]) as usize;
+        let num_elements = u32::from_le_bytes([
+            data[num_elements_start],
+            data[num_elements_start + 1],
+            data[num_elements_start + 2],
+            data[num_elements_start + 3],
+        ]) as usize;
 
         let offsets_start = data.len() - U32_SIZE - (num_elements * U32_SIZE);
         let records_data = data[..offsets_start].to_vec();
@@ -99,7 +103,12 @@ impl Block {
         let mut offset_pos = offsets_start;
 
         for _ in 0..num_elements {
-            let offset = u32::from_le_bytes([data[offset_pos], data[offset_pos + 1], data[offset_pos + 2], data[offset_pos + 3]]);
+            let offset = u32::from_le_bytes([
+                data[offset_pos],
+                data[offset_pos + 1],
+                data[offset_pos + 2],
+                data[offset_pos + 3],
+            ]);
             offsets.push(offset);
             offset_pos += U32_SIZE;
         }
@@ -198,14 +207,17 @@ mod tests {
 
         let mut count = 0;
         while block.data_size() < 66000 {
-             let key = format!("{}{}", key_base, count);
-             if !block.add(key.as_bytes(), &large_value) {
-                 break;
-             }
-             count += 1;
+            let key = format!("{}{}", key_base, count);
+            if !block.add(key.as_bytes(), &large_value) {
+                break;
+            }
+            count += 1;
         }
 
-        assert!(block.data_size() > 65535, "Block data size should be > 64KB");
+        assert!(
+            block.data_size() > 65535,
+            "Block data size should be > 64KB"
+        );
 
         // Verify integrity
         let encoded = block.encode();

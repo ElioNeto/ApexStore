@@ -4,11 +4,13 @@ use crate::infra::config::StorageConfig;
 use crate::infra::error::{LsmError, Result};
 use crate::storage::block::Block;
 use crate::storage::builder::{BlockMeta, MetaBlock};
-use crate::storage::cache::{CacheKey, GlobalBlockCache};
+use crate::storage::cache::GlobalBlockCache;
 use bloomfilter::Bloom;
 use lz4_flex::decompress_size_prepended;
 use parking_lot::Mutex;
+use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -40,6 +42,7 @@ pub struct SstableReader {
     file: Mutex<File>,
     block_cache: Arc<GlobalBlockCache>,
     path: PathBuf,
+    table_id: u64,
     #[allow(dead_code)]
     config: StorageConfig,
 }
@@ -80,12 +83,18 @@ impl SstableReader {
                 LsmError::CompactionFailed(format!("Bloom filter deserialization failed: {}", e))
             })?;
 
+        // Generate table ID from path for cache
+        let mut hasher = DefaultHasher::new();
+        path.hash(&mut hasher);
+        let table_id = hasher.finish();
+
         Ok(Self {
             metadata,
             bloom_filter,
             file: Mutex::new(file),
             block_cache,
             path,
+            table_id,
             config,
         })
     }
@@ -266,19 +275,25 @@ impl SstableReader {
     }
 
     fn read_block(&self, block_meta: &BlockMeta) -> Result<Vec<u8>> {
-        // Create cache key with file path and block offset
-        let cache_key = CacheKey::new(&self.path, block_meta.offset);
+        // Use block index as cache key (blocks are numbered 0, 1, 2...)
+        let block_idx = self
+            .metadata
+            .blocks
+            .iter()
+            .position(|b| b.offset == block_meta.offset)
+            .unwrap_or(0);
 
         // Check shared cache first (GlobalBlockCache has internal Mutex)
-        if let Some(cached) = self.block_cache.get(&cache_key) {
-            return Ok((*cached).clone());
+        if let Some(cached) = self.block_cache.get(self.table_id, block_idx) {
+            return Ok(cached);
         }
 
         // Cache miss - read from disk (lock released during decompression)
         let block_data = self.read_and_decompress_block(block_meta)?;
 
         // Store in shared cache (GlobalBlockCache has internal Mutex)
-        self.block_cache.put(cache_key, block_data.clone());
+        self.block_cache
+            .put(self.table_id, block_idx, block_data.clone());
 
         Ok(block_data)
     }
@@ -434,8 +449,10 @@ mod tests {
     fn test_reader_multiple_blocks() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("multi_block.sst");
-        let mut config = StorageConfig::default();
-        config.block_size = 256; // Small blocks to force multiple blocks
+        let config = StorageConfig {
+            block_size: 256,
+            ..Default::default()
+        };
         let cache = create_test_cache(&config);
 
         // Write many records to span multiple blocks
@@ -608,10 +625,6 @@ mod tests {
         assert!(stats_after2.len <= stats_after2.cap);
     }
 
-    // ======================
-    // CONCURRENCY TESTS
-    // ======================
-
     #[test]
     fn test_concurrent_reads_same_keys() {
         let dir = tempdir().unwrap();
@@ -710,9 +723,11 @@ mod tests {
     fn test_concurrent_reads_with_cache_contention() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("concurrent_cache.sst");
-        let mut config = StorageConfig::default();
-        config.block_size = 512; // Small blocks
-        config.block_cache_size_mb = 1; // Small cache to force evictions
+        let config = StorageConfig {
+            block_size: 512,
+            block_cache_size_mb: 1,
+            ..Default::default()
+        };
         let cache = create_test_cache(&config);
 
         // Write enough data to span many blocks
@@ -778,9 +793,7 @@ mod tests {
         let readers: Vec<_> = paths
             .into_iter()
             .map(|path| {
-                Arc::new(
-                    SstableReader::open(path, config.clone(), Arc::clone(&cache)).unwrap(),
-                )
+                Arc::new(SstableReader::open(path, config.clone(), Arc::clone(&cache)).unwrap())
             })
             .collect();
 

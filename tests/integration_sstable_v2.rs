@@ -34,7 +34,7 @@ fn test_sstable_v2_roundtrip_small() -> Result<()> {
     builder.finish()?;
 
     // Read and verify
-    let mut reader = SstableReader::open(path, config, cache)?;
+    let reader = SstableReader::open(path, config, cache)?;
 
     for (key, expected_value) in &test_data {
         let record = reader.get(key)?.expect("Key should exist");
@@ -66,7 +66,7 @@ fn test_sstable_v2_roundtrip_large() -> Result<()> {
     builder.finish()?;
 
     // Read and verify all records
-    let mut reader = SstableReader::open(path, config, cache)?;
+    let reader = SstableReader::open(path, config, cache)?;
 
     for (key, expected_value) in &test_data {
         let record = reader.get(key)?.expect("Key should exist");
@@ -80,8 +80,10 @@ fn test_sstable_v2_roundtrip_large() -> Result<()> {
 fn test_sstable_v2_multiple_blocks() -> Result<()> {
     let dir = tempdir()?;
     let path = dir.path().join("multi_block.sst");
-    let mut config = StorageConfig::default();
-    config.block_size = 512; // Small blocks to force multiple blocks
+    let config = StorageConfig {
+        block_size: 512,
+        ..Default::default()
+    };
     let cache = create_test_cache(&config);
 
     // Write enough data to span multiple blocks
@@ -94,7 +96,7 @@ fn test_sstable_v2_multiple_blocks() -> Result<()> {
     builder.finish()?;
 
     // Read and verify
-    let mut reader = SstableReader::open(path, config, cache)?;
+    let reader = SstableReader::open(path, config, cache)?;
 
     // Verify metadata shows multiple blocks
     assert!(
@@ -178,7 +180,7 @@ fn test_sstable_v2_boundary_keys() -> Result<()> {
     builder.add(b"zzz", &create_test_record("zzz", b"last"))?;
     builder.finish()?;
 
-    let mut reader = SstableReader::open(path, config, cache)?;
+    let reader = SstableReader::open(path, config, cache)?;
 
     // Test exact boundary keys
     assert!(reader.get("aaa")?.is_some(), "First key should exist");
@@ -230,7 +232,7 @@ fn test_sstable_v2_scan() -> Result<()> {
     builder.finish()?;
 
     // Scan all records
-    let mut reader = SstableReader::open(path, config, cache)?;
+    let reader = SstableReader::open(path, config, cache)?;
     let records = reader.scan()?;
 
     assert_eq!(records.len(), test_keys.len(), "Should scan all records");
@@ -251,9 +253,10 @@ fn test_sstable_v2_scan() -> Result<()> {
 fn test_sstable_v2_large_values() -> Result<()> {
     let dir = tempdir()?;
     let path = dir.path().join("large_values.sst");
-    let mut config = StorageConfig::default();
-    // Increase block size to accommodate large values
-    config.block_size = 16384; // 16KB blocks
+    let config = StorageConfig {
+        block_size: 16384,
+        ..Default::default()
+    };
     let cache = create_test_cache(&config);
 
     // Write records with large values (but smaller than block size)
@@ -267,7 +270,7 @@ fn test_sstable_v2_large_values() -> Result<()> {
     builder.finish()?;
 
     // Read and verify
-    let mut reader = SstableReader::open(path, config, cache)?;
+    let reader = SstableReader::open(path, config, cache)?;
 
     for i in 0..10 {
         let key = format!("key_{}", i);
@@ -283,9 +286,11 @@ fn test_sstable_v2_large_values() -> Result<()> {
 fn test_sstable_v2_cache_effectiveness() -> Result<()> {
     let dir = tempdir()?;
     let path = dir.path().join("cache_test.sst");
-    let mut config = StorageConfig::default();
-    config.block_cache_size_mb = 10; // Small cache
-    config.block_size = 512;
+    let config = StorageConfig {
+        block_cache_size_mb: 10,
+        block_size: 512,
+        ..Default::default()
+    };
     let cache = create_test_cache(&config);
 
     // Write multiple blocks
@@ -297,7 +302,7 @@ fn test_sstable_v2_cache_effectiveness() -> Result<()> {
     }
     builder.finish()?;
 
-    let mut reader = SstableReader::open(path, config, cache)?;
+    let reader = SstableReader::open(path, config, cache)?;
 
     // Read same keys multiple times (should benefit from cache)
     for _ in 0..3 {
@@ -327,7 +332,7 @@ fn test_sstable_v2_empty_key() -> Result<()> {
     )?;
     builder.finish()?;
 
-    let mut reader = SstableReader::open(path, config, cache)?;
+    let reader = SstableReader::open(path, config, cache)?;
 
     // Should be able to read empty key
     let record = reader.get("")?.expect("Empty key should exist");
@@ -361,7 +366,7 @@ fn test_sstable_v2_unicode_keys() -> Result<()> {
     }
     builder.finish()?;
 
-    let mut reader = SstableReader::open(path, config, cache)?;
+    let reader = SstableReader::open(path, config, cache)?;
 
     // Verify all unicode keys are readable
     for key in &unicode_keys {
