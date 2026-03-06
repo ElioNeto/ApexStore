@@ -1,4 +1,4 @@
-use apexstore::{LsmConfig, LsmEngine};
+use crate::{LsmConfig, LsmEngine};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
@@ -15,18 +15,17 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("╚═══════════════════════════════════════════════════════╝\n");
 
     // Configuração
-    let config = LsmConfig {
-        memtable_max_size: 4 * 1024, // 4KB para testes
-        data_dir: PathBuf::from("./.lsm_data"),
-    };
+    let config = LsmConfig::builder()
+        .dir_path(PathBuf::from("./.lsm_data"))
+        .memtable_max_size(4 * 1024) // 4KB para testes
+        .build()?;
 
-    // ADICIONAR ESTA LINHA:
     println!(
         "📂 Diretório de dados: {}",
-        config.data_dir.canonicalize()?.display()
+        config.core.dir_path.display()
     );
 
-    println!("Inicializando engine em: {}", config.data_dir.display());
+    println!("Inicializando engine...");
     let engine = LsmEngine::new(config)?;
     println!("✓ Engine inicializado com sucesso!\n");
 
@@ -270,7 +269,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let key_display = if key.len() > 20 {
                                     format!("{}...", &key[..17])
                                 } else {
-                                    key
+                                    key.clone()
                                 };
                                 let value_display = if value_str.len() > 20 {
                                     format!("{}...", &value_str[..17])

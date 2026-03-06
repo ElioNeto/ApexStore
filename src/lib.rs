@@ -69,6 +69,7 @@
 //! - [`infra`] - Infrastructure (config, error handling, codec)
 //! - [`features`] - Feature flags system
 //! - [`api`] - REST API server (optional, requires "api" feature)
+//! - [`cli`] - Interactive CLI REPL interface
 //!
 //! ## Feature Flags
 //!
@@ -87,6 +88,7 @@
 //! - [Configuration Guide](https://github.com/ElioNeto/ApexStore/blob/main/docs/CONFIGURATION.md)
 //! - [API Documentation](https://github.com/ElioNeto/ApexStore/blob/main/docs/API.md)
 
+pub mod cli;
 pub mod core;
 pub mod features;
 pub mod infra;
