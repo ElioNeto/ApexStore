@@ -1,0 +1,60 @@
+# ApexStore - Docker Compose Configuration
+# High-Performance LSM-Tree Key-Value Store
+
+version: '3.8'
+
+services:
+  apexstore:
+    image: apexstore:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: apexstore-server
+    restart: unless-stopped
+    
+    # Port mapping
+    ports:
+      - "${PORT:-8080}:8080"
+    
+    # Environment variables
+    environment:
+      - HOST=${HOST:-0.0.0.0}
+      - PORT=${PORT:-8080}
+      - DIR_PATH=/data
+      - MEMTABLE_MAX_SIZE=${MEMTABLE_MAX_SIZE:-16777216}
+      - BLOCK_SIZE=${BLOCK_SIZE:-4096}
+      - BLOCK_CACHE_SIZE_MB=${BLOCK_CACHE_SIZE_MB:-64}
+      - BLOOM_FALSE_POSITIVE_RATE=${BLOOM_FALSE_POSITIVE_RATE:-0.01}
+      - INDEX_INTERVAL=${INDEX_INTERVAL:-16}
+      - MAX_JSON_PAYLOAD_SIZE=${MAX_JSON_PAYLOAD_SIZE:-52428800}
+      - MAX_RAW_PAYLOAD_SIZE=${MAX_RAW_PAYLOAD_SIZE:-52428800}
+      - FEATURE_CACHE_TTL=${FEATURE_CACHE_TTL:-10}
+      - API_AUTH_ENABLED=${API_AUTH_ENABLED:-false}
+      - API_TOKEN_EXPIRY_DAYS=${API_TOKEN_EXPIRY_DAYS:-30}
+    
+    # Volume for persistent data
+    volumes:
+      - apexstore-data:/data
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    
+    # Resource limits (optional, adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+volumes:
+  apexstore-data:
+    driver: local
+    name: apexstore-data
