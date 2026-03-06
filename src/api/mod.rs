@@ -17,7 +17,7 @@ use crate::features::FeatureClient;
 pub use config::{AuthConfig, ServerConfig};
 
 #[cfg(feature = "api")]
-use auth::{manager::TokenManager, middleware::extract_token, token::Permission, ApiToken};
+use auth::{manager::TokenManager, token::Permission};
 
 pub struct AppState {
     pub engine: Arc<LsmEngine>,
@@ -450,15 +450,24 @@ async fn auth_validator(
     req: ServiceRequest,
     credentials: actix_web_httpauth::extractors::bearer::BearerAuth,
 ) -> Result<ServiceRequest, (Error, ServiceRequest)> {
-    let data = req.app_data::<web::Data<AppState>>().unwrap();
+    // Extract data before any moves
+    let auth_enabled = {
+        let data = req.app_data::<web::Data<AppState>>().unwrap();
+        data.auth_enabled
+    };
     
-    if !data.auth_enabled {
+    if !auth_enabled {
         return Ok(req);
     }
 
+    let token_manager = {
+        let data = req.app_data::<web::Data<AppState>>().unwrap();
+        data.token_manager.clone()
+    };
+
     auth::middleware::bearer_validator(
         req,
-        data.token_manager.clone(),
+        token_manager,
         Some(credentials.token().to_string()),
     )
     .await

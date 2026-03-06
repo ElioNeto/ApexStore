@@ -91,8 +91,11 @@ impl ApiToken {
 pub fn generate_token() -> String {
     use rand::Rng;
     let mut rng = rand::thread_rng();
-    let random_bytes: Vec<u8> = (0..32).map(|_| rng.gen::<u8>()).collect();
-    format!("apx_{}", base64::encode(&random_bytes))
+    let random_bytes: Vec<u8> = (0..32).map(|_| rng.r#gen::<u8>()).collect();
+    
+    // Use base64 engine for encoding
+    use base64::{Engine as _, engine::general_purpose};
+    format!("apx_{}", general_purpose::STANDARD.encode(&random_bytes))
 }
 
 /// Hash token using SHA-256
