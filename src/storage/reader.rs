@@ -7,6 +7,7 @@ use crate::storage::builder::{BlockMeta, MetaBlock};
 use crate::storage::cache::{CacheKey, GlobalBlockCache};
 use bloomfilter::Bloom;
 use lz4_flex::decompress_size_prepended;
+use parking_lot::Mutex;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
@@ -16,12 +17,28 @@ const SST_MAGIC_V2: &[u8; 8] = b"LSMSST03";
 const FOOTER_SIZE: u64 = 8;
 
 /// SSTable V2 Reader with sparse index, Bloom filter, and shared global block caching
+///
+/// # Thread Safety
+///
+/// This reader is designed for concurrent access. Multiple threads can safely call
+/// `get()` and `scan()` methods simultaneously. Internal synchronization is provided by:
+/// - `Mutex<File>` for thread-safe file operations
+/// - `Mutex<GlobalBlockCache>` for thread-safe cache access
+/// - Immutable `metadata` and `bloom_filter` (no synchronization needed)
+///
+/// # Performance
+///
+/// Lock contention is minimized by:
+/// - Bloom filter checks are lock-free (immutable data)
+/// - Binary search on metadata is lock-free (immutable data)
+/// - File and cache locks are held only during I/O operations
+/// - Block decompression happens outside of locks
 #[derive(Debug)]
 pub struct SstableReader {
     metadata: MetaBlock,
     bloom_filter: Bloom<[u8]>,
-    file: File,
-    block_cache: Arc<GlobalBlockCache>,
+    file: Mutex<File>,
+    block_cache: Arc<Mutex<GlobalBlockCache>>,
     path: PathBuf,
     #[allow(dead_code)]
     config: StorageConfig,
@@ -66,26 +83,33 @@ impl SstableReader {
         Ok(Self {
             metadata,
             bloom_filter,
-            file,
-            block_cache,
+            file: Mutex::new(file),
+            block_cache: Arc::new(Mutex::new((*block_cache).clone())),
             path,
             config,
         })
     }
 
     /// Check if key might exist using Bloom filter (fast pre-check)
+    ///
+    /// This method is lock-free and very fast. It should be called before `get()`
+    /// to avoid unnecessary I/O for keys that definitely don't exist.
     pub fn might_contain(&self, key: &str) -> bool {
         self.bloom_filter.check(key.as_bytes())
     }
 
     /// Retrieve a value by key using sparse index and Bloom filter
-    pub fn get(&mut self, key: &str) -> Result<Option<LogRecord>> {
-        // Fast rejection using Bloom filter
+    ///
+    /// # Thread Safety
+    /// This method can be safely called concurrently from multiple threads.
+    /// Locks are held only during cache access and file I/O.
+    pub fn get(&self, key: &str) -> Result<Option<LogRecord>> {
+        // Fast rejection using Bloom filter (no lock needed)
         if !self.might_contain(key) {
             return Ok(None);
         }
 
-        // Binary search on sparse index to find the block (clone to avoid borrow issues)
+        // Binary search on sparse index to find the block (no lock needed - immutable)
         let block_meta = match self.binary_search_block(key.as_bytes()) {
             Some(meta) => meta.clone(),
             None => return Ok(None),
@@ -94,10 +118,10 @@ impl SstableReader {
         // Read and decompress the block (with caching)
         let block_data = self.read_block(&block_meta)?;
 
-        // Deserialize block
+        // Deserialize block (no lock needed)
         let block = Block::decode(&block_data);
 
-        // Linear scan within the block to find the key
+        // Linear scan within the block to find the key (no lock needed)
         Self::search_in_block(&block, key.as_bytes())
     }
 
@@ -144,10 +168,13 @@ impl SstableReader {
     }
 
     /// Scan all records in the SSTable (for compaction)
-    pub fn scan(&mut self) -> Result<Vec<(Vec<u8>, LogRecord)>> {
+    ///
+    /// # Thread Safety
+    /// This method can be safely called concurrently from multiple threads.
+    pub fn scan(&self) -> Result<Vec<(Vec<u8>, LogRecord)>> {
         let mut records = Vec::new();
 
-        // Clone blocks to avoid borrow issues
+        // Clone blocks to avoid borrow issues (immutable, no lock needed)
         let blocks = self.metadata.blocks.clone();
 
         for block_meta in &blocks {
@@ -238,33 +265,41 @@ impl SstableReader {
         Ok(metadata)
     }
 
-    fn read_block(&mut self, block_meta: &BlockMeta) -> Result<Vec<u8>> {
+    fn read_block(&self, block_meta: &BlockMeta) -> Result<Vec<u8>> {
         // Create cache key with file path and block offset
         let cache_key = CacheKey::new(&self.path, block_meta.offset);
 
-        // Check shared cache first
-        if let Some(cached) = self.block_cache.get(&cache_key) {
-            return Ok((*cached).clone());
+        // Check shared cache first (lock held briefly)
+        {
+            let cache = self.block_cache.lock();
+            if let Some(cached) = cache.get(&cache_key) {
+                return Ok((*cached).clone());
+            }
         }
 
-        // Cache miss - read from disk
+        // Cache miss - read from disk (lock released during decompression)
         let block_data = self.read_and_decompress_block(block_meta)?;
 
-        // Store in shared cache
-        self.block_cache.put(cache_key, block_data.clone());
+        // Store in shared cache (lock held briefly)
+        {
+            let mut cache = self.block_cache.lock();
+            cache.put(cache_key, block_data.clone());
+        }
 
         Ok(block_data)
     }
 
-    fn read_and_decompress_block(&mut self, block_meta: &BlockMeta) -> Result<Vec<u8>> {
-        // Seek to block offset
-        self.file.seek(SeekFrom::Start(block_meta.offset))?;
+    fn read_and_decompress_block(&self, block_meta: &BlockMeta) -> Result<Vec<u8>> {
+        // Read compressed block (lock held only during I/O)
+        let compressed_block = {
+            let mut file = self.file.lock();
+            file.seek(SeekFrom::Start(block_meta.offset))?;
+            let mut compressed_block = vec![0u8; block_meta.size as usize];
+            file.read_exact(&mut compressed_block)?;
+            compressed_block
+        };
 
-        // Read compressed block
-        let mut compressed_block = vec![0u8; block_meta.size as usize];
-        self.file.read_exact(&mut compressed_block)?;
-
-        // Decompress block
+        // Decompress block (no lock - CPU intensive work)
         let decompressed = decompress_size_prepended(&compressed_block).map_err(|e| {
             LsmError::DecompressionFailed(format!(
                 "Block decompression failed at offset {}: {}",
@@ -315,6 +350,7 @@ impl SstableReader {
 mod tests {
     use super::*;
     use crate::storage::builder::SstableBuilder;
+    use std::thread;
     use tempfile::tempdir;
 
     fn create_test_record(key: &str, value: &[u8]) -> LogRecord {
@@ -346,9 +382,9 @@ mod tests {
         builder.finish().unwrap();
 
         // Read SSTable
-        let mut reader = SstableReader::open(path, config, cache).unwrap();
+        let reader = SstableReader::open(path, config, cache).unwrap();
 
-        // Verify reads
+        // Verify reads (note: now uses &self, not &mut self)
         let record1 = reader.get("key1").unwrap().unwrap();
         assert_eq!(record1.value, b"value1");
 
@@ -420,7 +456,7 @@ mod tests {
         builder.finish().unwrap();
 
         // Read and verify all records
-        let mut reader = SstableReader::open(path, config, cache).unwrap();
+        let reader = SstableReader::open(path, config, cache).unwrap();
         for i in 0..50 {
             let key = format!("key_{:03}", i);
             let record = reader.get(&key).unwrap();
@@ -448,7 +484,7 @@ mod tests {
             .unwrap();
         builder.finish().unwrap();
 
-        let mut reader = SstableReader::open(path, config, cache).unwrap();
+        let reader = SstableReader::open(path, config, cache).unwrap();
 
         // Test exact boundary keys
         assert!(
@@ -509,7 +545,7 @@ mod tests {
         builder.finish().unwrap();
 
         // Scan all records
-        let mut reader = SstableReader::open(path, config, cache).unwrap();
+        let reader = SstableReader::open(path, config, cache).unwrap();
         let records = reader.scan().unwrap();
 
         assert_eq!(records.len(), test_keys.len(), "Should scan all records");
@@ -559,8 +595,8 @@ mod tests {
         builder2.finish().unwrap();
 
         // Open both readers with same cache
-        let mut reader1 = SstableReader::open(path1, config.clone(), Arc::clone(&cache)).unwrap();
-        let mut reader2 = SstableReader::open(path2, config, Arc::clone(&cache)).unwrap();
+        let reader1 = SstableReader::open(path1, config.clone(), Arc::clone(&cache)).unwrap();
+        let reader2 = SstableReader::open(path2, config, Arc::clone(&cache)).unwrap();
 
         let stats_before = cache.stats();
 
@@ -576,5 +612,241 @@ mod tests {
 
         // Both readers share the same cache
         assert!(stats_after2.len <= stats_after2.cap);
+    }
+
+    // ======================
+    // CONCURRENCY TESTS
+    // ======================
+
+    #[test]
+    fn test_concurrent_reads_same_keys() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("concurrent_same.sst");
+        let config = StorageConfig::default();
+        let cache = create_test_cache(&config);
+
+        // Write SSTable with 100 records
+        let mut builder = SstableBuilder::new(path.clone(), config.clone(), 1000).unwrap();
+        for i in 0..100 {
+            let key = format!("key_{:03}", i);
+            let value = format!("value_{:03}", i);
+            builder
+                .add(key.as_bytes(), &create_test_record(&key, value.as_bytes()))
+                .unwrap();
+        }
+        builder.finish().unwrap();
+
+        // Open reader and wrap in Arc for sharing
+        let reader = Arc::new(SstableReader::open(path, config, cache).unwrap());
+
+        // Spawn 10 threads, each reading the same 100 keys 100 times
+        let handles: Vec<_> = (0..10)
+            .map(|thread_id| {
+                let reader_clone = Arc::clone(&reader);
+                thread::spawn(move || {
+                    for _ in 0..100 {
+                        for i in 0..100 {
+                            let key = format!("key_{:03}", i);
+                            let result = reader_clone.get(&key).unwrap();
+                            assert!(
+                                result.is_some(),
+                                "Thread {} failed to read key {}",
+                                thread_id,
+                                key
+                            );
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_concurrent_reads_different_keys() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("concurrent_diff.sst");
+        let config = StorageConfig::default();
+        let cache = create_test_cache(&config);
+
+        // Write SSTable with 1000 records
+        let mut builder = SstableBuilder::new(path.clone(), config.clone(), 2000).unwrap();
+        for i in 0..1000 {
+            let key = format!("key_{:04}", i);
+            let value = format!("value_{:04}", i);
+            builder
+                .add(key.as_bytes(), &create_test_record(&key, value.as_bytes()))
+                .unwrap();
+        }
+        builder.finish().unwrap();
+
+        let reader = Arc::new(SstableReader::open(path, config, cache).unwrap());
+
+        // Spawn 10 threads, each reading different ranges of keys
+        let handles: Vec<_> = (0..10)
+            .map(|thread_id| {
+                let reader_clone = Arc::clone(&reader);
+                thread::spawn(move || {
+                    let start = thread_id * 100;
+                    let end = start + 100;
+                    for _ in 0..50 {
+                        for i in start..end {
+                            let key = format!("key_{:04}", i);
+                            let result = reader_clone.get(&key).unwrap();
+                            assert!(result.is_some(), "Key {} should exist", key);
+                            let record = result.unwrap();
+                            let expected_value = format!("value_{:04}", i);
+                            assert_eq!(record.value, expected_value.as_bytes());
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_concurrent_reads_with_cache_contention() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("concurrent_cache.sst");
+        let mut config = StorageConfig::default();
+        config.block_size = 512; // Small blocks
+        config.block_cache_size_mb = 1; // Small cache to force evictions
+        let cache = create_test_cache(&config);
+
+        // Write enough data to span many blocks
+        let mut builder = SstableBuilder::new(path.clone(), config.clone(), 3000).unwrap();
+        for i in 0..500 {
+            let key = format!("key_{:04}", i);
+            let value = vec![b'x'; 50]; // 50 bytes each
+            builder
+                .add(key.as_bytes(), &create_test_record(&key, &value))
+                .unwrap();
+        }
+        builder.finish().unwrap();
+
+        let reader = Arc::new(SstableReader::open(path, config, cache).unwrap());
+
+        // Spawn threads that cause cache contention
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let reader_clone = Arc::clone(&reader);
+                thread::spawn(move || {
+                    for _ in 0..200 {
+                        // Random-ish access pattern
+                        for i in (0..500).step_by(7) {
+                            let key = format!("key_{:04}", i);
+                            let result = reader_clone.get(&key);
+                            assert!(result.is_ok());
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_concurrent_readers_shared_cache() {
+        let dir = tempdir().unwrap();
+        let config = StorageConfig::default();
+        let cache = create_test_cache(&config);
+
+        // Create 3 SSTable files
+        let paths: Vec<_> = (0..3)
+            .map(|i| {
+                let path = dir.path().join(format!("file_{}.sst", i));
+                let mut builder =
+                    SstableBuilder::new(path.clone(), config.clone(), 4000 + i).unwrap();
+                for j in 0..100 {
+                    let key = format!("key_{}_{:03}", i, j);
+                    let value = format!("value_{}_{:03}", i, j);
+                    builder
+                        .add(key.as_bytes(), &create_test_record(&key, value.as_bytes()))
+                        .unwrap();
+                }
+                builder.finish().unwrap();
+                path
+            })
+            .collect();
+
+        // Open 3 readers with shared cache
+        let readers: Vec<_> = paths
+            .into_iter()
+            .map(|path| {
+                Arc::new(
+                    SstableReader::open(path, config.clone(), Arc::clone(&cache)).unwrap(),
+                )
+            })
+            .collect();
+
+        // Spawn threads that read from different SSTables concurrently
+        let handles: Vec<_> = (0..9)
+            .map(|thread_id| {
+                let reader_idx = thread_id % 3;
+                let reader_clone = Arc::clone(&readers[reader_idx]);
+                thread::spawn(move || {
+                    for _ in 0..100 {
+                        for j in 0..100 {
+                            let key = format!("key_{}_{:03}", reader_idx, j);
+                            let result = reader_clone.get(&key).unwrap();
+                            assert!(result.is_some(), "Key {} should exist", key);
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_concurrent_scan() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("concurrent_scan.sst");
+        let config = StorageConfig::default();
+        let cache = create_test_cache(&config);
+
+        // Write SSTable
+        let mut builder = SstableBuilder::new(path.clone(), config.clone(), 5000).unwrap();
+        for i in 0..200 {
+            let key = format!("key_{:03}", i);
+            let value = format!("value_{:03}", i);
+            builder
+                .add(key.as_bytes(), &create_test_record(&key, value.as_bytes()))
+                .unwrap();
+        }
+        builder.finish().unwrap();
+
+        let reader = Arc::new(SstableReader::open(path, config, cache).unwrap());
+
+        // Spawn 5 threads all doing full scans simultaneously
+        let handles: Vec<_> = (0..5)
+            .map(|_| {
+                let reader_clone = Arc::clone(&reader);
+                thread::spawn(move || {
+                    for _ in 0..10 {
+                        let records = reader_clone.scan().unwrap();
+                        assert_eq!(records.len(), 200, "Should scan all 200 records");
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
     }
 }
