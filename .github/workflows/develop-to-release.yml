@@ -116,9 +116,14 @@ jobs:
           fi
 
           # Extract issue numbers (Closes #123, Fixes #456, #789)
-          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?) #[0-9]+' | grep -oE '#[0-9]+' | sort -u | tr '\n' ' ')
+          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?) #[0-9]+' | grep -oE '#[0-9]+' | sort -u | tr '\n' ' ' || echo "")
           echo "issues=$ISSUES" >> "$GITHUB_OUTPUT"
-          echo "Found issues: $ISSUES"
+          
+          if [ -n "$ISSUES" ]; then
+            echo "Found issues: $ISSUES"
+          else
+            echo "No issues referenced in commits"
+          fi
 
       - name: Generate changelog
         id: changelog
@@ -143,15 +148,22 @@ jobs:
           RELEASE_BRANCH="release/v${NEW_VERSION}"
           CHANGELOG=$(cat /tmp/changelog.txt)
 
-          # Format issues list for PR body
-          ISSUES_LIST=""
+          # Format issues list for PR body (optional section)
+          ISSUES_SECTION=""
           if [ -n "$ISSUES" ]; then
+            ISSUES_LIST=""
             for ISSUE in $ISSUES; do
               ISSUE_NUM=${ISSUE#\#}
               ISSUES_LIST+="- $ISSUE\n"
             done
-          else
-            ISSUES_LIST="_No issues referenced in commits_"
+            ISSUES_SECTION="### 🐛 Issues Resolvidas
+          $ISSUES_LIST
+
+          _Essas issues serão fechadas automaticamente quando este PR for mergeado._
+
+          ---
+
+          "
           fi
 
           if [ "${{ steps.check-pr.outputs.pr_exists }}" -eq 0 ]; then
@@ -179,14 +191,7 @@ jobs:
 
           ---
 
-          ### 🐛 Issues Resolvidas
-          $ISSUES_LIST
-
-          _Essas issues serão fechadas automaticamente quando este PR for mergeado._
-
-          ---
-
-          ### 📝 Changelog
+          ${ISSUES_SECTION}### 📝 Changelog
           $CHANGELOG
 
           ---
@@ -225,7 +230,7 @@ jobs:
           BRANCH_NAME="${{ github.head_ref }}"
           VERSION=${BRANCH_NAME#release/}
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Closing issues for release $VERSION"
+          echo "Checking for issues to close in release $VERSION"
 
       - name: Extract and close issues
         env:
@@ -242,16 +247,24 @@ jobs:
           fi
 
           # Extract all issue references
-          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?|#)[[:space:]]*#[0-9]+' | grep -oE '#[0-9]+' | sort -u)
+          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?|#)[[:space:]]*#[0-9]+' | grep -oE '#[0-9]+' | sort -u || echo "")
+
+          if [ -z "$ISSUES" ]; then
+            echo "ℹ️ No issues referenced in commits - skipping issue closure"
+            echo "This is normal if commits didn't reference any issues."
+            exit 0
+          fi
 
           echo "Found issues to close: $ISSUES"
 
           for ISSUE in $ISSUES; do
             ISSUE_NUM=${ISSUE#\#}
-            echo "Closing issue #$ISSUE_NUM"
+            echo "Processing issue #$ISSUE_NUM"
 
-            # Add comment to issue
-            gh issue comment "$ISSUE_NUM" --body "✅ **Resolved in Release $VERSION**
+            # Check if issue exists
+            if gh issue view "$ISSUE_NUM" &>/dev/null; then
+              # Add comment to issue
+              gh issue comment "$ISSUE_NUM" --body "✅ **Resolved in Release $VERSION**
 
           This issue has been fixed and released in version \`$VERSION\`.
 
@@ -260,14 +273,13 @@ jobs:
           - 📦 Release: [View Release](https://github.com/${{ github.repository }}/releases/tag/$VERSION)
           - 🔀 PR: #${{ github.event.pull_request.number }}
 
-          Thank you for your contribution!"
+          Thank you for your contribution!" 2>/dev/null || echo "⚠️ Could not comment on issue #$ISSUE_NUM"
 
-            # Close the issue
-            gh issue close "$ISSUE_NUM" --reason completed
-
-            echo "✅ Issue #$ISSUE_NUM closed"
+              # Close the issue
+              gh issue close "$ISSUE_NUM" --reason completed 2>/dev/null && echo "✅ Issue #$ISSUE_NUM closed" || echo "⚠️ Could not close issue #$ISSUE_NUM (may already be closed)"
+            else
+              echo "⚠️ Issue #$ISSUE_NUM not found - skipping"
+            fi
           done
 
-          if [ -z "$ISSUES" ]; then
-            echo "No issues to close"
-          fi
+          echo "✅ Issue processing complete"

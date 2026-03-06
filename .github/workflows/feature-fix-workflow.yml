@@ -75,9 +75,14 @@ jobs:
           COMMITS=$(git log "origin/develop..${{ github.ref_name }}" --pretty=format:'%s')
 
           # Extract issue numbers
-          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?|#)[[:space:]]*#[0-9]+' | grep -oE '#[0-9]+' | sort -u | tr '\n' ' ')
+          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?|#)[[:space:]]*#[0-9]+' | grep -oE '#[0-9]+' | sort -u | tr '\n' ' ' || echo "")
           echo "issues=$ISSUES" >> "$GITHUB_OUTPUT"
-          echo "Found issues: $ISSUES"
+          
+          if [ -n "$ISSUES" ]; then
+            echo "Found issues: $ISSUES"
+          else
+            echo "No issues referenced in commits"
+          fi
 
       - name: Check if PR already exists
         id: check-pr
@@ -101,14 +106,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUES: ${{ steps.extract-issues.outputs.issues }}
         run: |
-          # Format issues list
-          ISSUES_LIST=""
+          # Format issues list (optional section)
+          ISSUES_SECTION=""
           if [ -n "$ISSUES" ]; then
+            ISSUES_LIST=""
             for ISSUE in $ISSUES; do
               ISSUES_LIST+="- $ISSUE\n"
             done
-          else
-            ISSUES_LIST="_No issues referenced_"
+            ISSUES_SECTION="### 🐛 Issues Addressed
+          $ISSUES_LIST
+
+          "
           fi
 
           gh pr create \
@@ -120,10 +128,7 @@ jobs:
           ✅ **Build:** Passed
           ✅ **Tests:** Passed
 
-          ### 🐛 Issues Addressed
-          $ISSUES_LIST
-
-          ### 📊 Details
+          ${ISSUES_SECTION}### 📊 Details
           - **Commits:** ${{ steps.check-commits.outputs.commits_ahead }}
           - **Branch:** \`${{ github.ref_name }}\`
           - **Commit:** \`${{ github.sha }}\`
@@ -168,16 +173,24 @@ jobs:
           COMMITS=$(git log "origin/develop..${{ github.ref_name }}" --pretty=format:'%s' 2>/dev/null || echo "")
 
           if [ -z "$COMMITS" ]; then
-            echo "No commits to process"
+            echo "ℹ️ No commits to process"
             exit 0
           fi
 
           # Extract issue numbers
-          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?|#)[[:space:]]*#[0-9]+' | grep -oE '#[0-9]+' | sort -u)
+          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?|#)[[:space:]]*#[0-9]+' | grep -oE '#[0-9]+' | sort -u || echo "")
+
+          if [ -z "$ISSUES" ]; then
+            echo "ℹ️ No issues referenced in commits - skipping"
+            echo "This is normal for commits that don't reference issues."
+            exit 0
+          fi
+
+          echo "Found issues to comment on: $ISSUES"
 
           for ISSUE in $ISSUES; do
             ISSUE_NUM=${ISSUE#\#}
-            echo "Adding comment to issue #$ISSUE_NUM"
+            echo "Processing issue #$ISSUE_NUM"
 
             # Check if issue exists and is open
             ISSUE_STATE=$(gh issue view "$ISSUE_NUM" --json state --jq .state 2>/dev/null || echo "NOT_FOUND")
@@ -196,14 +209,10 @@ jobs:
           **Latest commit:** [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
 
           ---
-          _Automated update from feature/fix workflow_"
-
-              echo "✅ Comment added to issue #$ISSUE_NUM"
+          _Automated update from feature/fix workflow_" 2>/dev/null && echo "✅ Comment added to issue #$ISSUE_NUM" || echo "⚠️ Could not comment on issue #$ISSUE_NUM"
             else
               echo "⏭️ Skipping issue #$ISSUE_NUM (state: $ISSUE_STATE)"
             fi
           done
 
-          if [ -z "$ISSUES" ]; then
-            echo "No issues referenced in commits"
-          fi
+          echo "✅ Issue comment processing complete"
