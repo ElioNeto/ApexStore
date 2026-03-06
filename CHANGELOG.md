@@ -361,9 +361,9 @@ BLOCK_CACHE_SIZE_MB=256
 
 **Basic Usage**:
 ```rust
-use lsm_kv_store::storage::builder::SstableBuilder;
-use lsm_kv_store::infra::config::StorageConfig;
-use lsm_kv_store::core::log_record::LogRecord;
+use apexstore::storage::builder::SstableBuilder;
+use apexstore::infra::config::StorageConfig;
+use apexstore::core::log_record::LogRecord;
 
 // Create builder
 let config = StorageConfig::default();

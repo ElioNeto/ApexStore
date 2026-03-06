@@ -367,7 +367,7 @@ export RUST_LOG=debug
 RUST_LOG=trace cargo run
 
 # Filter by module
-RUST_LOG=lsm_kv_store::core::engine=debug cargo run
+RUST_LOG=apexstore::core::engine=debug cargo run
 ```
 
 ---
