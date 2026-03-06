@@ -1,4 +1,4 @@
-# Roadmap — LSM KV Store
+  # Roadmap — LSM KV Store
 
 **Last Updated:** 2026-02-03  
 **Current Version:** v1.3.0  
