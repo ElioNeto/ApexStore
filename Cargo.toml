@@ -1,10 +1,14 @@
 [package]
-name = "lsm-kv-store"
+name = "apexstore"
 version = "2.1.0"
 edition = "2024"
 authors = ["Elio Neto <netoo.elio@hotmail.com>"]
-description = "High-performance Key-Value Store using LSM-Tree architecture"
-repository = "https://github.com/ElioNeto/lsm-kv-store"
+description = "High-performance LSM-Tree Key-Value Store in Rust"
+repository = "https://github.com/ElioNeto/ApexStore"
+homepage = "https://github.com/ElioNeto/ApexStore"
+license = "MIT"
+keywords = ["database", "lsm-tree", "key-value", "storage", "embedded"]
+categories = ["database-implementations", "embedded"]
 
 [dependencies]
 # Serialization
@@ -50,11 +54,11 @@ codegen-units = 1
 opt-level = 0
 
 [[bin]]
-name = "lsm-kv-store"
+name = "apexstore"
 path = "src/main.rs"
 
 [[bin]]
-name = "lsm-server"
+name = "apexstore-server"
 path = "src/bin/server.rs"
 required-features = ["api"]
 
