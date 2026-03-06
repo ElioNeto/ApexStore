@@ -1,14 +1,14 @@
-# 🦀 LSM KV Store
+# 🗄️ ApexStore
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/ElioNeto/lsm-kv-store/releases)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](https://github.com/ElioNeto/ApexStore/releases)
 
 A high-performance, embedded key-value store written in Rust, implementing the **Log-Structured Merge-Tree (LSM-Tree)** architecture. Built with SOLID principles for production-grade reliability, testability, and maintainability.
 
 ## 🎯 Overview
 
-LSM KV Store is a modern, Rust-based storage engine designed for write-heavy workloads. It combines the durability of write-ahead logging with the efficiency of LSM-Tree architecture, providing:
+ApexStore is a modern, Rust-based storage engine designed for write-heavy workloads. It combines the durability of write-ahead logging with the efficiency of LSM-Tree architecture, providing:
 
 - **High Write Throughput**: Optimized for write-intensive applications with in-memory buffering and sequential disk writes
 - **Data Durability**: Write-ahead log (WAL) ensures zero data loss on crashes
@@ -172,8 +172,8 @@ sequenceDiagram
 
 ```bash
 # Clone the repository
-git clone https://github.com/ElioNeto/lsm-kv-store.git
-cd lsm-kv-store
+git clone https://github.com/ElioNeto/ApexStore.git
+cd ApexStore
 
 # Build the project
 cargo build --release
@@ -206,7 +206,7 @@ cp .env.example .env
 nano .env
 
 # Start the server
-cargo run --release --features api --bin lsm-server
+cargo run --release --features api --bin apexstore-server
 ```
 
 The server will start at `http://0.0.0.0:8080` by default.
@@ -242,7 +242,7 @@ The server will start at `http://0.0.0.0:8080` by default.
 
 ## ⚙️ Configuration
 
-LSM KV Store uses environment variables for configuration. No recompilation needed!
+ApexStore uses environment variables for configuration. No recompilation needed!
 
 ### Quick Configuration Examples
 
@@ -278,7 +278,7 @@ For detailed configuration options, see [`docs/CONFIGURATION.md`](docs/CONFIGURA
 Organized following **SOLID principles**:
 
 ```
-lsm-kv-store/
+ApexStore/
 ├── src/
 │   ├── core/              # Domain logic (SRP)
 │   │   ├── engine.rs      # LSM Engine orchestration
@@ -351,7 +351,7 @@ cargo fmt
 
 ## 🗺️ Roadmap
 
-### ✅ Completed (v1.0 - v1.3)
+### ✅ Completed (v1.0 - v1.4)
 - [x] Core LSM engine with MemTable and WAL
 - [x] SSTable V2 with sparse indexing and compression
 - [x] REST API with feature flags
@@ -359,14 +359,17 @@ cargo fmt
 - [x] Interactive CLI
 - [x] Bloom filters for read optimization
 - [x] Statistics and monitoring
+- [x] Global block cache
 
-### 🚧 In Progress (v1.4)
-- [ ] SSTable Reader with sparse index support
-- [ ] Engine integration with V2 format
-- [ ] Efficient range iterators
+### 🚧 In Progress (v1.5)
+- [ ] Storage iterators for range queries
+- [ ] Concurrent read optimization
+- [ ] Comprehensive benchmark suite
 
 ### 🔮 Future (v2.0+)
 - [ ] Compaction strategies (Leveled, Tiered, Lazy Leveling)
+- [ ] Authentication & authorization
+- [ ] Data integrity validation (CRC32 checksums)
 - [ ] Multi-instance support
 - [ ] Secondary indexes
 - [ ] Snapshot isolation
@@ -404,7 +407,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Author**: Elio Neto
 - **Email**: netoo.elio@hotmail.com
 - **GitHub**: [@ElioNeto](https://github.com/ElioNeto)
-- **Project**: [lsm-kv-store](https://github.com/ElioNeto/lsm-kv-store)
+- **Project**: [ApexStore](https://github.com/ElioNeto/ApexStore)
 - **Demo**: [lsm-admin-dev.up.railway.app](https://lsm-admin-dev.up.railway.app/)
 
 ## 🌟 Star History
