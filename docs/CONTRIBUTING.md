@@ -1,6 +1,6 @@
-# Contributing to LSM KV Store
+# Contributing to ApexStore
 
-First off, thank you for considering contributing to LSM KV Store! 🎉
+First off, thank you for considering contributing to ApexStore! 🎉
 
 This document provides guidelines and instructions for contributing to the project. Following these guidelines helps maintain code quality and makes the review process smoother.
 
