@@ -255,7 +255,8 @@ impl LsmEngine {
         for sst in sstables.iter_mut() {
             let records = sst.scan()?;
             for (key_bytes, record) in records {
-                let key = String::from_utf8(key_bytes).map_err(|e| LsmError::CorruptedData(e.to_string()))?;
+                let key = String::from_utf8(key_bytes)
+                    .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
                 result_map.entry(key).or_insert((
                     record.value,
                     record.timestamp,
@@ -316,10 +317,7 @@ impl LsmEngine {
         let sstables = self.sstables_lock().map_err(|e| e.to_string())?;
 
         let mem_records = memtable.data.len();
-        let sst_records_total: u64 = sstables
-            .iter()
-            .map(|s| s.metadata().record_count)
-            .sum();
+        let sst_records_total: u64 = sstables.iter().map(|s| s.metadata().record_count).sum();
 
         let sst_bytes_total: u64 = sstables
             .iter()

@@ -21,7 +21,7 @@ use std::collections::btree_map;
 /// ```ignore
 /// let mut iter = memtable.iter();
 /// iter.seek(b"key_100");
-/// 
+///
 /// while iter.is_valid() {
 ///     let key = iter.key();
 ///     let value = iter.value();
@@ -102,9 +102,7 @@ impl<'a> StorageIterator for MemTableIterator<'a> {
     }
 
     fn value(&self) -> &LogRecord {
-        self.current
-            .expect("value() called on invalid iterator")
-            .1
+        self.current.expect("value() called on invalid iterator").1
     }
 
     fn is_valid(&self) -> bool {
@@ -135,7 +133,7 @@ mod tests {
     fn create_test_record(key: &str, value: &[u8]) -> LogRecord {
         LogRecord::new(key.to_string(), value.to_vec())
     }
-    
+
     fn create_test_memtable() -> BTreeMap<String, LogRecord> {
         let mut map = BTreeMap::new();
         map.insert(
@@ -294,21 +292,21 @@ mod tests {
     #[test]
     fn test_iterator_new_from() {
         let map = create_test_memtable();
-        
+
         // Start from key_020
         let mut iter = MemTableIterator::new_from(&map, "key_020");
-        
+
         assert!(iter.is_valid());
         assert_eq!(iter.key(), b"key_020");
-        
+
         iter.next();
         assert!(iter.is_valid());
         assert_eq!(iter.key(), b"key_030");
-        
+
         iter.next();
         assert!(iter.is_valid());
         assert_eq!(iter.key(), b"key_100");
-        
+
         iter.next();
         assert!(!iter.is_valid());
     }

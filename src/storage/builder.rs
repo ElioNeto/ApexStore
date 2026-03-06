@@ -132,7 +132,9 @@ impl SstableBuilder {
 
         let key_len = u16::from_le_bytes([encoded[0], encoded[1]]) as usize;
         if encoded.len() < 2 + key_len {
-            return Err(LsmError::CompactionFailed("Corrupted block data".to_string()));
+            return Err(LsmError::CompactionFailed(
+                "Corrupted block data".to_string(),
+            ));
         }
 
         Ok(encoded[2..2 + key_len].to_vec())

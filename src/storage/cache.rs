@@ -150,7 +150,6 @@ mod tests {
         use std::thread;
 
         let cache = GlobalBlockCache::new(1, 4096);
-        let cache_clone = Arc::clone(&cache.cache.lock().unwrap().cap().get().into());
 
         let handles: Vec<_> = (0..10)
             .map(|i| {

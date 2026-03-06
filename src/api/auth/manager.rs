@@ -75,10 +75,7 @@ impl TokenManager {
             .read()
             .map_err(|e| AuthError::Internal(format!("Lock poisoned: {}", e)))?;
 
-        tokens
-            .get(id)
-            .cloned()
-            .ok_or(AuthError::TokenNotFound)
+        tokens.get(id).cloned().ok_or(AuthError::TokenNotFound)
     }
 
     /// Delete token by ID
