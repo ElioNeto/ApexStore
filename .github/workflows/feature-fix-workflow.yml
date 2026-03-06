@@ -5,6 +5,13 @@ on:
     branches:
       - "feature/**"
       - "fix/**"
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    branches:
+      - develop
 
 defaults:
   run:
@@ -40,6 +47,7 @@ jobs:
         continue-on-error: true
 
   create-pr-to-develop:
+    if: github.event_name == 'push'
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
@@ -59,6 +67,23 @@ jobs:
           echo "commits_ahead=$COMMITS_AHEAD" >> "$GITHUB_OUTPUT"
           echo "Branch está $COMMITS_AHEAD commits à frente de develop"
 
+      - name: Extract issues from commits
+        id: extract-issues
+        if: steps.check-commits.outputs.commits_ahead > 0
+        run: |
+          git fetch origin develop
+          COMMITS=$(git log "origin/develop..${{ github.ref_name }}" --pretty=format:'%s')
+
+          # Extract issue numbers
+          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?|#)[[:space:]]*#[0-9]+' | grep -oE '#[0-9]+' | sort -u | tr '\n' ' ' || echo "")
+          echo "issues=$ISSUES" >> "$GITHUB_OUTPUT"
+          
+          if [ -n "$ISSUES" ]; then
+            echo "Found issues: $ISSUES"
+          else
+            echo "No issues referenced in commits"
+          fi
+
       - name: Check if PR already exists
         id: check-pr
         if: steps.check-commits.outputs.commits_ahead > 0
@@ -66,14 +91,34 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           BRANCH_NAME="${{ github.ref_name }}"
-          PR_EXISTS=$(gh pr list --head "$BRANCH_NAME" --base develop --json number --jq 'length')
+          PR_LIST=$(gh pr list --head "$BRANCH_NAME" --base develop --json number)
+          PR_EXISTS=$(echo "$PR_LIST" | jq 'length')
           echo "pr_exists=$PR_EXISTS" >> "$GITHUB_OUTPUT"
+
+          if [ "$PR_EXISTS" -gt 0 ]; then
+            PR_NUMBER=$(echo "$PR_LIST" | jq -r '.[0].number')
+            echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Create Pull Request to develop
         if: steps.check-commits.outputs.commits_ahead > 0 && steps.check-pr.outputs.pr_exists == '0'
         env:
           GH_TOKEN: ${{ github.token }}
+          ISSUES: ${{ steps.extract-issues.outputs.issues }}
         run: |
+          # Format issues list (optional section)
+          ISSUES_SECTION=""
+          if [ -n "$ISSUES" ]; then
+            ISSUES_LIST=""
+            for ISSUE in $ISSUES; do
+              ISSUES_LIST+="- $ISSUE\n"
+            done
+            ISSUES_SECTION="### 🐛 Issues Addressed
+          $ISSUES_LIST
+
+          "
+          fi
+
           gh pr create \
             --base develop \
             --head "${{ github.ref_name }}" \
@@ -83,7 +128,7 @@ jobs:
           ✅ **Build:** Passed
           ✅ **Tests:** Passed
 
-          ### 📊 Details
+          ${ISSUES_SECTION}### 📊 Details
           - **Commits:** ${{ steps.check-commits.outputs.commits_ahead }}
           - **Branch:** \`${{ github.ref_name }}\`
           - **Commit:** \`${{ github.sha }}\`
@@ -106,4 +151,68 @@ jobs:
         if: steps.check-commits.outputs.commits_ahead > 0 && steps.check-pr.outputs.pr_exists != '0'
         run: |
           echo "ℹ️ PR já existe para a branch ${{ github.ref_name }}"
-          echo "Não é necessário criar um novo PR"
+
+  add-issue-comments:
+    if: github.event_name == 'push'
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract and comment on issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch origin develop
+          COMMITS=$(git log "origin/develop..${{ github.ref_name }}" --pretty=format:'%s' 2>/dev/null || echo "")
+
+          if [ -z "$COMMITS" ]; then
+            echo "ℹ️ No commits to process"
+            exit 0
+          fi
+
+          # Extract issue numbers
+          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?|#)[[:space:]]*#[0-9]+' | grep -oE '#[0-9]+' | sort -u || echo "")
+
+          if [ -z "$ISSUES" ]; then
+            echo "ℹ️ No issues referenced in commits - skipping"
+            echo "This is normal for commits that don't reference issues."
+            exit 0
+          fi
+
+          echo "Found issues to comment on: $ISSUES"
+
+          for ISSUE in $ISSUES; do
+            ISSUE_NUM=${ISSUE#\#}
+            echo "Processing issue #$ISSUE_NUM"
+
+            # Check if issue exists and is open
+            ISSUE_STATE=$(gh issue view "$ISSUE_NUM" --json state --jq .state 2>/dev/null || echo "NOT_FOUND")
+
+            if [ "$ISSUE_STATE" = "OPEN" ]; then
+              # Get recent commits for this branch
+              RECENT_COMMITS=$(git log "origin/develop..${{ github.ref_name }}" --pretty=format:'- %s (%h)' | head -3)
+
+              gh issue comment "$ISSUE_NUM" --body "🔄 **Update from \`${{ github.ref_name }}\`**
+
+          New commits pushed:
+          $RECENT_COMMITS
+
+          **Status:** In development
+          **Branch:** [${{ github.ref_name }}](https://github.com/${{ github.repository }}/tree/${{ github.ref_name }})
+          **Latest commit:** [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+
+          ---
+          _Automated update from feature/fix workflow_" 2>/dev/null && echo "✅ Comment added to issue #$ISSUE_NUM" || echo "⚠️ Could not comment on issue #$ISSUE_NUM"
+            else
+              echo "⏭️ Skipping issue #$ISSUE_NUM (state: $ISSUE_STATE)"
+            fi
+          done
+
+          echo "✅ Issue comment processing complete"
