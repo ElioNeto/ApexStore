@@ -22,7 +22,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!(
         "📂 Diretório de dados: {}",
-        config.core.data_dir.display()
+        config.core.dir_path.display()
     );
 
     println!("Inicializando engine...");
