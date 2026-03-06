@@ -1,19 +1,30 @@
 mod config;
 
+#[cfg(feature = "api")]
+pub mod auth;
+
 use actix_cors::Cors;
-use actix_web::{delete, get, post, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{
+    delete, dev::ServiceRequest, get, post, web, App, Error, HttpResponse, HttpServer, Responder,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::core::engine::LsmEngine;
 use crate::features::FeatureClient;
 
-pub use config::ServerConfig;
+pub use config::{AuthConfig, ServerConfig};
+
+#[cfg(feature = "api")]
+use auth::{manager::TokenManager, middleware::extract_token, token::Permission, ApiToken};
 
 pub struct AppState {
     pub engine: Arc<LsmEngine>,
     pub features: Arc<FeatureClient>,
+    #[cfg(feature = "api")]
+    pub token_manager: TokenManager,
+    pub auth_enabled: bool,
 }
 
 #[derive(Deserialize)]
@@ -61,11 +72,32 @@ pub struct FeatureResponse {
     pub description: String,
 }
 
+// Admin endpoints
+#[cfg(feature = "api")]
+#[derive(Deserialize)]
+pub struct CreateTokenRequest {
+    pub name: String,
+    pub permissions: Vec<Permission>,
+    pub expires_in_days: Option<u32>,
+}
+
+#[cfg(feature = "api")]
+#[derive(Serialize)]
+pub struct TokenResponse {
+    pub id: String,
+    pub name: String,
+    pub token: Option<String>,
+    pub created_at: u128,
+    pub expires_at: Option<u128>,
+    pub permissions: Vec<Permission>,
+}
+
+// Public endpoint - no auth required
 #[get("/health")]
 async fn health() -> impl Responder {
     HttpResponse::Ok().json(ApiResponse {
         success: true,
-        message: "LSM-Tree API is running".to_string(),
+        message: "ApexStore API is running".to_string(),
         data: None,
     })
 }
@@ -324,6 +356,114 @@ async fn set_feature(
     }
 }
 
+// Admin endpoints for token management
+#[cfg(feature = "api")]
+#[post("/admin/tokens")]
+async fn create_token(
+    req: web::Json<CreateTokenRequest>,
+    data: web::Data<AppState>,
+) -> impl Responder {
+    let expires_at = req.expires_in_days.map(|days| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            + (days as u128 * 24 * 60 * 60 * 1_000_000_000)
+    });
+
+    match data
+        .token_manager
+        .create_token(req.name.clone(), expires_at, req.permissions.clone())
+    {
+        Ok((raw_token, token)) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Token created successfully".to_string(),
+            data: Some(serde_json::json!({
+                "id": token.id,
+                "name": token.name,
+                "token": raw_token,
+                "expires_at": token.expires_at,
+                "permissions": token.permissions,
+            })),
+        }),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
+            success: false,
+            message: format!("Error: {}", e),
+            data: None,
+        }),
+    }
+}
+
+#[cfg(feature = "api")]
+#[get("/admin/tokens")]
+async fn list_tokens(data: web::Data<AppState>) -> impl Responder {
+    match data.token_manager.list_tokens() {
+        Ok(tokens) => {
+            let token_list: Vec<TokenResponse> = tokens
+                .into_iter()
+                .map(|t| TokenResponse {
+                    id: t.id,
+                    name: t.name,
+                    token: None, // Never expose raw token
+                    created_at: t.created_at,
+                    expires_at: t.expires_at,
+                    permissions: t.permissions,
+                })
+                .collect();
+
+            HttpResponse::Ok().json(ApiResponse {
+                success: true,
+                message: format!("{} tokens found", token_list.len()),
+                data: Some(serde_json::json!({ "tokens": token_list })),
+            })
+        }
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
+            success: false,
+            message: format!("Error: {}", e),
+            data: None,
+        }),
+    }
+}
+
+#[cfg(feature = "api")]
+#[delete("/admin/tokens/{id}")]
+async fn delete_token(path: web::Path<String>, data: web::Data<AppState>) -> impl Responder {
+    let id = path.into_inner();
+
+    match data.token_manager.delete_token(&id) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Token deleted successfully".to_string(),
+            data: None,
+        }),
+        Err(e) => HttpResponse::NotFound().json(ApiResponse {
+            success: false,
+            message: format!("Error: {}", e),
+            data: None,
+        }),
+    }
+}
+
+// Custom auth validator
+#[cfg(feature = "api")]
+async fn auth_validator(
+    req: ServiceRequest,
+    credentials: actix_web_httpauth::extractors::bearer::BearerAuth,
+) -> Result<ServiceRequest, (Error, ServiceRequest)> {
+    let data = req.app_data::<web::Data<AppState>>().unwrap();
+    
+    if !data.auth_enabled {
+        return Ok(req);
+    }
+
+    auth::middleware::bearer_validator(
+        req,
+        data.token_manager.clone(),
+        Some(credentials.token().to_string()),
+    )
+    .await
+}
+
 pub async fn start_server(
     engine: LsmEngine,
     server_config: ServerConfig,
@@ -333,6 +473,12 @@ pub async fn start_server(
         Arc::clone(&engine),
         Duration::from_secs(server_config.feature_cache_ttl_secs),
     ));
+
+    #[cfg(feature = "api")]
+    let token_manager = TokenManager::new();
+
+    #[cfg(feature = "api")]
+    let auth_enabled = server_config.auth.enabled;
 
     server_config.print_info();
     println!("🚀 Starting server at {}:{}\n", server_config.host, server_config.port);
@@ -348,25 +494,72 @@ pub async fn start_server(
             .allow_any_method()
             .allow_any_header();
 
-        App::new()
+        #[cfg(feature = "api")]
+        let auth_middleware =
+            actix_web_httpauth::middleware::HttpAuthentication::bearer(auth_validator);
+
+        let mut app = App::new()
             .wrap(cors)
             .app_data(web::Data::new(AppState {
                 engine: Arc::clone(&engine),
                 features: Arc::clone(&features),
+                #[cfg(feature = "api")]
+                token_manager: token_manager.clone(),
+                #[cfg(feature = "api")]
+                auth_enabled,
+                #[cfg(not(feature = "api"))]
+                auth_enabled: false,
             }))
             .app_data(web::JsonConfig::default().limit(max_json))
             .app_data(web::PayloadConfig::default().limit(max_raw))
-            .service(health)
-            .service(get_stats)
-            .service(get_stats_all)
-            .service(get_key)
-            .service(set_key)
-            .service(set_batch)
-            .service(list_keys)
-            .service(search_keys)
-            .service(scan_all)
-            .service(list_features)
-            .service(set_feature)
+            // Public endpoints (no auth)
+            .service(health);
+
+        // Protected endpoints (with conditional auth)
+        #[cfg(feature = "api")]
+        {
+            app = app
+                .service(
+                    web::scope("")
+                        .wrap(auth_middleware.clone())
+                        .service(get_stats)
+                        .service(get_stats_all)
+                        .service(get_key)
+                        .service(set_key)
+                        .service(set_batch)
+                        .service(delete_key)
+                        .service(list_keys)
+                        .service(search_keys)
+                        .service(scan_all)
+                        .service(list_features)
+                        .service(set_feature),
+                )
+                .service(
+                    web::scope("/admin")
+                        .wrap(auth_middleware)
+                        .service(create_token)
+                        .service(list_tokens)
+                        .service(delete_token),
+                );
+        }
+
+        #[cfg(not(feature = "api"))]
+        {
+            app = app
+                .service(get_stats)
+                .service(get_stats_all)
+                .service(get_key)
+                .service(set_key)
+                .service(set_batch)
+                .service(delete_key)
+                .service(list_keys)
+                .service(search_keys)
+                .service(scan_all)
+                .service(list_features)
+                .service(set_feature);
+        }
+
+        app
     })
     .bind((host.as_str(), port))?
     .run()
