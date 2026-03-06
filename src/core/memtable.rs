@@ -1,4 +1,5 @@
 use crate::core::log_record::LogRecord;
+use crate::storage::iterator::MemTableIterator;
 use std::collections::BTreeMap;
 
 pub struct MemTable {
@@ -34,8 +35,42 @@ impl MemTable {
         self.data.get(key).cloned()
     }
 
+    /// Returns a StorageIterator over all entries (backward compatible)
     pub fn iter_ordered(&self) -> impl Iterator<Item = (&String, &LogRecord)> {
         self.data.iter()
+    }
+
+    /// Returns a MemTableIterator starting from the beginning
+    ///
+    /// This is the preferred method for using the StorageIterator trait.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let mut iter = memtable.iter();
+    /// while iter.is_valid() {
+    ///     println!("{}={:?}", String::from_utf8_lossy(iter.key()), iter.value());
+    ///     iter.next();
+    /// }
+    /// ```
+    pub fn iter(&self) -> MemTableIterator {
+        MemTableIterator::new(&self.data)
+    }
+
+    /// Returns a MemTableIterator starting from a specific key
+    ///
+    /// # Arguments
+    /// * `start_key` - The key to start iteration from (inclusive)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let mut iter = memtable.iter_from("key_100");
+    /// while iter.is_valid() {
+    ///     // Iterate from key_100 onwards
+    ///     iter.next();
+    /// }
+    /// ```
+    pub fn iter_from(&self, start_key: &str) -> MemTableIterator {
+        MemTableIterator::new_from(&self.data, start_key)
     }
 
     pub fn clear(&mut self) -> usize {
@@ -47,5 +82,48 @@ impl MemTable {
 
     fn estimate_size(record: &LogRecord) -> usize {
         record.key.len() + record.value.len() + 32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::iterator::StorageIterator;
+
+    #[test]
+    fn test_memtable_iter() {
+        let mut memtable = MemTable::new(1024);
+        memtable.insert(LogRecord::new("key1".to_string(), b"value1".to_vec()));
+        memtable.insert(LogRecord::new("key2".to_string(), b"value2".to_vec()));
+        memtable.insert(LogRecord::new("key3".to_string(), b"value3".to_vec()));
+
+        let mut iter = memtable.iter();
+        let mut count = 0;
+
+        while iter.is_valid() {
+            count += 1;
+            iter.next();
+        }
+
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_memtable_iter_from() {
+        let mut memtable = MemTable::new(1024);
+        memtable.insert(LogRecord::new("key1".to_string(), b"value1".to_vec()));
+        memtable.insert(LogRecord::new("key2".to_string(), b"value2".to_vec()));
+        memtable.insert(LogRecord::new("key3".to_string(), b"value3".to_vec()));
+
+        let mut iter = memtable.iter_from("key2");
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), b"key2");
+
+        iter.next();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), b"key3");
+
+        iter.next();
+        assert!(!iter.is_valid());
     }
 }
