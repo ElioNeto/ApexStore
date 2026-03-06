@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](https://github.com/ElioNeto/ApexStore/releases)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 
 A high-performance, embedded key-value store written in Rust, implementing the **Log-Structured Merge-Tree (LSM-Tree)** architecture. Built with SOLID principles for production-grade reliability, testability, and maintainability.
 
@@ -211,6 +212,103 @@ cargo run --release --features api --bin apexstore-server
 
 The server will start at `http://0.0.0.0:8080` by default.
 
+## 🐳 Docker Deployment
+
+### Quick Start with Docker Compose (Recommended)
+
+```bash
+# Clone the repository
+git clone https://github.com/ElioNeto/ApexStore.git
+cd ApexStore
+
+# Copy environment file and customize (optional)
+cp .env.example .env
+
+# Start ApexStore
+docker-compose up -d
+
+# View logs
+docker-compose logs -f apexstore
+
+# Stop the service
+docker-compose down
+```
+
+The API will be available at `http://localhost:8080`.
+
+### Standalone Docker Commands
+
+```bash
+# Build the Docker image
+docker build -t apexstore:latest .
+
+# Run the container
+docker run -d \
+  --name apexstore-server \
+  -p 8080:8080 \
+  -v apexstore-data:/data \
+  -e MEMTABLE_MAX_SIZE=16777216 \
+  -e BLOCK_CACHE_SIZE_MB=64 \
+  apexstore:latest
+
+# View logs
+docker logs -f apexstore-server
+
+# Stop the container
+docker stop apexstore-server
+```
+
+### Docker Configuration
+
+You can pass environment variables to configure ApexStore:
+
+```bash
+docker run -d \
+  --name apexstore-server \
+  -p 8080:8080 \
+  -v apexstore-data:/data \
+  -e HOST=0.0.0.0 \
+  -e PORT=8080 \
+  -e MEMTABLE_MAX_SIZE=33554432 \
+  -e BLOCK_SIZE=8192 \
+  -e BLOCK_CACHE_SIZE_MB=128 \
+  -e BLOOM_FALSE_POSITIVE_RATE=0.005 \
+  -e API_AUTH_ENABLED=true \
+  apexstore:latest
+```
+
+### Health Check
+
+Docker includes automatic health checks:
+
+```bash
+# Check container health status
+docker ps
+
+# Manual health check
+curl http://localhost:8080/health
+```
+
+### Data Persistence
+
+ApexStore data is persisted in a Docker volume:
+
+```bash
+# List volumes
+docker volume ls | grep apexstore
+
+# Inspect volume
+docker volume inspect apexstore-data
+
+# Backup data
+docker run --rm -v apexstore-data:/data -v $(pwd):/backup alpine \
+  tar czf /backup/apexstore-backup.tar.gz -C /data .
+
+# Restore data
+docker run --rm -v apexstore-data:/data -v $(pwd):/backup alpine \
+  tar xzf /backup/apexstore-backup.tar.gz -C /data
+```
+
 ## 🌐 REST API
 
 ### Core Operations
@@ -305,6 +403,8 @@ ApexStore/
 │   ├── CONTRIBUTING.md    # Contribution guidelines
 │   └── SETUP.md           # Development setup
 ├── tests/                 # Integration tests
+├── docker-compose.yml     # Docker Compose configuration
+├── Dockerfile             # Container build instructions
 ├── .env.example           # Configuration template
 ├── Cargo.toml             # Dependencies
 ├── CHANGELOG.md           # Version history
@@ -360,6 +460,7 @@ cargo fmt
 - [x] Bloom filters for read optimization
 - [x] Statistics and monitoring
 - [x] Global block cache
+- [x] Docker support with health checks
 
 ### 🚧 In Progress (v1.5)
 - [ ] Storage iterators for range queries
