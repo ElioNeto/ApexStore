@@ -20,10 +20,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         .memtable_max_size(4 * 1024) // 4KB para testes
         .build()?;
 
-    println!(
-        "📂 Diretório de dados: {}",
-        config.core.dir_path.display()
-    );
+    println!("📂 Diretório de dados: {}", config.core.dir_path.display());
 
     println!("Inicializando engine...");
     let engine = LsmEngine::new(config)?;
@@ -97,12 +94,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Check if "ALL" parameter is provided
                 if parts.len() > 1 && parts[1].to_uppercase() == "ALL" {
                     match engine.stats_all() {
-                        Ok(stats) => {
-                            match serde_json::to_string_pretty(&stats) {
-                                Ok(json) => println!("{}", json),
-                                Err(e) => println!("❌ Erro ao serializar JSON: {}", e),
-                            }
-                        }
+                        Ok(stats) => match serde_json::to_string_pretty(&stats) {
+                            Ok(json) => println!("{}", json),
+                            Err(e) => println!("❌ Erro ao serializar JSON: {}", e),
+                        },
                         Err(e) => println!("❌ Erro: {}", e),
                     }
                 } else {
@@ -115,16 +110,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("❌ Uso: SEARCH <query> [--prefix]");
                     continue;
                 }
-                
+
                 let query = parts[1];
                 let prefix_mode = parts.len() > 2 && parts[2] == "--prefix";
-                
+
                 let results = if prefix_mode {
                     engine.search_prefix(query)
                 } else {
                     engine.search(query)
                 };
-                
+
                 match results {
                     Ok(records) => {
                         if records.is_empty() {
@@ -166,22 +161,22 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // BATCH SET <file>
                     let file_path = parts[2];
                     println!("Importando de {}...", file_path);
-                    
+
                     match std::fs::read_to_string(file_path) {
                         Ok(content) => {
                             let mut count = 0;
                             let mut errors = 0;
-                            
+
                             for (line_num, line) in content.lines().enumerate() {
                                 let line = line.trim();
                                 if line.is_empty() || line.starts_with('#') {
                                     continue; // Skip empty lines and comments
                                 }
-                                
+
                                 if let Some((key, value)) = line.split_once('=') {
                                     let key = key.trim();
                                     let value = value.trim();
-                                    
+
                                     match engine.set(key.to_string(), value.as_bytes().to_vec()) {
                                         Ok(_) => count += 1,
                                         Err(e) => {
@@ -190,11 +185,14 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         }
                                     }
                                 } else {
-                                    println!("⚠ Linha {} inválida (formato esperado: key=value)", line_num + 1);
+                                    println!(
+                                        "⚠ Linha {} inválida (formato esperado: key=value)",
+                                        line_num + 1
+                                    );
                                     errors += 1;
                                 }
                             }
-                            
+
                             println!("✓ {} registro(s) importado(s)", count);
                             if errors > 0 {
                                 println!("⚠ {} erro(s) encontrado(s)", errors);
@@ -235,14 +233,18 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
                 let prefix = parts[1];
-                
+
                 // Use the search_prefix method now available
                 match engine.search_prefix(prefix) {
                     Ok(records) => {
                         if records.is_empty() {
                             println!("⚠ Nenhum registro encontrado com prefixo '{}'", prefix);
                         } else {
-                            println!("✓ {} registro(s) com prefixo '{}':\n", records.len(), prefix);
+                            println!(
+                                "✓ {} registro(s) com prefixo '{}':\n",
+                                records.len(),
+                                prefix
+                            );
                             for (key, value) in records {
                                 let value_str = String::from_utf8_lossy(&value);
                                 println!("  {} = {}", key, value_str);
@@ -391,7 +393,7 @@ fn run_demo(engine: &LsmEngine) -> Result<(), Box<dyn std::error::Error>> {
         Ok(results) => println!("     Encontrados {} registros", results.len()),
         Err(e) => println!("     Erro: {}", e),
     }
-    
+
     println!("   - SEARCH user: --prefix");
     match engine.search_prefix("user:") {
         Ok(results) => println!("     Encontrados {} registros", results.len()),
@@ -401,7 +403,7 @@ fn run_demo(engine: &LsmEngine) -> Result<(), Box<dyn std::error::Error>> {
 
     println!("7. Estatísticas finais (básicas):");
     println!("{}", engine.stats());
-    
+
     println!("\n8. Estatísticas detalhadas:");
     match engine.stats_all() {
         Ok(stats) => {
