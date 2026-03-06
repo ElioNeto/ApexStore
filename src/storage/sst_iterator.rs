@@ -308,10 +308,7 @@ mod tests {
 
     /// Write `n` records (key_000 … key_{n-1}) and return an Arc<SstableReader>.
     /// `_dir` must be kept alive for the file to remain accessible.
-    fn write_n(
-        n: usize,
-        block_size: usize,
-    ) -> (Arc<SstableReader>, tempfile::TempDir) {
+    fn write_n(n: usize, block_size: usize) -> (Arc<SstableReader>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let path = dir.path().join("t.sst");
         let config = StorageConfig {
@@ -601,10 +598,7 @@ mod tests {
         data.extend_from_slice(b"hello");
         data.extend_from_slice(&0u16.to_le_bytes()); // val_len irrelevant
 
-        assert_eq!(
-            SstableIterator::read_key(&data, 0),
-            Some(b"hello".to_vec())
-        );
+        assert_eq!(SstableIterator::read_key(&data, 0), Some(b"hello".to_vec()));
     }
 
     #[test]
