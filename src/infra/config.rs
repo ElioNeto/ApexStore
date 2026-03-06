@@ -238,8 +238,10 @@ mod tests {
 
     #[test]
     fn test_invalid_block_size_zero() {
-        let mut config = StorageConfig::default();
-        config.block_size = 0;
+        let config = StorageConfig {
+            block_size: 0,
+            ..Default::default()
+        };
         let result = config.validate();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), LsmError::InvalidBlockSize(_)));
@@ -247,8 +249,10 @@ mod tests {
 
     #[test]
     fn test_invalid_block_size_too_large() {
-        let mut config = StorageConfig::default();
-        config.block_size = 2 * 1024 * 1024; // 2MB
+        let config = StorageConfig {
+            block_size: 2 * 1024 * 1024,
+            ..Default::default()
+        };
         let result = config.validate();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), LsmError::InvalidBlockSize(_)));
@@ -256,8 +260,10 @@ mod tests {
 
     #[test]
     fn test_invalid_cache_size_zero() {
-        let mut config = StorageConfig::default();
-        config.block_cache_size_mb = 0;
+        let config = StorageConfig {
+            block_cache_size_mb: 0,
+            ..Default::default()
+        };
         let result = config.validate();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), LsmError::InvalidCacheSize(_)));
@@ -265,17 +271,24 @@ mod tests {
 
     #[test]
     fn test_invalid_index_interval_zero() {
-        let mut config = StorageConfig::default();
-        config.sparse_index_interval = 0;
+        let config = StorageConfig {
+            sparse_index_interval: 0,
+            ..Default::default()
+        };
         let result = config.validate();
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), LsmError::InvalidIndexInterval(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            LsmError::InvalidIndexInterval(_)
+        ));
     }
 
     #[test]
     fn test_invalid_bloom_rate_zero() {
-        let mut config = StorageConfig::default();
-        config.bloom_false_positive_rate = 0.0;
+        let config = StorageConfig {
+            bloom_false_positive_rate: 0.0,
+            ..Default::default()
+        };
         let result = config.validate();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), LsmError::InvalidBloomRate(_)));
@@ -283,8 +296,10 @@ mod tests {
 
     #[test]
     fn test_invalid_bloom_rate_one() {
-        let mut config = StorageConfig::default();
-        config.bloom_false_positive_rate = 1.0;
+        let config = StorageConfig {
+            bloom_false_positive_rate: 1.0,
+            ..Default::default()
+        };
         let result = config.validate();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), LsmError::InvalidBloomRate(_)));
@@ -292,8 +307,10 @@ mod tests {
 
     #[test]
     fn test_invalid_bloom_rate_negative() {
-        let mut config = StorageConfig::default();
-        config.bloom_false_positive_rate = -0.1;
+        let config = StorageConfig {
+            bloom_false_positive_rate: -0.1,
+            ..Default::default()
+        };
         let result = config.validate();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), LsmError::InvalidBloomRate(_)));
@@ -301,11 +318,16 @@ mod tests {
 
     #[test]
     fn test_invalid_memtable_size_zero() {
-        let mut config = CoreConfig::default();
-        config.memtable_max_size = 0;
+        let config = CoreConfig {
+            memtable_max_size: 0,
+            ..Default::default()
+        };
         let result = config.validate();
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), LsmError::InvalidMemtableSize(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            LsmError::InvalidMemtableSize(_)
+        ));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! Token structures and utilities
 
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -91,10 +92,8 @@ impl ApiToken {
 pub fn generate_token() -> String {
     use rand::Rng;
     let mut rng = rand::thread_rng();
-    let random_bytes: Vec<u8> = (0..32).map(|_| rng.r#gen::<u8>()).collect();
-    
-    // Use base64 engine for encoding
-    use base64::{Engine as _, engine::general_purpose};
+    let random_bytes: Vec<u8> = (0..32).map(|_| rng.gen::<u8>()).collect();
+
     format!("apx_{}", general_purpose::STANDARD.encode(&random_bytes))
 }
 
@@ -139,7 +138,8 @@ mod tests {
     #[test]
     fn test_token_validation() {
         let raw_token = generate_token();
-        let api_token = ApiToken::new("test".to_string(), &raw_token, None, vec![Permission::Read]);
+        let api_token =
+            ApiToken::new("test".to_string(), &raw_token, None, vec![Permission::Read]);
         assert!(api_token.validate_token(&raw_token));
         assert!(!api_token.validate_token("wrong_token"));
     }
