@@ -1,8 +1,8 @@
 [package]
 name = "lsm-kv-store"
-version = "0.1.0"
-edition = "2021"
-authors = ["Elio Neto <seuemail.com>"]
+version = "2.1.0"
+edition = "2024"
+authors = ["Elio Neto <netoo.elio@hotmail.com>"]
 description = "High-performance Key-Value Store using LSM-Tree architecture"
 repository = "https://github.com/ElioNeto/lsm-kv-store"
 
