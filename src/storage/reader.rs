@@ -658,7 +658,8 @@ mod tests {
                             assert!(
                                 result.is_some(),
                                 "Thread {} failed to read key {}",
-                                thread_id, key
+                                thread_id,
+                                key
                             );
                         }
                     }
@@ -792,9 +793,7 @@ mod tests {
         let readers: Vec<_> = paths
             .into_iter()
             .map(|path| {
-                Arc::new(
-                    SstableReader::open(path, config.clone(), Arc::clone(&cache)).unwrap(),
-                )
+                Arc::new(SstableReader::open(path, config.clone(), Arc::clone(&cache)).unwrap())
             })
             .collect();
 
