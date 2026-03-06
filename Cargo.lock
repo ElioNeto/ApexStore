@@ -249,6 +249,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
 
 [[package]]
+name = "apexstore"
+version = "2.1.0"
+dependencies = [
+ "actix-cors",
+ "actix-web",
+ "bincode",
+ "bloomfilter",
+ "crc32fast",
+ "criterion",
+ "dotenvy",
+ "lru",
+ "lz4_flex",
+ "rand 0.8.5",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1035,30 +1059,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
 dependencies = [
  "hashbrown 0.15.5",
-]
-
-[[package]]
-name = "lsm-kv-store"
-version = "2.1.0"
-dependencies = [
- "actix-cors",
- "actix-web",
- "bincode",
- "bloomfilter",
- "crc32fast",
- "criterion",
- "dotenvy",
- "lru",
- "lz4_flex",
- "rand 0.8.5",
- "serde",
- "serde_derive",
- "serde_json",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

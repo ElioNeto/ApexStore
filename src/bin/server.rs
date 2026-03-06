@@ -1,4 +1,4 @@
-use lsm_kv_store::{LsmConfig, LsmEngine};
+use apexstore::{LsmConfig, LsmEngine};
 use std::env;
 use std::io;
 use std::path::PathBuf;
@@ -21,7 +21,7 @@ async fn main() -> std::io::Result<()> {
     println!("╚═══════════════════════════════════════════════════════╝\n");
 
     // Load server configuration from environment
-    let server_config = lsm_kv_store::api::ServerConfig::from_env();
+    let server_config = apexstore::api::ServerConfig::from_env();
 
     // Load LSM engine configuration from environment
     let data_dir = env::var("DATA_DIR").unwrap_or_else(|_| "./.lsm_data".to_string());
@@ -67,7 +67,10 @@ async fn main() -> std::io::Result<()> {
         Ok(abs_path) => println!("   Data Directory: {}", abs_path.display()),
         Err(_) => println!("   Data Directory: {} (will be created)", data_dir),
     }
-    println!("   MemTable Max Size: {} MB", memtable_max_size / 1024 / 1024);
+    println!(
+        "   MemTable Max Size: {} MB",
+        memtable_max_size / 1024 / 1024
+    );
     println!("   Block Size: {} bytes", block_size);
     println!("   Block Cache: {} MB", block_cache_size_mb);
     println!("   Sparse Index Interval: {}", sparse_index_interval);
@@ -78,12 +81,14 @@ async fn main() -> std::io::Result<()> {
         Ok(engine) => engine,
         Err(e) => {
             eprintln!("❌ Error initializing LSM Engine: {}", e);
-            eprintln!("💡 Tip: if you don't need to recover unflushed writes, rename/delete wal.log and try again.");
+            eprintln!(
+                "💡 Tip: if you don't need to recover unflushed writes, rename/delete wal.log and try again."
+            );
             return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()));
         }
     };
 
     println!("✓ Engine initialized successfully!\n");
 
-    lsm_kv_store::api::start_server(engine, server_config).await
+    apexstore::api::start_server(engine, server_config).await
 }

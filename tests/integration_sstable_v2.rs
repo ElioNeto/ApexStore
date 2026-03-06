@@ -1,9 +1,9 @@
-use lsm_kv_store::core::log_record::LogRecord;
-use lsm_kv_store::infra::config::StorageConfig;
-use lsm_kv_store::infra::error::Result;
-use lsm_kv_store::storage::builder::SstableBuilder;
-use lsm_kv_store::storage::cache::GlobalBlockCache;
-use lsm_kv_store::storage::reader::SstableReader;
+use apexstore::core::log_record::LogRecord;
+use apexstore::infra::config::StorageConfig;
+use apexstore::infra::error::Result;
+use apexstore::storage::builder::SstableBuilder;
+use apexstore::storage::cache::GlobalBlockCache;
+use apexstore::storage::reader::SstableReader;
 use std::sync::Arc;
 use tempfile::tempdir;
 
@@ -97,7 +97,10 @@ fn test_sstable_v2_multiple_blocks() -> Result<()> {
     let mut reader = SstableReader::open(path, config, cache)?;
 
     // Verify metadata shows multiple blocks
-    assert!(reader.metadata().blocks.len() > 1, "Should have multiple blocks");
+    assert!(
+        reader.metadata().blocks.len() > 1,
+        "Should have multiple blocks"
+    );
 
     // Verify all records are readable
     for i in 0..100 {
@@ -130,7 +133,10 @@ fn test_sstable_v2_bloom_filter_effectiveness() -> Result<()> {
     // All existing keys should pass Bloom filter
     for i in 0..500 {
         let key = format!("existing_key_{:04}", i);
-        assert!(reader.might_contain(&key), "Existing key should pass Bloom filter");
+        assert!(
+            reader.might_contain(&key),
+            "Existing key should pass Bloom filter"
+        );
     }
 
     // Count false positives for non-existent keys
@@ -139,7 +145,11 @@ fn test_sstable_v2_bloom_filter_effectiveness() -> Result<()> {
         .count();
 
     // With 1% FP rate and 500 checks, expect < 10 false positives
-    assert!(false_positives < 10, "Too many false positives: {}", false_positives);
+    assert!(
+        false_positives < 10,
+        "Too many false positives: {}",
+        false_positives
+    );
 
     Ok(())
 }
@@ -165,14 +175,26 @@ fn test_sstable_v2_boundary_keys() -> Result<()> {
     assert!(reader.get("zzz")?.is_some(), "Last key should exist");
 
     // Test keys before first
-    assert!(reader.get("000")?.is_none(), "Key before first should not exist");
-    assert!(reader.get("aa")?.is_none(), "Key before first should not exist");
+    assert!(
+        reader.get("000")?.is_none(),
+        "Key before first should not exist"
+    );
+    assert!(
+        reader.get("aa")?.is_none(),
+        "Key before first should not exist"
+    );
 
     // Test keys after last
-    assert!(reader.get("zzzz")?.is_none(), "Key after last should not exist");
+    assert!(
+        reader.get("zzzz")?.is_none(),
+        "Key after last should not exist"
+    );
 
     // Test keys between boundaries
-    assert!(reader.get("bbb")?.is_none(), "Non-existent key should not exist");
+    assert!(
+        reader.get("bbb")?.is_none(),
+        "Non-existent key should not exist"
+    );
     assert!(reader.get("mmm")?.is_some(), "Middle key should exist");
 
     Ok(())
@@ -188,9 +210,12 @@ fn test_sstable_v2_scan() -> Result<()> {
     // Write ordered records
     let mut builder = SstableBuilder::new(path.clone(), config.clone(), 222)?;
     let test_keys = vec!["apple", "banana", "cherry", "date", "elderberry"];
-    
+
     for key in &test_keys {
-        builder.add(key.as_bytes(), &create_test_record(key, format!("{}_value", key).as_bytes()))?;
+        builder.add(
+            key.as_bytes(),
+            &create_test_record(key, format!("{}_value", key).as_bytes()),
+        )?;
     }
     builder.finish()?;
 
@@ -202,7 +227,11 @@ fn test_sstable_v2_scan() -> Result<()> {
 
     // Verify order is preserved
     for (i, key) in test_keys.iter().enumerate() {
-        assert_eq!(records[i].0, key.as_bytes(), "Key order should be preserved");
+        assert_eq!(
+            records[i].0,
+            key.as_bytes(),
+            "Key order should be preserved"
+        );
     }
 
     Ok(())
@@ -282,7 +311,10 @@ fn test_sstable_v2_empty_key() -> Result<()> {
     // Write with empty string key
     let mut builder = SstableBuilder::new(path.clone(), config.clone(), 555)?;
     builder.add(b"", &create_test_record("", b"empty_key_value"))?;
-    builder.add(b"normal_key", &create_test_record("normal_key", b"normal_value"))?;
+    builder.add(
+        b"normal_key",
+        &create_test_record("normal_key", b"normal_value"),
+    )?;
     builder.finish()?;
 
     let mut reader = SstableReader::open(path, config, cache)?;
@@ -312,7 +344,10 @@ fn test_sstable_v2_unicode_keys() -> Result<()> {
     unicode_keys.sort();
 
     for key in &unicode_keys {
-        builder.add(key.as_bytes(), &create_test_record(key, format!("{}_value", key).as_bytes()))?;
+        builder.add(
+            key.as_bytes(),
+            &create_test_record(key, format!("{}_value", key).as_bytes()),
+        )?;
     }
     builder.finish()?;
 
@@ -324,7 +359,12 @@ fn test_sstable_v2_unicode_keys() -> Result<()> {
         assert!(record.is_some(), "Unicode key '{}' should exist", key);
         if let Some(r) = record {
             let expected = format!("{}_value", key);
-            assert_eq!(r.value, expected.as_bytes(), "Value for '{}' should match", key);
+            assert_eq!(
+                r.value,
+                expected.as_bytes(),
+                "Value for '{}' should match",
+                key
+            );
         }
     }
 
