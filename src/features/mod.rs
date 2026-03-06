@@ -43,10 +43,10 @@ impl FeatureClient {
     fn load_features(&self) -> Result<Features> {
         {
             let cache = self.cache.read().unwrap();
-            if let Some((features, timestamp)) = cache.as_ref() {
-                if timestamp.elapsed() < self.cache_ttl {
-                    return Ok(features.clone());
-                }
+            if let Some((features, timestamp)) = cache.as_ref()
+                && timestamp.elapsed() < self.cache_ttl
+            {
+                return Ok(features.clone());
             }
         }
 
