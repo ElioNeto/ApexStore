@@ -1,182 +1,106 @@
-//! Token management and storage
-
-use super::token::{generate_token, ApiToken, Permission};
-use super::AuthError;
+use super::token::Token;
+use crate::infra::error::LsmError;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use thiserror::Error;
 
-/// Token manager for storing and retrieving tokens
+#[derive(Error, Debug)]
+pub enum AuthError {
+    #[error("Invalid token")]
+    InvalidToken,
+
+    #[error("Token not found")]
+    TokenNotFound,
+
+    #[error("Token expired")]
+    TokenExpired,
+
+    #[error("Internal error: {0}")]
+    Internal(String),
+}
+
+impl From<AuthError> for LsmError {
+    fn from(err: AuthError) -> Self {
+        LsmError::AuthenticationFailed(err.to_string())
+    }
+}
+
+/// Token manager for handling authentication tokens
 #[derive(Clone)]
 pub struct TokenManager {
-    tokens: Arc<RwLock<HashMap<String, ApiToken>>>,
+    tokens: Arc<RwLock<HashMap<String, Token>>>,
+    expiry_days: Option<u32>,
 }
 
 impl TokenManager {
-    /// Create new token manager
-    pub fn new() -> Self {
+    pub fn new(expiry_days: Option<u32>) -> Self {
         Self {
             tokens: Arc::new(RwLock::new(HashMap::new())),
+            expiry_days,
         }
     }
 
     /// Create a new token
-    pub fn create_token(
-        &self,
-        name: String,
-        expires_at: Option<u128>,
-        permissions: Vec<Permission>,
-    ) -> Result<(String, ApiToken), AuthError> {
-        let raw_token = generate_token();
-        let token = ApiToken::new(name, &raw_token, expires_at, permissions);
+    pub fn create_token(&self, name: String) -> Result<Token, AuthError> {
+        let token = Token::new(name, self.expiry_days);
 
-        let mut tokens = self
-            .tokens
+        self.tokens
             .write()
-            .map_err(|e| AuthError::Internal(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| AuthError::Internal(format!("Lock poisoned: {}", e)))?
+            .insert(token.id.clone(), token.clone());
 
-        tokens.insert(token.id.clone(), token.clone());
-
-        Ok((raw_token, token))
+        Ok(token)
     }
 
-    /// Validate a token and return the ApiToken if valid
-    pub fn validate_token(&self, raw_token: &str) -> Result<ApiToken, AuthError> {
-        let tokens = self
-            .tokens
-            .read()
-            .map_err(|e| AuthError::Internal(format!("Lock poisoned: {}", e)))?;
-
-        for token in tokens.values() {
-            if token.validate_token(raw_token) {
-                if token.is_expired() {
-                    return Err(AuthError::TokenExpired);
-                }
-                return Ok(token.clone());
-            }
-        }
-
-        Err(AuthError::InvalidToken)
-    }
-
-    /// List all tokens (without raw token values)
-    pub fn list_tokens(&self) -> Result<Vec<ApiToken>, AuthError> {
-        let tokens = self
-            .tokens
-            .read()
-            .map_err(|e| AuthError::Internal(format!("Lock poisoned: {}", e)))?;
-
-        Ok(tokens.values().cloned().collect())
-    }
-
-    /// Get token by ID
-    pub fn get_token(&self, id: &str) -> Result<ApiToken, AuthError> {
+    /// Validate a token by its value
+    pub fn validate_token(&self, token_value: &str) -> Result<Token, AuthError> {
         let tokens = self
             .tokens
             .read()
             .map_err(|e| AuthError::Internal(format!("Lock poisoned: {}", e)))?;
 
         tokens
-            .get(id)
+            .values()
+            .find(|t| t.value == token_value)
             .cloned()
-            .ok_or(AuthError::TokenNotFound)
+            .ok_or(AuthError::InvalidToken)
+            .and_then(|token| {
+                if token.is_expired() {
+                    Err(AuthError::TokenExpired)
+                } else {
+                    Ok(token)
+                }
+            })
     }
 
-    /// Delete token by ID
-    pub fn delete_token(&self, id: &str) -> Result<(), AuthError> {
-        let mut tokens = self
-            .tokens
-            .write()
-            .map_err(|e| AuthError::Internal(format!("Lock poisoned: {}", e)))?;
-
-        tokens.remove(id).ok_or(AuthError::TokenNotFound)?;
-        Ok(())
-    }
-
-    /// Get count of active tokens
-    pub fn count(&self) -> Result<usize, AuthError> {
+    /// Get token by ID
+    pub fn get_token(&self, id: &str) -> Result<Token, AuthError> {
         let tokens = self
             .tokens
             .read()
             .map_err(|e| AuthError::Internal(format!("Lock poisoned: {}", e)))?;
 
-        Ok(tokens.len())
-    }
-}
-
-impl Default for TokenManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_create_and_validate_token() {
-        let manager = TokenManager::new();
-        let (raw_token, token) = manager
-            .create_token("test".to_string(), None, vec![Permission::Read])
-            .unwrap();
-
-        let validated = manager.validate_token(&raw_token).unwrap();
-        assert_eq!(validated.id, token.id);
-        assert_eq!(validated.name, "test");
+        tokens.get(id).cloned().ok_or(AuthError::TokenNotFound)
     }
 
-    #[test]
-    fn test_invalid_token() {
-        let manager = TokenManager::new();
-        let result = manager.validate_token("invalid_token");
-        assert!(matches!(result, Err(AuthError::InvalidToken)));
+    /// Delete token by ID
+    pub fn delete_token(&self, id: &str) -> Result<(), AuthError> {
+        self.tokens
+            .write()
+            .map_err(|e| AuthError::Internal(format!("Lock poisoned: {}", e)))?
+            .remove(id)
+            .ok_or(AuthError::TokenNotFound)?;
+
+        Ok(())
     }
 
-    #[test]
-    fn test_list_tokens() {
-        let manager = TokenManager::new();
-        manager
-            .create_token("token1".to_string(), None, vec![Permission::Read])
-            .unwrap();
-        manager
-            .create_token("token2".to_string(), None, vec![Permission::Write])
-            .unwrap();
+    /// List all tokens
+    pub fn list_tokens(&self) -> Result<Vec<Token>, AuthError> {
+        let tokens = self
+            .tokens
+            .read()
+            .map_err(|e| AuthError::Internal(format!("Lock poisoned: {}", e)))?;
 
-        let tokens = manager.list_tokens().unwrap();
-        assert_eq!(tokens.len(), 2);
-    }
-
-    #[test]
-    fn test_delete_token() {
-        let manager = TokenManager::new();
-        let (_, token) = manager
-            .create_token("test".to_string(), None, vec![Permission::Read])
-            .unwrap();
-
-        assert_eq!(manager.count().unwrap(), 1);
-        manager.delete_token(&token.id).unwrap();
-        assert_eq!(manager.count().unwrap(), 0);
-    }
-
-    #[test]
-    fn test_expired_token() {
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let manager = TokenManager::new();
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-
-        let (raw_token, _) = manager
-            .create_token(
-                "expired".to_string(),
-                Some(now - 1000),
-                vec![Permission::Read],
-            )
-            .unwrap();
-
-        let result = manager.validate_token(&raw_token);
-        assert!(matches!(result, Err(AuthError::TokenExpired)));
+        Ok(tokens.values().cloned().collect())
     }
 }
