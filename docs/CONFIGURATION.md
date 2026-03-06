@@ -1,6 +1,6 @@
-# LSM-KV-Store Configuration Guide
+# ApexStore Configuration Guide
 
-This guide explains all configuration parameters available in LSM-KV-Store. All settings can be configured via environment variables without recompilation.
+This guide explains all configuration parameters available in ApexStore. All settings can be configured via environment variables without recompilation.
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ cp .env.example .env
 nano .env
 
 # 3. Run the server
-cargo run --release --features api --bin lsm-server
+cargo run --release --features api --bin apexstore-server
 ```
 
 The server will load `.env` automatically and display all active configuration on startup.
@@ -303,7 +303,7 @@ SERVER_MAX_CONNECTIONS=10000
 
 ```bash
 # Enable detailed logging
-RUST_LOG=debug cargo run --features api --bin lsm-server
+RUST_LOG=debug cargo run --features api --bin apexstore-server
 
 # Watch server startup for configuration values
 # The server prints all active config on startup

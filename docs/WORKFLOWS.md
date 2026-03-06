@@ -1,159 +1,159 @@
 # 🔄 GitHub Workflows Documentation
 
-ApexStore utiliza workflows automatizados do GitHub Actions para gerenciar o ciclo de vida do desenvolvimento, desde features até releases.
+ApexStore uses automated GitHub Actions workflows to manage the development lifecycle, from features to releases.
 
-## 📊 Visão Geral
+## 📊 Overview
 
 ```
 feature/fix branches → develop → release/vX.Y.Z → main
        │                │            │              │
-       └── PR auto    └─ PR auto  └─ Issues*   └─ Tag + Release
-          + comments*     criado       fechadas*
-          em issues*                   
+       └── Auto PR    └─ Auto PR  └─ Issues*   └─ Tag + Release
+          + comments*     created      closed*
+          on issues*                   
 
-* = Opcional, apenas quando issues são referenciadas
+* = Optional, only when issues are referenced
 ```
 
-## 🛠️ Workflows Disponíveis
+## 🛠️ Available Workflows
 
 ### 1. Feature/Fix Workflow
 
-**Arquivo**: `.github/workflows/feature-fix-workflow.yml`
+**File**: `.github/workflows/feature-fix-workflow.yml`
 
-**Trigger**: Push em branches `feature/**` ou `fix/**`
+**Trigger**: Push to `feature/**` or `fix/**` branches
 
-#### O que faz:
+#### What it does:
 
 1. **Build & Test**
-   - Compila o projeto: `cargo build --release --all-features`
-   - Executa testes: `cargo test --all-features`
-   - Verifica lint: `cargo clippy --all-features -- -D warnings`
+   - Compiles project: `cargo build --release --all-features`
+   - Runs tests: `cargo test --all-features`
+   - Checks linting: `cargo clippy --all-features -- -D warnings`
 
-2. **Cria PR para develop**
-   - Detecta automaticamente se há commits novos
-   - Cria PR para `develop` com:
-     - Lista de issues referenciadas *(se houver)*
-     - Resumo dos commits
-     - Status dos testes
-   - Não duplica PRs existentes
+2. **Creates PR to develop**
+   - Automatically detects if there are new commits
+   - Creates PR to `develop` with:
+     - List of referenced issues *(if any)*
+     - Commit summary
+     - Test status
+   - Doesn't duplicate existing PRs
 
-3. **Comenta em Issues** *(opcional)*
-   - **Só roda se houver issues referenciadas**
-   - Identifica issues mencionadas nos commits
-   - Adiciona comentários **empilhados** com updates:
-     - Commits recentes
-     - Link para branch
-     - Status do desenvolvimento
+3. **Comments on Issues** *(optional)*
+   - **Only runs if issues are referenced**
+   - Identifies issues mentioned in commits
+   - Adds **stacked** comments with updates:
+     - Recent commits
+     - Branch link
+     - Development status
 
-#### Como usar:
+#### How to use:
 
-**Com issues:**
+**With issues:**
 ```bash
-git checkout -b feature/minha-feature
+git checkout -b feature/my-feature
 git commit -m "feat: implement X (#123)"
 git commit -m "fix: resolve Y (fixes #124)"
-git push origin feature/minha-feature
+git push origin feature/my-feature
 ```
 
-**Sem issues (também funciona!):**
+**Without issues (also works!):**
 ```bash
 git checkout -b feature/refactoring
 git commit -m "refactor: improve code structure"
 git commit -m "chore: update dependencies"
 git push origin feature/refactoring
-# ✅ PR criado normalmente, sem seção de issues
+# ✅ PR created normally, without issues section
 ```
 
 ---
 
 ### 2. Develop to Release Workflow
 
-**Arquivo**: `.github/workflows/develop-to-release.yml`
+**File**: `.github/workflows/develop-to-release.yml`
 
 **Triggers**:
-- Push em `develop` → Cria/atualiza PR de release
-- PR merged em `main` → Fecha issues automaticamente *(se houver)*
+- Push to `develop` → Creates/updates release PR
+- PR merged to `main` → Closes issues automatically *(if any)*
 
-#### O que faz:
+#### What it does:
 
-**No push para develop:**
+**On push to develop:**
 
-1. **Determina versão**
-   - Analisa commits desde última tag
-   - Calcula bump (major/minor/patch):
+1. **Determines version**
+   - Analyzes commits since last tag
+   - Calculates bump (major/minor/patch):
      - `BREAKING CHANGE:`, `feat!:`, `fix!:` → Major
      - `feat:` → Minor
-     - Outros → Patch
+     - Others → Patch
 
-2. **Cria branch de release**
+2. **Creates release branch**
    - `release/vX.Y.Z`
-   - Sincroniza com `develop`
+   - Syncs with `develop`
 
-3. **Cria PR para main**
+3. **Creates PR to main**
    - Title: `🚀 Release vX.Y.Z`
-   - Draft mode (requer aprovação)
-   - Contém:
-     - Tipo de release configurável (alpha/beta/lts)
-     - Lista de issues resolvidas *(se houver)*
-     - Changelog completo
-     - Checklist de validação
+   - Draft mode (requires approval)
+   - Contains:
+     - Configurable release type (alpha/beta/lts)
+     - List of resolved issues *(if any)*
+     - Complete changelog
+     - Validation checklist
 
-**No merge do PR de release:**
+**On release PR merge:**
 
-4. **Fecha Issues Automaticamente** *(opcional)*
-   - **Só roda se houver issues referenciadas**
-   - Extrai issues referenciadas nos commits
-   - Adiciona comentário final:
+4. **Closes Issues Automatically** *(optional)*
+   - **Only runs if issues are referenced**
+   - Extracts referenced issues from commits
+   - Adds final comment:
      ```
      ✅ Resolved in Release vX.Y.Z
      
      This issue has been fixed and released.
      Release: [View Release](link)
      ```
-   - Fecha issue com razão "completed"
-   - **Se não houver issues**: workflow completa normalmente sem erros
+   - Closes issue with "completed" reason
+   - **If no issues**: workflow completes normally without errors
 
 ---
 
-## 🏷️ Referência de Issues (Opcional)
+## 🏷️ Issue Reference (Optional)
 
-### Quando Usar Issues
+### When to Use Issues
 
-✅ **Use quando:**
-- Está resolvendo um bug reportado
-- Está implementando uma feature solicitada
-- Quer rastreabilidade automática
-- Quer notificações automáticas
+✅ **Use when:**
+- Fixing a reported bug
+- Implementing a requested feature
+- Want automatic traceability
+- Want automatic notifications
 
-⚪ **Não precisa usar quando:**
-- Refatoração interna
-- Updates de dependências
-- Melhorias de performance sem issue
-- Documentação
-- Chores e tarefas menores
+⚪ **Don't need to use when:**
+- Internal refactoring
+- Dependency updates
+- Performance improvements without issue
+- Documentation
+- Chores and minor tasks
 
-### Sintaxe Suportada:
+### Supported Syntax:
 
 ```bash
-# Qualquer uma dessas formas é detectada:
+# Any of these forms are detected:
 git commit -m "feat: add feature (#123)"
 git commit -m "fix: resolve bug (fixes #124)"
 git commit -m "refactor: improve code (closes #125)"
 git commit -m "docs: update (resolved #126)"
 ```
 
-### Keywords Reconhecidas:
+### Recognized Keywords:
 
 - `close`, `closes`, `closed`
 - `fix`, `fixes`, `fixed`
 - `resolve`, `resolves`, `resolved`
-- Simples: `#123`
+- Simple: `#123`
 
 ---
 
-## 📋 Exemplos de Fluxo
+## 📋 Flow Examples
 
-### Exemplo 1: Com Issues
+### Example 1: With Issues
 
 ```bash
 # Issue: #31 - Implement Bearer Token Authentication
@@ -163,129 +163,129 @@ git commit -m "feat: add auth module (#31)"
 git commit -m "feat: add auth config (#31)"
 git push origin feature/bearer-auth
 
-# ✅ Workflow roda:
-#    - Build + Tests passam
-#    - PR criado: feature/bearer-auth → develop
-#    - Comentário adicionado à #31
-#    - Issue listada no PR
+# ✅ Workflow runs:
+#    - Build + Tests pass
+#    - PR created: feature/bearer-auth → develop
+#    - Comment added to #31
+#    - Issue listed in PR
 ```
 
-### Exemplo 2: Sem Issues
+### Example 2: Without Issues
 
 ```bash
-# Refatoração geral - sem issue específica
+# General refactoring - no specific issue
 
 git checkout -b refactor/improve-performance
 git commit -m "refactor: optimize database queries"
 git commit -m "perf: add caching layer"
 git push origin refactor/improve-performance
 
-# ✅ Workflow roda:
-#    - Build + Tests passam
-#    - PR criado: refactor/improve-performance → develop
-#    - Sem seção de issues (normal!)
-#    - Changelog mostra commits normalmente
+# ✅ Workflow runs:
+#    - Build + Tests pass
+#    - PR created: refactor/improve-performance → develop
+#    - No issues section (normal!)
+#    - Changelog shows commits normally
 ```
 
-### Exemplo 3: Release com Mix
+### Example 3: Release with Mix
 
 ```bash
-# Merge para develop (alguns commits com issues, outros sem)
+# Merge to develop (some commits with issues, others without)
 
 git checkout develop
-git merge feature/bearer-auth  # tem issue #31
-git merge refactor/performance  # sem issue
+git merge feature/bearer-auth  # has issue #31
+git merge refactor/performance  # no issue
 git push origin develop
 
-# ✅ Workflow roda:
-#    - Calcula versão: v2.1.0 → v2.2.0
-#    - Cria branch: release/v2.2.0
-#    - Cria PR: release/v2.2.0 → main
-#    - Lista apenas issue #31 (que foi referenciada)
-#    - Changelog mostra TODOS os commits
+# ✅ Workflow runs:
+#    - Calculates version: v2.1.0 → v2.2.0
+#    - Creates branch: release/v2.2.0
+#    - Creates PR: release/v2.2.0 → main
+#    - Lists only issue #31 (which was referenced)
+#    - Changelog shows ALL commits
 
-# Ao mergear PR de release:
-# ✅ Issue #31 fechada automaticamente
-# ✅ Commits sem issue ignorados (sem erro)
+# When merging release PR:
+# ✅ Issue #31 closed automatically
+# ✅ Commits without issue ignored (no error)
 ```
 
 ---
 
-## 🔍 Comportamento dos Workflows
+## 🔍 Workflow Behavior
 
 ### Feature/Fix Workflow
 
-| Situação | Comportamento |
-|----------|---------------|
-| Commits com issues | PR criado + issues listadas + comentários nas issues |
-| Commits sem issues | PR criado + "No issues referenced" |
-| Mix | PR criado + apenas issues encontradas listadas |
-| Issues inexistentes | Ignora e continua (sem erro) |
-| Issues já fechadas | Não comenta (skip silencioso) |
+| Situation | Behavior |
+|----------|----------|
+| Commits with issues | PR created + issues listed + comments on issues |
+| Commits without issues | PR created + "No issues referenced" |
+| Mix | PR created + only found issues listed |
+| Non-existent issues | Ignores and continues (no error) |
+| Already closed issues | Doesn't comment (silent skip) |
 
 ### Develop to Release Workflow
 
-| Situação | Comportamento |
-|----------|---------------|
-| Commits com issues | PR lista issues + ao mergear fecha automaticamente |
-| Commits sem issues | PR sem seção de issues + ao mergear completa normalmente |
-| Mix | PR lista apenas issues encontradas |
-| Issues inexistentes | Ignora e continua (log warning) |
-| Issues já fechadas | Tenta fechar mas ignora erro |
+| Situation | Behavior |
+|----------|----------|
+| Commits with issues | PR lists issues + on merge closes automatically |
+| Commits without issues | PR without issues section + on merge completes normally |
+| Mix | PR lists only found issues |
+| Non-existent issues | Ignores and continues (log warning) |
+| Already closed issues | Tries to close but ignores error |
 
 ---
 
-## ⚙️ Logs e Debugging
+## ⚙️ Logs and Debugging
 
-### Mensagens Normais (não são erros)
+### Normal Messages (not errors)
 
 ```
 ℹ️ No issues referenced in commits - skipping
 ```
-**Significado**: Nenhuma issue foi mencionada. Normal para commits sem rastreamento.
+**Meaning**: No issue was mentioned. Normal for commits without tracking.
 
 ```
 ⏭️ Skipping issue #123 (state: CLOSED)
 ```
-**Significado**: Issue já estava fechada. Workflow pula automaticamente.
+**Meaning**: Issue was already closed. Workflow automatically skips.
 
 ```
 ⚠️ Issue #999 not found - skipping
 ```
-**Significado**: Issue não existe. Pode ser typo no commit, workflow continua.
+**Meaning**: Issue doesn't exist. May be typo in commit, workflow continues.
 
 ---
 
-## 📚 Boas Práticas
+## 📚 Best Practices
 
-### Quando Referenciar Issues
+### When to Reference Issues
 
-✅ **Recomendado**:
+✅ **Recommended**:
 ```bash
 # Bug fixes
 git commit -m "fix: resolve authentication bug (fixes #54)"
 
-# Features solicitadas
+# Requested features
 git commit -m "feat: add JWT support (#31)"
 
-# Melhorias específicas
+# Specific improvements
 git commit -m "perf: optimize query (closes #67)"
 ```
 
-### Quando NÃO Referenciar
+### When NOT to Reference
 
-✅ **Também aceitável**:
+✅ **Also acceptable**:
 ```bash
-# Refatorações internas
+# Internal refactoring
 git commit -m "refactor: restructure auth module"
 
-# Updates de dependências
+# Dependency updates
 git commit -m "chore: update dependencies"
 
-# Documentação
+# Documentation
 git commit -m "docs: add API examples"
 
-# Pequenos fixes
+# Small fixes
 git commit -m "style: fix formatting"
 ```
 
@@ -293,69 +293,69 @@ git commit -m "style: fix formatting"
 
 ## ⚠️ Troubleshooting
 
-### "Workflow não comentou na issue"
+### "Workflow didn't comment on issue"
 
-**Possíveis causas**:
-1. ✅ **Normal**: Issue não foi referenciada no commit
-2. ✅ **Normal**: Issue já estava fechada
-3. ⚠️ **Verifique**: Número da issue está correto?
-4. ⚠️ **Verifique**: Sintaxe de referência correta?
+**Possible causes**:
+1. ✅ **Normal**: Issue wasn't referenced in commit
+2. ✅ **Normal**: Issue was already closed
+3. ⚠️ **Check**: Is issue number correct?
+4. ⚠️ **Check**: Is reference syntax correct?
 
-### "Issue não fechou após release"
+### "Issue didn't close after release"
 
-**Possíveis causas**:
-1. ✅ **Normal**: Issue não foi referenciada em nenhum commit
-2. ✅ **Normal**: Issue já estava fechada
-3. ⚠️ **Verifique**: PR foi mergeado (não apenas fechado)?
-4. ⚠️ **Verifique**: Branch seguia padrão `release/*`?
+**Possible causes**:
+1. ✅ **Normal**: Issue wasn't referenced in any commit
+2. ✅ **Normal**: Issue was already closed
+3. ⚠️ **Check**: Was PR merged (not just closed)?
+4. ⚠️ **Check**: Did branch follow `release/*` pattern?
 
-### "Workflow falhou"
+### "Workflow failed"
 
 **Checklist**:
-- [ ] Build passou localmente?
-- [ ] Tests passaram?
-- [ ] Clippy sem erros?
-- [ ] Permissões do GitHub Actions habilitadas?
+- [ ] Build passed locally?
+- [ ] Tests passed?
+- [ ] Clippy without errors?
+- [ ] GitHub Actions permissions enabled?
 
 ---
 
-## 🎯 Resumo
+## 🎯 Summary
 
 ### TL;DR
 
-- ✅ **Issues são OPCIONAIS** - workflows funcionam com ou sem
-- ✅ **Use issues para rastreabilidade** - fechamento automático é bonus
-- ✅ **Sem issues é válido** - para refatorações, chores, etc
-- ✅ **Mix é aceito** - alguns commits com, outros sem issues
-- ✅ **Workflows são resilientes** - não quebram por falta de issues
+- ✅ **Issues are OPTIONAL** - workflows work with or without
+- ✅ **Use issues for traceability** - automatic closing is bonus
+- ✅ **Without issues is valid** - for refactoring, chores, etc
+- ✅ **Mix is accepted** - some commits with, others without issues
+- ✅ **Workflows are resilient** - don't break due to lack of issues
 
-### Fluxo Mínimo (sem issues)
+### Minimum Flow (without issues)
 
 ```bash
 1. feature/x → develop
-   ✅ Build + Test + PR criado
+   ✅ Build + Test + PR created
 
 2. develop → release/vX.Y.Z → main
-   ✅ Versão + Tag + Changelog
+   ✅ Version + Tag + Changelog
 
-Nenhuma issue necessária!
+No issue needed!
 ```
 
-### Fluxo Completo (com issues)
+### Complete Flow (with issues)
 
 ```bash
 1. feature/x (#123) → develop
-   ✅ Build + Test + PR + Issue comentada
+   ✅ Build + Test + PR + Issue commented
 
 2. develop → release/vX.Y.Z → main
-   ✅ Versão + Tag + Changelog + Issue #123 fechada
+   ✅ Version + Tag + Changelog + Issue #123 closed
 
-Rastreabilidade automática!
+Automatic traceability!
 ```
 
 ---
 
-## 📚 Referências
+## 📚 References
 
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Workflow Syntax](https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions)
@@ -364,6 +364,6 @@ Rastreabilidade automática!
 
 ---
 
-**Mantenedores**: @ElioNeto
+**Maintainers**: @ElioNeto
 
-**Última atualização**: 2026-03-06
+**Last updated**: March 6, 2026

@@ -1,6 +1,6 @@
 # Development Setup Guide
 
-This guide will help you set up a development environment for LSM KV Store.
+This guide will help you set up a development environment for ApexStore.
 
 ## 💻 System Requirements
 
@@ -139,11 +139,11 @@ Create `.vscode/settings.json` in project root:
 
 ```bash
 # Clone your fork
-git clone https://github.com/YOUR_USERNAME/lsm-kv-store.git
-cd lsm-kv-store
+git clone https://github.com/YOUR_USERNAME/ApexStore.git
+cd ApexStore
 
 # Add upstream remote
-git remote add upstream https://github.com/ElioNeto/lsm-kv-store.git
+git remote add upstream https://github.com/ElioNeto/ApexStore.git
 
 # Verify remotes
 git remote -v
@@ -231,13 +231,13 @@ cargo run --release
 
 ```bash
 # Debug mode
-cargo run --features api --bin lsm-server
+cargo run --features api --bin apexstore-server
 
 # Release mode
-cargo run --release --features api --bin lsm-server
+cargo run --release --features api --bin apexstore-server
 
 # With custom port
-PORT=3000 cargo run --release --features api --bin lsm-server
+PORT=3000 cargo run --release --features api --bin apexstore-server
 ```
 
 **Testing the API**:
@@ -291,6 +291,41 @@ open target/criterion/report/index.html
 
 ---
 
+## 🐳 Docker Development
+
+### Build Docker Image
+
+```bash
+# Build production image
+docker build -t apexstore:dev .
+
+# Run in development mode with volume mount
+docker run -d \
+  --name apexstore-dev \
+  -p 8080:8080 \
+  -v $(pwd)/data:/data \
+  -v $(pwd)/.env:/app/.env \
+  apexstore:dev
+```
+
+### Docker Compose Development
+
+```bash
+# Start services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f apexstore
+
+# Restart after code changes
+docker-compose restart
+
+# Stop services
+docker-compose down
+```
+
+---
+
 ## 🛠️ Debugging
 
 ### Using LLDB (VS Code)
@@ -307,7 +342,7 @@ open target/criterion/report/index.html
       "request": "launch",
       "name": "Debug CLI",
       "cargo": {
-        "args": ["build", "--bin=lsm-kv-store"]
+        "args": ["build", "--bin=apexstore"]
       },
       "args": [],
       "cwd": "${workspaceFolder}"
@@ -317,7 +352,7 @@ open target/criterion/report/index.html
       "request": "launch",
       "name": "Debug Server",
       "cargo": {
-        "args": ["build", "--features", "api", "--bin=lsm-server"]
+        "args": ["build", "--features", "api", "--bin=apexstore-server"]
       },
       "args": [],
       "cwd": "${workspaceFolder}"
@@ -381,7 +416,7 @@ RUST_LOG=apexstore::core::engine=debug cargo run
 cargo install flamegraph
 
 # Generate flamegraph
-sudo cargo flamegraph --bin lsm-server
+sudo cargo flamegraph --bin apexstore-server
 
 # Open flamegraph.svg in browser
 firefox flamegraph.svg
@@ -392,11 +427,11 @@ firefox flamegraph.svg
 ```bash
 # Using valgrind (Linux)
 valgrind --leak-check=full --track-origins=yes \
-  ./target/debug/lsm-kv-store
+  ./target/debug/apexstore
 
 # Using heaptrack (Linux)
-heaptrack ./target/debug/lsm-kv-store
-heaptrack_gui heaptrack.lsm-kv-store.*.gz
+heaptrack ./target/debug/apexstore
+heaptrack_gui heaptrack.apexstore.*.gz
 ```
 
 ### Benchmark Profiling
@@ -563,7 +598,7 @@ lsof -i :8080  # macOS/Linux
 kill -9 <PID>
 
 # Or use different port
-PORT=3000 cargo run --features api --bin lsm-server
+PORT=3000 cargo run --features api --bin apexstore-server
 ```
 
 #### Issue: Out of Disk Space
@@ -606,12 +641,12 @@ incremental = true
 ## 💬 Getting Help
 
 - **Documentation**: Run `cargo doc --open`
-- **Issues**: [GitHub Issues](https://github.com/ElioNeto/lsm-kv-store/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/ElioNeto/lsm-kv-store/discussions)
+- **Issues**: [GitHub Issues](https://github.com/ElioNeto/ApexStore/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/ElioNeto/ApexStore/discussions)
 - **Email**: netoo.elio@hotmail.com
 
 ---
 
 **Happy Coding!** 🦀
 
-*Last updated: February 2026*
+*Last updated: March 2026*
