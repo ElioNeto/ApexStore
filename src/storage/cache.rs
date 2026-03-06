@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 type BlockId = (u64, usize);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GlobalBlockCache {
     cache: Arc<Mutex<LruCache<BlockId, Vec<u8>>>>,
 }
