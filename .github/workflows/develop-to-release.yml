@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - develop
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
 
 defaults:
   run:
@@ -15,6 +20,7 @@ concurrency:
 
 jobs:
   analyze-and-create-release-pr:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -98,6 +104,22 @@ jobs:
             echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Extract issues from commits
+        id: extract-issues
+        env:
+          LAST_TAG: ${{ steps.version.outputs.last_tag }}
+        run: |
+          if [ "$LAST_TAG" = "v0.0.0" ]; then
+            COMMITS=$(git log --pretty=format:'%s' | head -50)
+          else
+            COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:'%s')
+          fi
+
+          # Extract issue numbers (Closes #123, Fixes #456, #789)
+          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?) #[0-9]+' | grep -oE '#[0-9]+' | sort -u | tr '\n' ' ')
+          echo "issues=$ISSUES" >> "$GITHUB_OUTPUT"
+          echo "Found issues: $ISSUES"
+
       - name: Generate changelog
         id: changelog
         env:
@@ -116,9 +138,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NEW_VERSION: ${{ steps.version.outputs.new_version }}
           BUMP_TYPE: ${{ steps.version.outputs.bump_type }}
+          ISSUES: ${{ steps.extract-issues.outputs.issues }}
         run: |
           RELEASE_BRANCH="release/v${NEW_VERSION}"
           CHANGELOG=$(cat /tmp/changelog.txt)
+
+          # Format issues list for PR body
+          ISSUES_LIST=""
+          if [ -n "$ISSUES" ]; then
+            for ISSUE in $ISSUES; do
+              ISSUE_NUM=${ISSUE#\#}
+              ISSUES_LIST+="- $ISSUE\n"
+            done
+          else
+            ISSUES_LIST="_No issues referenced in commits_"
+          fi
 
           if [ "${{ steps.check-pr.outputs.pr_exists }}" -eq 0 ]; then
             gh pr create \
@@ -145,6 +179,13 @@ jobs:
 
           ---
 
+          ### 🐛 Issues Resolvidas
+          $ISSUES_LIST
+
+          _Essas issues serão fechadas automaticamente quando este PR for mergeado._
+
+          ---
+
           ### 📝 Changelog
           $CHANGELOG
 
@@ -164,34 +205,69 @@ jobs:
             echo "✅ PR criado: release/v${NEW_VERSION} → main (draft)"
           else
             echo "ℹ️ PR já existe (#${{ steps.check-pr.outputs.pr_number }})"
-            echo "Atualizando changelog..."
+          fi
 
-            CURRENT_BODY=$(gh pr view "${{ steps.check-pr.outputs.pr_number }}" --json body --jq .body)
-            RELEASE_TYPE_LINE=$(echo "$CURRENT_BODY" | grep "Release Type:" || echo "Release Type: [lts]")
+  close-issues-on-release:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
 
-            gh pr edit "${{ steps.check-pr.outputs.pr_number }}" \
-              --body "## 🚀 Release v${NEW_VERSION}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-          **Bump type:** \`${BUMP_TYPE}\`
+      - name: Extract version from branch
+        id: version
+        run: |
+          BRANCH_NAME="${{ github.head_ref }}"
+          VERSION=${BRANCH_NAME#release/}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Closing issues for release $VERSION"
 
-          ---
+      - name: Extract and close issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Get the last tag before this release
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
-          ### ⚙️ Release Configuration
-          **Escolha o tipo de release editando abaixo:**
+          if [ -n "$LAST_TAG" ]; then
+            COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:'%s')
+          else
+            COMMITS=$(git log --pretty=format:'%s')
+          fi
 
-          $RELEASE_TYPE_LINE
+          # Extract all issue references
+          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?|#)[[:space:]]*#[0-9]+' | grep -oE '#[0-9]+' | sort -u)
 
-          **Opções válidas:**
-          - \`alpha\` - Release alpha (instável, desenvolvimento)
-          - \`beta\` - Release beta (pré-release, testes)
-          - \`lts\` - Release estável de longo prazo (produção)
+          echo "Found issues to close: $ISSUES"
 
-          ---
+          for ISSUE in $ISSUES; do
+            ISSUE_NUM=${ISSUE#\#}
+            echo "Closing issue #$ISSUE_NUM"
 
-          ### 📝 Changelog (atualizado)
-          $CHANGELOG
+            # Add comment to issue
+            gh issue comment "$ISSUE_NUM" --body "✅ **Resolved in Release $VERSION**
 
-          ---
+          This issue has been fixed and released in version \`$VERSION\`.
 
-          _Última atualização: $(date +'%Y-%m-%d %H:%M:%S UTC')_"
+          **Release Details:**
+          - 🏷️ Version: $VERSION
+          - 📦 Release: [View Release](https://github.com/${{ github.repository }}/releases/tag/$VERSION)
+          - 🔀 PR: #${{ github.event.pull_request.number }}
+
+          Thank you for your contribution!"
+
+            # Close the issue
+            gh issue close "$ISSUE_NUM" --reason completed
+
+            echo "✅ Issue #$ISSUE_NUM closed"
+          done
+
+          if [ -z "$ISSUES" ]; then
+            echo "No issues to close"
           fi
