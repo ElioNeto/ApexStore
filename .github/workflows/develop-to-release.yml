@@ -34,18 +34,28 @@ jobs:
       - name: Determine version bump
         id: version
         run: |
+          # Fetch all tags to ensure we have the latest
+          git fetch --tags --force
+          
+          # Get the latest tag (preferably from main branch)
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "Last tag: $LAST_TAG"
 
+          # Parse version
           LAST_VERSION=${LAST_TAG#v}
-
           IFS='.' read -ra VERSION_PARTS <<< "$LAST_VERSION"
           MAJOR=${VERSION_PARTS[0]:-0}
           MINOR=${VERSION_PARTS[1]:-0}
           PATCH=${VERSION_PARTS[2]:-0}
 
-          COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s")
+          # Get commits since last tag
+          if [ "$LAST_TAG" = "v0.0.0" ]; then
+            COMMITS=$(git log --pretty=format:"%s")
+          else
+            COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%s")
+          fi
 
+          # Determine bump type based on conventional commits
           if echo "$COMMITS" | grep -qiE "^(BREAKING CHANGE|feat!|fix!):"; then
             MAJOR=$((MAJOR + 1))
             MINOR=0
@@ -61,10 +71,18 @@ jobs:
           fi
 
           NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          
+          # Check if this version already exists as a tag and increment if needed
+          while git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; do
+            echo "⚠️ Tag v${NEW_VERSION} already exists, incrementing patch version..."
+            PATCH=$((PATCH + 1))
+            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          done
+          
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "bump_type=$BUMP_TYPE" >> "$GITHUB_OUTPUT"
           echo "last_tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
-          echo "✅ New version will be: v$NEW_VERSION (${BUMP_TYPE} bump)"
+          echo "✅ New version will be: v$NEW_VERSION (${BUMP_TYPE} bump from $LAST_TAG)"
 
       - name: Create or update release branch
         env:
@@ -144,6 +162,7 @@ jobs:
           NEW_VERSION: ${{ steps.version.outputs.new_version }}
           BUMP_TYPE: ${{ steps.version.outputs.bump_type }}
           ISSUES: ${{ steps.extract-issues.outputs.issues }}
+          LAST_TAG: ${{ steps.version.outputs.last_tag }}
         run: |
           RELEASE_BRANCH="release/v${NEW_VERSION}"
           CHANGELOG=$(cat /tmp/changelog.txt)
@@ -173,7 +192,7 @@ jobs:
               --title "🚀 Release v${NEW_VERSION}" \
               --body "## 🚀 Release v${NEW_VERSION}
 
-          **Bump type:** \`${BUMP_TYPE}\`
+          **Bump type:** \`${BUMP_TYPE}\` (from \`${LAST_TAG}\` → \`v${NEW_VERSION}\`)
 
           ---
 
