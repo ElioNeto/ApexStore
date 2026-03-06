@@ -1,0 +1,28 @@
+# Example data file for BATCH SET command
+# Format: key=value
+# Lines starting with # are comments and will be ignored
+
+# User data
+user:alice=Alice Silva
+user:bob=Bob Santos
+user:charlie=Charlie Costa
+user:diana=Diana Ferreira
+user:eduardo=Eduardo Oliveira
+
+# Product data
+product:1=Laptop Dell XPS 15
+product:2=Mouse Logitech MX Master
+product:3=Keyboard Mechanical RGB
+product:4=Monitor LG 27 4K
+product:5=Webcam Logitech C920
+
+# Configuration data
+config:theme=dark
+config:language=pt-BR
+config:notifications=enabled
+config:auto_save=true
+
+# Session data
+session:user1=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+session:user2=eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4
+session:user3=eyJpYXQiOjE1MTYyMzkwMjJ9
