@@ -22,8 +22,8 @@ const FOOTER_SIZE: u64 = 8;
 ///
 /// This reader is designed for concurrent access. Multiple threads can safely call
 /// `get()` and `scan()` methods simultaneously. Internal synchronization is provided by:
-/// - `Mutex<File>` for thread-safe file operations
-/// - `Mutex<GlobalBlockCache>` for thread-safe cache access
+/// - `Mutex<File>` for thread-safe file operations  
+/// - `GlobalBlockCache` (has internal Mutex) for thread-safe cache access
 /// - Immutable `metadata` and `bloom_filter` (no synchronization needed)
 ///
 /// # Performance
@@ -38,7 +38,7 @@ pub struct SstableReader {
     metadata: MetaBlock,
     bloom_filter: Bloom<[u8]>,
     file: Mutex<File>,
-    block_cache: Arc<Mutex<GlobalBlockCache>>,
+    block_cache: Arc<GlobalBlockCache>,
     path: PathBuf,
     #[allow(dead_code)]
     config: StorageConfig,
@@ -84,7 +84,7 @@ impl SstableReader {
             metadata,
             bloom_filter,
             file: Mutex::new(file),
-            block_cache: Arc::new(Mutex::new((*block_cache).clone())),
+            block_cache,
             path,
             config,
         })
@@ -269,22 +269,16 @@ impl SstableReader {
         // Create cache key with file path and block offset
         let cache_key = CacheKey::new(&self.path, block_meta.offset);
 
-        // Check shared cache first (lock held briefly)
-        {
-            let cache = self.block_cache.lock();
-            if let Some(cached) = cache.get(&cache_key) {
-                return Ok((*cached).clone());
-            }
+        // Check shared cache first (GlobalBlockCache has internal Mutex)
+        if let Some(cached) = self.block_cache.get(&cache_key) {
+            return Ok((*cached).clone());
         }
 
         // Cache miss - read from disk (lock released during decompression)
         let block_data = self.read_and_decompress_block(block_meta)?;
 
-        // Store in shared cache (lock held briefly)
-        {
-            let mut cache = self.block_cache.lock();
-            cache.put(cache_key, block_data.clone());
-        }
+        // Store in shared cache (GlobalBlockCache has internal Mutex)
+        self.block_cache.put(cache_key, block_data.clone());
 
         Ok(block_data)
     }
