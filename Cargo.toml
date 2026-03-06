@@ -11,6 +11,10 @@ description = "A high-performance LSM-tree storage engine with SSTable V2 format
 name = "apexstore-server"
 path = "src/bin/server.rs"
 
+[[bin]]
+name = "cli"
+path = "src/bin/cli.rs"
+
 [lib]
 name = "apexstore"
 path = "src/lib.rs"
