@@ -42,6 +42,7 @@ rand = { version = "0.8", optional = true }
 
 # HTTP Server (opcionais)
 actix-web = { version = "4", optional = true }
+actix-web-httpauth = { version = "0.8", optional = true }
 actix-cors = { version = "0.7", optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
 dotenvy = { version = "0.15", optional = true }
@@ -70,4 +71,4 @@ required-features = ["api"]
 
 [features]
 default = []
-api = ["actix-web", "actix-cors", "tokio", "dotenvy", "uuid", "sha2", "base64", "rand"]
+api = ["actix-web", "actix-web-httpauth", "actix-cors", "tokio", "dotenvy", "uuid", "sha2", "base64", "rand"]
