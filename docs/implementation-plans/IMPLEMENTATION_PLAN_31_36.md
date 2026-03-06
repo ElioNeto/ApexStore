@@ -835,8 +835,8 @@ pub async fn start_server(
 
 ```rust
 use actix_web::{test, App};
-use lsm_kv_store::api::auth::TokenManager;
-use lsm_kv_store::api::server::configure_routes;
+use apexstore::api::auth::TokenManager;
+use apexstore::api::server::configure_routes;
 use std::sync::Arc;
 
 #[actix_web::test]
@@ -882,7 +882,7 @@ async fn test_valid_token_access() {
     let (token, _) = token_manager
         .create(
             "test-token".to_string(),
-            vec![lsm_kv_store::api::auth::token::Permission::Write],
+            vec![apexstore::api::auth::token::Permission::Write],
             None,
         )
         .unwrap();

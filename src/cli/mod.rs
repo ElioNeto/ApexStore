@@ -1,4 +1,4 @@
-use lsm_kv_store::{LsmConfig, LsmEngine};
+use apexstore::{LsmConfig, LsmEngine};
 use std::io::{self, Write};
 use std::path::PathBuf;
 

@@ -77,7 +77,7 @@ pub struct MetaBlock {
 **Builder API Usage**:
 
 ```rust
-use lsm_kv_store::storage::builder::SstableBuilder;
+use apexstore::storage::builder::SstableBuilder;
 
 // Create builder with automatic block management
 let mut builder = SstableBuilder::new(

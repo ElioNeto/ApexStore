@@ -1,4 +1,4 @@
-use lsm_kv_store::{LsmConfig, LsmEngine, LsmError};
+use apexstore::{LsmConfig, LsmEngine, LsmError};
 use tempfile::tempdir;
 
 use std::fs::OpenOptions;

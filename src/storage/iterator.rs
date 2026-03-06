@@ -116,11 +116,7 @@ impl<'a> StorageIterator for MemTableIterator<'a> {
     }
 
     fn seek(&mut self, key: &[u8]) {
-        // Convert bytes to String for comparison
-        let key_str = String::from_utf8_lossy(key);
-        
-        // We need to restart the range from the seek position
-        // Since we can't modify the inner range in place, we'll iterate until we find it
+        // We need to iterate until we find a key >= seek target
         while let Some((current_key, _)) = self.current {
             if current_key.as_bytes() >= key {
                 // Found a key >= seek target
@@ -139,7 +135,7 @@ mod tests {
     fn create_test_record(key: &str, value: &[u8]) -> LogRecord {
         LogRecord::new(key.to_string(), value.to_vec())
     }
-
+    
     fn create_test_memtable() -> BTreeMap<String, LogRecord> {
         let mut map = BTreeMap::new();
         map.insert(
@@ -272,7 +268,7 @@ mod tests {
     #[test]
     fn test_iterator_empty_memtable() {
         let map = BTreeMap::new();
-        let mut iter = MemTableIterator::new(&map);
+        let iter = MemTableIterator::new(&map);
 
         // Should be invalid from the start
         assert!(!iter.is_valid());

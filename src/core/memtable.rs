@@ -52,7 +52,7 @@ impl MemTable {
     ///     iter.next();
     /// }
     /// ```
-    pub fn iter(&self) -> MemTableIterator {
+    pub fn iter(&self) -> MemTableIterator<'_> {
         MemTableIterator::new(&self.data)
     }
 
@@ -69,7 +69,7 @@ impl MemTable {
     ///     iter.next();
     /// }
     /// ```
-    pub fn iter_from(&self, start_key: &str) -> MemTableIterator {
+    pub fn iter_from(&self, start_key: &str) -> MemTableIterator<'_> {
         MemTableIterator::new_from(&self.data, start_key)
     }
 
