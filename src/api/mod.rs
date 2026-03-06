@@ -455,7 +455,7 @@ async fn auth_validator(
         let data = req.app_data::<web::Data<AppState>>().unwrap();
         data.auth_enabled
     };
-    
+
     if !auth_enabled {
         return Ok(req);
     }
@@ -465,18 +465,11 @@ async fn auth_validator(
         data.token_manager.clone()
     };
 
-    auth::middleware::bearer_validator(
-        req,
-        token_manager,
-        Some(credentials.token().to_string()),
-    )
-    .await
+    auth::middleware::bearer_validator(req, token_manager, Some(credentials.token().to_string()))
+        .await
 }
 
-pub async fn start_server(
-    engine: LsmEngine,
-    server_config: ServerConfig,
-) -> std::io::Result<()> {
+pub async fn start_server(engine: LsmEngine, server_config: ServerConfig) -> std::io::Result<()> {
     let engine = Arc::new(engine);
     let features = Arc::new(FeatureClient::new(
         Arc::clone(&engine),
@@ -490,7 +483,10 @@ pub async fn start_server(
     let auth_enabled = server_config.auth.enabled;
 
     server_config.print_info();
-    println!("🚀 Starting server at {}:{}\n", server_config.host, server_config.port);
+    println!(
+        "🚀 Starting server at {}:{}\n",
+        server_config.host, server_config.port
+    );
 
     let max_json = server_config.max_json_payload_size;
     let max_raw = server_config.max_raw_payload_size;
