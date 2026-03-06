@@ -4,4 +4,5 @@ pub mod cache;
 pub mod config;
 pub mod iterator;
 pub mod reader;
+pub mod sst_iterator;
 pub mod wal;

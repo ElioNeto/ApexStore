@@ -274,7 +274,12 @@ impl SstableReader {
         Ok(metadata)
     }
 
-    fn read_block(&self, block_meta: &BlockMeta) -> Result<Vec<u8>> {
+    /// Read and decompress a block by its metadata.
+    /// Results are cached in the shared `GlobalBlockCache`.
+    ///
+    /// Exposed as `pub(crate)` so that `SstableIterator` can load blocks
+    /// without duplicating the decompression + cache logic.
+    pub(crate) fn read_block(&self, block_meta: &BlockMeta) -> Result<Vec<u8>> {
         // Use block index as cache key (blocks are numbered 0, 1, 2...)
         let block_idx = self
             .metadata
@@ -393,7 +398,7 @@ mod tests {
         // Read SSTable
         let reader = SstableReader::open(path, config, cache).unwrap();
 
-        // Verify reads (note: now uses &self, not &mut self)
+        // Verify reads
         let record1 = reader.get("key1").unwrap().unwrap();
         assert_eq!(record1.value, b"value1");
 
