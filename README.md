@@ -1,5 +1,6 @@
  # 🗄️ ApexStore
-
+ 
+[![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://elioneto.github.io/ApexStore/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](https://github.com/ElioNeto/ApexStore/releases)
