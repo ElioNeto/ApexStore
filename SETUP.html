@@ -1,0 +1,765 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Setup Guide - ApexStore Documentation</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body class="sidebar-visible no-js">
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('light')
+            html.classList.add(theme);
+            var body = document.querySelector('body');
+            body.classList.remove('no-js')
+            body.classList.add('js');
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var body = document.querySelector('body');
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            body.classList.remove('sidebar-visible');
+            body.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded "><a href="index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="CONFIGURATION.html"><strong aria-hidden="true">2.</strong> Configuration</a></li><li class="chapter-item expanded "><a href="SETUP.html" class="active"><strong aria-hidden="true">3.</strong> Setup Guide</a></li><li class="chapter-item expanded "><a href="CONTRIBUTING.html"><strong aria-hidden="true">4.</strong> Contributing</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <!-- Track and set sidebar scroll position -->
+        <script>
+            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
+            sidebarScrollbox.addEventListener('click', function(e) {
+                if (e.target.tagName === 'A') {
+                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
+                }
+            }, { passive: true });
+            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
+            sessionStorage.removeItem('sidebar-scroll');
+            if (sidebarScrollTop) {
+                // preserve sidebar scroll position when navigating via links within sidebar
+                sidebarScrollbox.scrollTop = sidebarScrollTop;
+            } else {
+                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
+                var activeSection = document.querySelector('#sidebar .active');
+                if (activeSection) {
+                    activeSection.scrollIntoView({ block: 'center' });
+                }
+            }
+        </script>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">ApexStore Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/ElioNeto/ApexStore" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="development-setup-guide"><a class="header" href="#development-setup-guide">Development Setup Guide</a></h1>
+<p>This guide will help you set up a development environment for ApexStore.</p>
+<h2 id="-system-requirements"><a class="header" href="#-system-requirements">💻 System Requirements</a></h2>
+<h3 id="minimum-requirements"><a class="header" href="#minimum-requirements">Minimum Requirements</a></h3>
+<ul>
+<li><strong>OS</strong>: Linux, macOS, or Windows (with WSL2 recommended)</li>
+<li><strong>RAM</strong>: 4GB (8GB+ recommended for large workloads)</li>
+<li><strong>Disk</strong>: 2GB free space</li>
+<li><strong>CPU</strong>: Any modern CPU (multi-core recommended for testing)</li>
+</ul>
+<h3 id="recommended-setup"><a class="header" href="#recommended-setup">Recommended Setup</a></h3>
+<ul>
+<li><strong>OS</strong>: Ubuntu 22.04 LTS or macOS 13+</li>
+<li><strong>RAM</strong>: 16GB</li>
+<li><strong>Disk</strong>: 10GB free space (SSD preferred)</li>
+<li><strong>CPU</strong>: 4+ cores</li>
+</ul>
+<hr />
+<h2 id="-installing-prerequisites"><a class="header" href="#-installing-prerequisites">🛠️ Installing Prerequisites</a></h2>
+<h3 id="1-rust-toolchain"><a class="header" href="#1-rust-toolchain">1. Rust Toolchain</a></h3>
+<h4 id="installation"><a class="header" href="#installation">Installation</a></h4>
+<pre><code class="language-bash"># Install Rust using rustup (recommended)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Follow the prompts, then reload your shell
+source $HOME/.cargo/env
+</code></pre>
+<h4 id="verify-installation"><a class="header" href="#verify-installation">Verify Installation</a></h4>
+<pre><code class="language-bash"># Check Rust version (should be 1.70+)
+rustc --version
+# Output: rustc 1.75.0 (or higher)
+
+# Check Cargo version
+cargo --version
+# Output: cargo 1.75.0 (or higher)
+</code></pre>
+<h4 id="additional-components"><a class="header" href="#additional-components">Additional Components</a></h4>
+<pre><code class="language-bash"># Install Clippy (linter)
+rustup component add clippy
+
+# Install rustfmt (formatter)
+rustup component add rustfmt
+
+# Install rust-src (for IDE support)
+rustup component add rust-src
+</code></pre>
+<h3 id="2-git"><a class="header" href="#2-git">2. Git</a></h3>
+<h4 id="linux-ubuntudebian"><a class="header" href="#linux-ubuntudebian">Linux (Ubuntu/Debian)</a></h4>
+<pre><code class="language-bash">sudo apt-get update
+sudo apt-get install git
+</code></pre>
+<h4 id="macos"><a class="header" href="#macos">macOS</a></h4>
+<pre><code class="language-bash"># Using Homebrew
+brew install git
+
+# Or install Xcode Command Line Tools
+xcode-select --install
+</code></pre>
+<h4 id="windows"><a class="header" href="#windows">Windows</a></h4>
+<p>Download from <a href="https://git-scm.com/download/win">git-scm.com</a></p>
+<h4 id="verify-installation-1"><a class="header" href="#verify-installation-1">Verify Installation</a></h4>
+<pre><code class="language-bash">git --version
+# Output: git version 2.x.x
+</code></pre>
+<h3 id="3-code-editor-recommended-vs-code"><a class="header" href="#3-code-editor-recommended-vs-code">3. Code Editor (Recommended: VS Code)</a></h3>
+<h4 id="install-vs-code"><a class="header" href="#install-vs-code">Install VS Code</a></h4>
+<ul>
+<li>Download from <a href="https://code.visualstudio.com/">code.visualstudio.com</a></li>
+<li>Or use package manager:
+<pre><code class="language-bash"># Ubuntu/Debian
+sudo snap install code --classic
+
+# macOS
+brew install --cask visual-studio-code
+</code></pre>
+</li>
+</ul>
+<h4 id="install-extensions"><a class="header" href="#install-extensions">Install Extensions</a></h4>
+<p><strong>Essential</strong>:</p>
+<ol>
+<li>
+<p><strong>rust-analyzer</strong> - Rust language support</p>
+<ul>
+<li>ID: <code>rust-lang.rust-analyzer</code></li>
+<li>Features: Auto-completion, go-to-definition, inline errors</li>
+</ul>
+</li>
+<li>
+<p><strong>CodeLLDB</strong> (optional) - Debugging support</p>
+<ul>
+<li>ID: <code>vadimcn.vscode-lldb</code></li>
+</ul>
+</li>
+</ol>
+<p><strong>Recommended</strong>:
+3. <strong>Better TOML</strong> - TOML syntax highlighting</p>
+<ul>
+<li>ID: <code>bungcip.better-toml</code></li>
+</ul>
+<ol start="4">
+<li>
+<p><strong>Error Lens</strong> - Inline error highlighting</p>
+<ul>
+<li>ID: <code>usernamehw.errorlens</code></li>
+</ul>
+</li>
+<li>
+<p><strong>crates</strong> - Cargo.toml dependency management</p>
+<ul>
+<li>ID: <code>serayuzgur.crates</code></li>
+</ul>
+</li>
+</ol>
+<h4 id="vs-code-settings"><a class="header" href="#vs-code-settings">VS Code Settings</a></h4>
+<p>Create <code>.vscode/settings.json</code> in project root:</p>
+<pre><code class="language-json">{
+  &quot;rust-analyzer.checkOnSave.command&quot;: &quot;clippy&quot;,
+  &quot;rust-analyzer.cargo.features&quot;: &quot;all&quot;,
+  &quot;editor.formatOnSave&quot;: true,
+  &quot;[rust]&quot;: {
+    &quot;editor.defaultFormatter&quot;: &quot;rust-lang.rust-analyzer&quot;
+  }
+}
+</code></pre>
+<hr />
+<h2 id="-project-setup"><a class="header" href="#-project-setup">📦 Project Setup</a></h2>
+<h3 id="1-clone-the-repository"><a class="header" href="#1-clone-the-repository">1. Clone the Repository</a></h3>
+<pre><code class="language-bash"># Clone your fork
+git clone https://github.com/YOUR_USERNAME/ApexStore.git
+cd ApexStore
+
+# Add upstream remote
+git remote add upstream https://github.com/ElioNeto/ApexStore.git
+
+# Verify remotes
+git remote -v
+</code></pre>
+<h3 id="2-build-the-project"><a class="header" href="#2-build-the-project">2. Build the Project</a></h3>
+<pre><code class="language-bash"># Debug build (faster compilation)
+cargo build
+
+# Release build (optimized)
+cargo build --release
+
+# Build with API feature
+cargo build --release --features api
+</code></pre>
+<p><strong>First build may take 5-10 minutes</strong> as Cargo downloads and compiles dependencies.</p>
+<h3 id="3-run-tests"><a class="header" href="#3-run-tests">3. Run Tests</a></h3>
+<pre><code class="language-bash"># Run all tests
+cargo test
+
+# Run tests with output
+cargo test -- --nocapture
+
+# Run specific test
+cargo test test_memtable_insert
+</code></pre>
+<h3 id="4-configuration"><a class="header" href="#4-configuration">4. Configuration</a></h3>
+<pre><code class="language-bash"># Copy environment template
+cp .env.example .env
+
+# Edit configuration (optional)
+nano .env
+</code></pre>
+<p><strong>Example Development Configuration</strong> (<code>.env</code>):</p>
+<pre><code class="language-bash"># Server
+HOST=127.0.0.1
+PORT=8080
+
+# LSM Engine
+DATA_DIR=.lsm_data_dev
+MEMTABLE_MAX_SIZE=2097152  # 2MB for faster flushing in dev
+BLOCK_CACHE_SIZE_MB=32
+
+# Logging
+RUST_LOG=debug
+ENABLE_METRICS=true
+</code></pre>
+<hr />
+<h2 id="-development-workflow"><a class="header" href="#-development-workflow">🧪 Development Workflow</a></h2>
+<h3 id="running-the-cli"><a class="header" href="#running-the-cli">Running the CLI</a></h3>
+<pre><code class="language-bash"># Debug mode
+cargo run
+
+# Release mode (faster)
+cargo run --release
+</code></pre>
+<p><strong>Available REPL Commands</strong>:</p>
+<pre><code>&gt; help                 # Show available commands
+&gt; put key value        # Insert or update key
+&gt; get key              # Retrieve value
+&gt; delete key           # Delete key (tombstone)
+&gt; stats                # Show statistics
+&gt; exit                 # Exit REPL
+</code></pre>
+<h3 id="running-the-api-server"><a class="header" href="#running-the-api-server">Running the API Server</a></h3>
+<pre><code class="language-bash"># Debug mode
+cargo run --features api --bin apexstore-server
+
+# Release mode
+cargo run --release --features api --bin apexstore-server
+
+# With custom port
+PORT=3000 cargo run --release --features api --bin apexstore-server
+</code></pre>
+<p><strong>Testing the API</strong>:</p>
+<pre><code class="language-bash"># Insert a key
+curl -X POST http://localhost:8080/keys \
+  -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;key&quot;: &quot;user:1&quot;, &quot;value&quot;: &quot;Alice&quot;}'
+
+# Get a key
+curl http://localhost:8080/keys/user:1
+
+# Get statistics
+curl http://localhost:8080/stats/all
+</code></pre>
+<h3 id="code-quality-checks"><a class="header" href="#code-quality-checks">Code Quality Checks</a></h3>
+<pre><code class="language-bash"># Format code
+cargo fmt
+
+# Check formatting (CI mode)
+cargo fmt -- --check
+
+# Run Clippy linter
+cargo clippy
+
+# Clippy with strict mode (CI mode)
+cargo clippy -- -D warnings
+
+# Check for unused dependencies
+cargo machete  # Requires: cargo install cargo-machete
+</code></pre>
+<h3 id="running-benchmarks"><a class="header" href="#running-benchmarks">Running Benchmarks</a></h3>
+<pre><code class="language-bash"># Install criterion
+cargo install cargo-criterion
+
+# Run all benchmarks
+cargo bench
+
+# Run specific benchmark
+cargo bench memtable_insert
+
+# Generate HTML report
+open target/criterion/report/index.html
+</code></pre>
+<hr />
+<h2 id="-docker-development"><a class="header" href="#-docker-development">🐳 Docker Development</a></h2>
+<h3 id="build-docker-image"><a class="header" href="#build-docker-image">Build Docker Image</a></h3>
+<pre><code class="language-bash"># Build production image
+docker build -t apexstore:dev .
+
+# Run in development mode with volume mount
+docker run -d \
+  --name apexstore-dev \
+  -p 8080:8080 \
+  -v $(pwd)/data:/data \
+  -v $(pwd)/.env:/app/.env \
+  apexstore:dev
+</code></pre>
+<h3 id="docker-compose-development"><a class="header" href="#docker-compose-development">Docker Compose Development</a></h3>
+<pre><code class="language-bash"># Start services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f apexstore
+
+# Restart after code changes
+docker-compose restart
+
+# Stop services
+docker-compose down
+</code></pre>
+<hr />
+<h2 id="-debugging"><a class="header" href="#-debugging">🛠️ Debugging</a></h2>
+<h3 id="using-lldb-vs-code"><a class="header" href="#using-lldb-vs-code">Using LLDB (VS Code)</a></h3>
+<ol>
+<li>Install CodeLLDB extension</li>
+<li>Create <code>.vscode/launch.json</code>:</li>
+</ol>
+<pre><code class="language-json">{
+  &quot;version&quot;: &quot;0.2.0&quot;,
+  &quot;configurations&quot;: [
+    {
+      &quot;type&quot;: &quot;lldb&quot;,
+      &quot;request&quot;: &quot;launch&quot;,
+      &quot;name&quot;: &quot;Debug CLI&quot;,
+      &quot;cargo&quot;: {
+        &quot;args&quot;: [&quot;build&quot;, &quot;--bin=apexstore&quot;]
+      },
+      &quot;args&quot;: [],
+      &quot;cwd&quot;: &quot;${workspaceFolder}&quot;
+    },
+    {
+      &quot;type&quot;: &quot;lldb&quot;,
+      &quot;request&quot;: &quot;launch&quot;,
+      &quot;name&quot;: &quot;Debug Server&quot;,
+      &quot;cargo&quot;: {
+        &quot;args&quot;: [&quot;build&quot;, &quot;--features&quot;, &quot;api&quot;, &quot;--bin=apexstore-server&quot;]
+      },
+      &quot;args&quot;: [],
+      &quot;cwd&quot;: &quot;${workspaceFolder}&quot;
+    },
+    {
+      &quot;type&quot;: &quot;lldb&quot;,
+      &quot;request&quot;: &quot;launch&quot;,
+      &quot;name&quot;: &quot;Debug Test&quot;,
+      &quot;cargo&quot;: {
+        &quot;args&quot;: [&quot;test&quot;, &quot;--no-run&quot;, &quot;--lib&quot;]
+      },
+      &quot;args&quot;: [&quot;test_memtable_insert&quot;],
+      &quot;cwd&quot;: &quot;${workspaceFolder}&quot;
+    }
+  ]
+}
+</code></pre>
+<ol start="3">
+<li>Set breakpoints in code</li>
+<li>Press <code>F5</code> to start debugging</li>
+</ol>
+<h3 id="using-println-debugging"><a class="header" href="#using-println-debugging">Using <code>println!</code> Debugging</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// In your code
+pub fn put(&amp;mut self, key: &amp;[u8], value: &amp;str) -&gt; Result&lt;()&gt; {
+    println!(&quot;[DEBUG] Inserting key: {:?}&quot;, String::from_utf8_lossy(key));
+    self.wal.append(key, value)?;
+    println!(&quot;[DEBUG] WAL append successful&quot;);
+    self.memtable.insert(key, value);
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Run with:</p>
+<pre><code class="language-bash">cargo run -- 2&gt;&amp;1 | grep DEBUG
+</code></pre>
+<h3 id="using-rust_log"><a class="header" href="#using-rust_log">Using <code>RUST_LOG</code></a></h3>
+<pre><code class="language-bash"># Set log level
+export RUST_LOG=debug
+
+# Or inline
+RUST_LOG=trace cargo run
+
+# Filter by module
+RUST_LOG=apexstore::core::engine=debug cargo run
+</code></pre>
+<hr />
+<h2 id="-performance-profiling"><a class="header" href="#-performance-profiling">📈 Performance Profiling</a></h2>
+<h3 id="cpu-profiling-linux"><a class="header" href="#cpu-profiling-linux">CPU Profiling (Linux)</a></h3>
+<pre><code class="language-bash"># Install flamegraph
+cargo install flamegraph
+
+# Generate flamegraph
+sudo cargo flamegraph --bin apexstore-server
+
+# Open flamegraph.svg in browser
+firefox flamegraph.svg
+</code></pre>
+<h3 id="memory-profiling"><a class="header" href="#memory-profiling">Memory Profiling</a></h3>
+<pre><code class="language-bash"># Using valgrind (Linux)
+valgrind --leak-check=full --track-origins=yes \
+  ./target/debug/apexstore
+
+# Using heaptrack (Linux)
+heaptrack ./target/debug/apexstore
+heaptrack_gui heaptrack.apexstore.*.gz
+</code></pre>
+<h3 id="benchmark-profiling"><a class="header" href="#benchmark-profiling">Benchmark Profiling</a></h3>
+<pre><code class="language-bash"># Profile specific benchmark
+cargo bench --bench memtable_bench -- --profile-time=10
+
+# With flamegraph
+cargo flamegraph --bench memtable_bench
+</code></pre>
+<hr />
+<h2 id="-testing"><a class="header" href="#-testing">🧰 Testing</a></h2>
+<h3 id="unit-tests"><a class="header" href="#unit-tests">Unit Tests</a></h3>
+<pre><code class="language-bash"># Run all unit tests
+cargo test --lib
+
+# Run tests in specific module
+cargo test --lib core::memtable
+
+# Run single test
+cargo test test_memtable_insert
+</code></pre>
+<h3 id="integration-tests"><a class="header" href="#integration-tests">Integration Tests</a></h3>
+<pre><code class="language-bash"># Run all integration tests
+cargo test --test '*'
+
+# Run specific integration test file
+cargo test --test recovery_test
+</code></pre>
+<h3 id="test-coverage"><a class="header" href="#test-coverage">Test Coverage</a></h3>
+<pre><code class="language-bash"># Install tarpaulin (Linux only)
+cargo install cargo-tarpaulin
+
+# Generate coverage report
+cargo tarpaulin --out Html
+
+# Open report
+firefox tarpaulin-report.html
+</code></pre>
+<h3 id="stress-testing"><a class="header" href="#stress-testing">Stress Testing</a></h3>
+<pre><code class="language-bash"># Create stress test script
+cat &gt; stress_test.sh &lt;&lt; 'EOF'
+#!/bin/bash
+for i in {1..10000}; do
+  curl -X POST http://localhost:8080/keys \
+    -H &quot;Content-Type: application/json&quot; \
+    -d &quot;{\&quot;key\&quot;: \&quot;key_$i\&quot;, \&quot;value\&quot;: \&quot;value_$i\&quot;}&quot; &amp;
+done
+wait
+EOF
+
+chmod +x stress_test.sh
+
+# Run stress test
+./stress_test.sh
+</code></pre>
+<hr />
+<h2 id="-documentation"><a class="header" href="#-documentation">📚 Documentation</a></h2>
+<h3 id="generating-documentation"><a class="header" href="#generating-documentation">Generating Documentation</a></h3>
+<pre><code class="language-bash"># Generate and open docs
+cargo doc --open
+
+# Include private items
+cargo doc --document-private-items --open
+
+# Generate for all features
+cargo doc --all-features --open
+</code></pre>
+<h3 id="writing-documentation"><a class="header" href="#writing-documentation">Writing Documentation</a></h3>
+<p>All public APIs should have documentation:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>/// Brief description (appears in summary).
+///
+/// Longer description with more details.
+///
+/// # Arguments
+///
+/// * `key` - Description of key parameter
+/// * `value` - Description of value parameter
+///
+/// # Returns
+///
+/// Description of return value
+///
+/// # Errors
+///
+/// Description of possible errors
+///
+/// # Examples
+///
+/// ```
+/// let engine = LsmEngine::new(config)?;
+/// engine.put(b&quot;key&quot;, &quot;value&quot;)?;
+/// ```
+///
+/// # Panics
+///
+/// Description of panic conditions (if any)
+///
+/// # Safety
+///
+/// Description of safety requirements (for unsafe functions)
+pub fn put(&amp;mut self, key: &amp;[u8], value: &amp;str) -&gt; Result&lt;()&gt; {
+    // Implementation
+}
+<span class="boring">}</span></code></pre></pre>
+<hr />
+<h2 id="-troubleshooting"><a class="header" href="#-troubleshooting">🐞 Troubleshooting</a></h2>
+<h3 id="common-issues"><a class="header" href="#common-issues">Common Issues</a></h3>
+<h4 id="issue-compilation-errors-after-update"><a class="header" href="#issue-compilation-errors-after-update">Issue: Compilation Errors After Update</a></h4>
+<pre><code class="language-bash"># Clean build artifacts
+cargo clean
+
+# Update dependencies
+cargo update
+
+# Rebuild
+cargo build
+</code></pre>
+<h4 id="issue-tests-failing-randomly"><a class="header" href="#issue-tests-failing-randomly">Issue: Tests Failing Randomly</a></h4>
+<pre><code class="language-bash"># Run tests serially (not in parallel)
+cargo test -- --test-threads=1
+</code></pre>
+<h4 id="issue-port-already-in-use"><a class="header" href="#issue-port-already-in-use">Issue: Port Already in Use</a></h4>
+<pre><code class="language-bash"># Find process using port 8080
+lsof -i :8080  # macOS/Linux
+
+# Kill process
+kill -9 &lt;PID&gt;
+
+# Or use different port
+PORT=3000 cargo run --features api --bin apexstore-server
+</code></pre>
+<h4 id="issue-out-of-disk-space"><a class="header" href="#issue-out-of-disk-space">Issue: Out of Disk Space</a></h4>
+<pre><code class="language-bash"># Clean target directory (safe, can be rebuilt)
+rm -rf target/
+
+# Clean cargo cache
+cargo cache --autoclean
+</code></pre>
+<h4 id="issue-slow-compilation"><a class="header" href="#issue-slow-compilation">Issue: Slow Compilation</a></h4>
+<pre><code class="language-bash"># Use faster linker (Linux)
+sudo apt-get install lld
+export RUSTFLAGS=&quot;-C link-arg=-fuse-ld=lld&quot;
+
+# Or use mold (even faster)
+cargo install mold
+export RUSTFLAGS=&quot;-C link-arg=-fuse-ld=mold&quot;
+
+# Enable incremental compilation (in Cargo.toml)
+[profile.dev]
+incremental = true
+</code></pre>
+<hr />
+<h2 id="-next-steps"><a class="header" href="#-next-steps">🚀 Next Steps</a></h2>
+<ol>
+<li>✅ Read <a href="CONTRIBUTING.html">CONTRIBUTING.md</a> for contribution guidelines</li>
+<li>✅ Explore the codebase structure</li>
+<li>✅ Pick an issue to work on</li>
+<li>✅ Join discussions on GitHub</li>
+</ol>
+<hr />
+<h2 id="-getting-help"><a class="header" href="#-getting-help">💬 Getting Help</a></h2>
+<ul>
+<li><strong>Documentation</strong>: Run <code>cargo doc --open</code></li>
+<li><strong>Issues</strong>: <a href="https://github.com/ElioNeto/ApexStore/issues">GitHub Issues</a></li>
+<li><strong>Discussions</strong>: <a href="https://github.com/ElioNeto/ApexStore/discussions">GitHub Discussions</a></li>
+<li><strong>Email</strong>: netoo.elio@hotmail.com</li>
+</ul>
+<hr />
+<p><strong>Happy Coding!</strong> 🦀</p>
+<p><em>Last updated: March 2026</em></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="CONFIGURATION.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="CONTRIBUTING.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="CONFIGURATION.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="CONTRIBUTING.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>

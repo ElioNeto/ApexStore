@@ -1,0 +1,1728 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>ApexStore Documentation</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body class="sidebar-visible no-js">
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('light')
+            html.classList.add(theme);
+            var body = document.querySelector('body');
+            body.classList.remove('no-js')
+            body.classList.add('js');
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var body = document.querySelector('body');
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            body.classList.remove('sidebar-visible');
+            body.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded "><a href="index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="CONFIGURATION.html"><strong aria-hidden="true">2.</strong> Configuration</a></li><li class="chapter-item expanded "><a href="SETUP.html"><strong aria-hidden="true">3.</strong> Setup Guide</a></li><li class="chapter-item expanded "><a href="CONTRIBUTING.html"><strong aria-hidden="true">4.</strong> Contributing</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <!-- Track and set sidebar scroll position -->
+        <script>
+            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
+            sidebarScrollbox.addEventListener('click', function(e) {
+                if (e.target.tagName === 'A') {
+                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
+                }
+            }, { passive: true });
+            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
+            sessionStorage.removeItem('sidebar-scroll');
+            if (sidebarScrollTop) {
+                // preserve sidebar scroll position when navigating via links within sidebar
+                sidebarScrollbox.scrollTop = sidebarScrollTop;
+            } else {
+                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
+                var activeSection = document.querySelector('#sidebar .active');
+                if (activeSection) {
+                    activeSection.scrollIntoView({ block: 'center' });
+                }
+            }
+        </script>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">ApexStore Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/ElioNeto/ApexStore" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="apexstore-configuration-guide"><a class="header" href="#apexstore-configuration-guide">ApexStore Configuration Guide</a></h1>
+<p>This guide explains all configuration parameters available in ApexStore. All settings can be configured via environment variables without recompilation.</p>
+<h2 id="table-of-contents"><a class="header" href="#table-of-contents">Table of Contents</a></h2>
+<ol>
+<li><a href="CONFIGURATION.html#quick-start">Quick Start</a></li>
+<li><a href="CONFIGURATION.html#server-configuration">Server Configuration</a></li>
+<li><a href="CONFIGURATION.html#lsm-engine-configuration">LSM Engine Configuration</a></li>
+<li><a href="CONFIGURATION.html#performance-tuning">Performance Tuning</a></li>
+<li><a href="CONFIGURATION.html#tuning-profiles">Tuning Profiles</a></li>
+<li><a href="CONFIGURATION.html#troubleshooting">Troubleshooting</a></li>
+</ol>
+<h2 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h2>
+<pre><code class="language-bash"># 1. Copy the example configuration
+cp .env.example .env
+
+# 2. Edit values as needed
+nano .env
+
+# 3. Run the server
+cargo run --release --features api --bin apexstore-server
+</code></pre>
+<p>The server will load <code>.env</code> automatically and display all active configuration on startup.</p>
+<h2 id="server-configuration"><a class="header" href="#server-configuration">Server Configuration</a></h2>
+<h3 id="network-settings"><a class="header" href="#network-settings">Network Settings</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>HOST</code></td><td><code>0.0.0.0</code></td><td>Server bind address (0.0.0.0 = all interfaces)</td></tr>
+<tr><td><code>PORT</code></td><td><code>8080</code></td><td>Server port</td></tr>
+</tbody></table>
+</div>
+<h3 id="payload-limits"><a class="header" href="#payload-limits">Payload Limits</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>MAX_JSON_PAYLOAD_SIZE</code></td><td><code>52428800</code> (50MB)</td><td>Maximum JSON request/response size</td></tr>
+<tr><td><code>MAX_RAW_PAYLOAD_SIZE</code></td><td><code>52428800</code> (50MB)</td><td>Maximum raw payload size</td></tr>
+</tbody></table>
+</div>
+<p><strong>Recommendations:</strong></p>
+<ul>
+<li><strong>Development/Testing</strong>: 50-100MB</li>
+<li><strong>Production with pagination</strong>: 10MB</li>
+<li><strong>Stress testing</strong>: 100-200MB</li>
+</ul>
+<h3 id="http-server-tuning"><a class="header" href="#http-server-tuning">HTTP Server Tuning</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>SERVER_WORKERS</code></td><td><code>0</code> (CPU cores)</td><td>Number of worker threads</td></tr>
+<tr><td><code>SERVER_KEEP_ALIVE</code></td><td><code>75</code></td><td>Keep-alive timeout (seconds)</td></tr>
+<tr><td><code>SERVER_CLIENT_TIMEOUT</code></td><td><code>60</code></td><td>Client request timeout (seconds)</td></tr>
+<tr><td><code>SERVER_SHUTDOWN_TIMEOUT</code></td><td><code>30</code></td><td>Graceful shutdown timeout (seconds)</td></tr>
+<tr><td><code>SERVER_BACKLOG</code></td><td><code>2048</code></td><td>Maximum pending connections</td></tr>
+<tr><td><code>SERVER_MAX_CONNECTIONS</code></td><td><code>25000</code></td><td>Max concurrent connections per worker</td></tr>
+</tbody></table>
+</div>
+<p><strong>Recommendations:</strong></p>
+<ul>
+<li><strong>High-traffic</strong>: Increase <code>SERVER_WORKERS</code> to 8-16</li>
+<li><strong>Low-latency</strong>: Set <code>SERVER_KEEP_ALIVE</code> to 5-15</li>
+<li><strong>Memory-constrained</strong>: Reduce <code>SERVER_MAX_CONNECTIONS</code> to 5000-10000</li>
+</ul>
+<h2 id="lsm-engine-configuration"><a class="header" href="#lsm-engine-configuration">LSM Engine Configuration</a></h2>
+<h3 id="storage-settings"><a class="header" href="#storage-settings">Storage Settings</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>DATA_DIR</code></td><td><code>./.lsm_data</code></td><td>Data storage directory path</td></tr>
+</tbody></table>
+</div>
+<h3 id="memtable"><a class="header" href="#memtable">MemTable</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>MEMTABLE_MAX_SIZE</code></td><td><code>4194304</code> (4MB)</td><td>Size threshold before flush to disk</td></tr>
+</tbody></table>
+</div>
+<p><strong>Impact:</strong></p>
+<ul>
+<li><strong>Larger</strong> (8-16MB): Fewer flushes, better compression, higher memory usage</li>
+<li><strong>Smaller</strong> (1-2MB): More flushes, lower memory usage, faster recovery</li>
+</ul>
+<p><strong>Recommendations:</strong></p>
+<ul>
+<li><strong>Write-heavy</strong>: 8-16MB</li>
+<li><strong>Memory-constrained</strong>: 2MB</li>
+<li><strong>Balanced</strong>: 4MB (default)</li>
+</ul>
+<h3 id="sstable-block-configuration"><a class="header" href="#sstable-block-configuration">SSTable Block Configuration</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>BLOCK_SIZE</code></td><td><code>4096</code> (4KB)</td><td>Block size for SSTables</td></tr>
+<tr><td><code>BLOCK_CACHE_SIZE_MB</code></td><td><code>64</code></td><td>In-memory cache for blocks (MB)</td></tr>
+<tr><td><code>SPARSE_INDEX_INTERVAL</code></td><td><code>16</code></td><td>Blocks between index entries</td></tr>
+</tbody></table>
+</div>
+<p><strong>Block Size Impact:</strong></p>
+<ul>
+<li><strong>Larger</strong> (8KB): Better compression ratio, higher read latency</li>
+<li><strong>Smaller</strong> (2KB): Lower latency, less compression</li>
+</ul>
+<p><strong>Cache Size Recommendations:</strong></p>
+<ul>
+<li><strong>Read-heavy</strong>: 256-512MB</li>
+<li><strong>Balanced</strong>: 64-128MB</li>
+<li><strong>Memory-constrained</strong>: 32MB</li>
+</ul>
+<p><strong>Sparse Index:</strong></p>
+<ul>
+<li><strong>Dense</strong> (8): More memory, faster lookups</li>
+<li><strong>Sparse</strong> (32): Less memory, slower lookups</li>
+</ul>
+<h3 id="bloom-filter"><a class="header" href="#bloom-filter">Bloom Filter</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>BLOOM_FALSE_POSITIVE_RATE</code></td><td><code>0.01</code> (1%)</td><td>False positive probability</td></tr>
+</tbody></table>
+</div>
+<p><strong>Impact:</strong></p>
+<ul>
+<li><strong>Lower</strong> (0.001 = 0.1%): More accurate, more memory</li>
+<li><strong>Higher</strong> (0.05 = 5%): Less accurate, less memory</li>
+</ul>
+<p><strong>Recommendations:</strong></p>
+<ul>
+<li><strong>Read-heavy</strong>: 0.001-0.005</li>
+<li><strong>Balanced</strong>: 0.01</li>
+<li><strong>Memory-constrained</strong>: 0.05</li>
+</ul>
+<h3 id="write-ahead-log-wal"><a class="header" href="#write-ahead-log-wal">Write-Ahead Log (WAL)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>MAX_WAL_RECORD_SIZE</code></td><td><code>33554432</code> (32MB)</td><td>Maximum single record size</td></tr>
+<tr><td><code>WAL_BUFFER_SIZE</code></td><td><code>65536</code> (64KB)</td><td>Write buffer size</td></tr>
+<tr><td><code>WAL_SYNC_MODE</code></td><td><code>always</code></td><td>Fsync strategy</td></tr>
+</tbody></table>
+</div>
+<p><strong>Sync Modes:</strong></p>
+<ul>
+<li><code>always</code>: Safest, slowest (every write synced)</li>
+<li><code>every_second</code>: Balanced (1s of data loss possible)</li>
+<li><code>manual</code>: Fastest, least safe (crash = data loss)</li>
+</ul>
+<p><strong>Recommendations:</strong></p>
+<ul>
+<li><strong>Production</strong>: <code>always</code></li>
+<li><strong>High-throughput</strong>: <code>every_second</code></li>
+<li><strong>Testing/Dev</strong>: <code>manual</code></li>
+</ul>
+<h3 id="compaction"><a class="header" href="#compaction">Compaction</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>COMPACTION_STRATEGY</code></td><td><code>lazy_leveling</code></td><td>Compaction algorithm</td></tr>
+<tr><td><code>SIZE_RATIO</code></td><td><code>10</code></td><td>Size ratio between levels</td></tr>
+<tr><td><code>LEVEL0_COMPACTION_THRESHOLD</code></td><td><code>4</code></td><td>L0 file count trigger</td></tr>
+<tr><td><code>MAX_LEVEL_COUNT</code></td><td><code>7</code></td><td>Maximum LSM tree levels</td></tr>
+<tr><td><code>COMPACTION_THREADS</code></td><td><code>2</code></td><td>Background compaction threads</td></tr>
+</tbody></table>
+</div>
+<p><strong>Compaction Strategies:</strong></p>
+<ul>
+<li><code>leveled</code>: Best read performance</li>
+<li><code>tiered</code>: Best write performance</li>
+<li><code>lazy_leveling</code>: Balanced (default)</li>
+</ul>
+<p><strong>Recommendations:</strong></p>
+<ul>
+<li><strong>Read-heavy</strong>: <code>leveled</code>, SIZE_RATIO=4-6</li>
+<li><strong>Write-heavy</strong>: <code>tiered</code>, SIZE_RATIO=15-20</li>
+<li><strong>High-throughput</strong>: COMPACTION_THREADS=4-8</li>
+</ul>
+<h3 id="feature-flags"><a class="header" href="#feature-flags">Feature Flags</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>FEATURE_CACHE_TTL</code></td><td><code>10</code></td><td>Cache TTL in seconds</td></tr>
+</tbody></table>
+</div>
+<h2 id="performance-tuning"><a class="header" href="#performance-tuning">Performance Tuning</a></h2>
+<h3 id="memory-vs-performance-trade-offs"><a class="header" href="#memory-vs-performance-trade-offs">Memory vs. Performance Trade-offs</a></h3>
+<pre><code>High Memory → High Performance:
+MEMTABLE_MAX_SIZE=16777216         # 16MB
+BLOCK_CACHE_SIZE_MB=512            # 512MB
+BLOOM_FALSE_POSITIVE_RATE=0.001    # 0.1%
+SPARSE_INDEX_INTERVAL=8            # Dense
+
+Low Memory → Acceptable Performance:
+MEMTABLE_MAX_SIZE=2097152          # 2MB
+BLOCK_CACHE_SIZE_MB=32             # 32MB
+BLOOM_FALSE_POSITIVE_RATE=0.05     # 5%
+SPARSE_INDEX_INTERVAL=32           # Sparse
+</code></pre>
+<h3 id="latency-vs-throughput"><a class="header" href="#latency-vs-throughput">Latency vs. Throughput</a></h3>
+<pre><code>Low Latency:
+BLOCK_SIZE=2048                    # 2KB
+WAL_SYNC_MODE=every_second
+SERVER_KEEP_ALIVE=5
+
+High Throughput:
+BLOCK_SIZE=8192                    # 8KB
+MEMTABLE_MAX_SIZE=16777216         # 16MB
+COMPACTION_THREADS=8
+WAL_BUFFER_SIZE=262144             # 256KB
+</code></pre>
+<h2 id="tuning-profiles"><a class="header" href="#tuning-profiles">Tuning Profiles</a></h2>
+<h3 id="stress-testing-profile"><a class="header" href="#stress-testing-profile">Stress Testing Profile</a></h3>
+<pre><code class="language-bash">MAX_JSON_PAYLOAD_SIZE=104857600    # 100MB
+MAX_RAW_PAYLOAD_SIZE=104857600
+MEMTABLE_MAX_SIZE=16777216         # 16MB
+BLOCK_SIZE=8192
+BLOCK_CACHE_SIZE_MB=256
+WAL_SYNC_MODE=every_second
+COMPACTION_THREADS=4
+</code></pre>
+<h3 id="high-write-throughput"><a class="header" href="#high-write-throughput">High Write Throughput</a></h3>
+<pre><code class="language-bash">MEMTABLE_MAX_SIZE=8388608          # 8MB
+BLOCK_SIZE=8192
+BLOOM_FALSE_POSITIVE_RATE=0.05
+WAL_SYNC_MODE=every_second
+WAL_BUFFER_SIZE=262144             # 256KB
+COMPACTION_THREADS=4
+LEVEL0_COMPACTION_THRESHOLD=8
+COMPACTION_STRATEGY=tiered
+</code></pre>
+<h3 id="high-read-throughput"><a class="header" href="#high-read-throughput">High Read Throughput</a></h3>
+<pre><code class="language-bash">BLOCK_CACHE_SIZE_MB=512
+BLOOM_FALSE_POSITIVE_RATE=0.001
+SPARSE_INDEX_INTERVAL=8
+COMPACTION_STRATEGY=leveled
+SIZE_RATIO=4
+</code></pre>
+<h3 id="memory-constrained"><a class="header" href="#memory-constrained">Memory Constrained</a></h3>
+<pre><code class="language-bash">MEMTABLE_MAX_SIZE=2097152          # 2MB
+BLOCK_CACHE_SIZE_MB=32
+BLOOM_FALSE_POSITIVE_RATE=0.05
+SPARSE_INDEX_INTERVAL=32
+SERVER_MAX_CONNECTIONS=5000
+COMPACTION_THREADS=1
+</code></pre>
+<h3 id="balanced-production"><a class="header" href="#balanced-production">Balanced Production</a></h3>
+<pre><code class="language-bash">MEMTABLE_MAX_SIZE=4194304          # 4MB
+BLOCK_SIZE=4096
+BLOCK_CACHE_SIZE_MB=128
+BLOOM_FALSE_POSITIVE_RATE=0.01
+WAL_SYNC_MODE=always
+COMPACTION_THREADS=2
+SERVER_WORKERS=4
+SERVER_MAX_CONNECTIONS=10000
+</code></pre>
+<h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
+<h3 id="high-memory-usage"><a class="header" href="#high-memory-usage">High Memory Usage</a></h3>
+<ol>
+<li>Reduce <code>MEMTABLE_MAX_SIZE</code></li>
+<li>Reduce <code>BLOCK_CACHE_SIZE_MB</code></li>
+<li>Increase <code>BLOOM_FALSE_POSITIVE_RATE</code></li>
+<li>Increase <code>SPARSE_INDEX_INTERVAL</code></li>
+<li>Reduce <code>SERVER_MAX_CONNECTIONS</code></li>
+</ol>
+<h3 id="slow-writes"><a class="header" href="#slow-writes">Slow Writes</a></h3>
+<ol>
+<li>Increase <code>MEMTABLE_MAX_SIZE</code></li>
+<li>Change <code>WAL_SYNC_MODE</code> to <code>every_second</code></li>
+<li>Increase <code>WAL_BUFFER_SIZE</code></li>
+<li>Increase <code>COMPACTION_THREADS</code></li>
+<li>Use <code>COMPACTION_STRATEGY=tiered</code></li>
+</ol>
+<h3 id="slow-reads"><a class="header" href="#slow-reads">Slow Reads</a></h3>
+<ol>
+<li>Increase <code>BLOCK_CACHE_SIZE_MB</code></li>
+<li>Decrease <code>BLOOM_FALSE_POSITIVE_RATE</code></li>
+<li>Decrease <code>SPARSE_INDEX_INTERVAL</code></li>
+<li>Use <code>COMPACTION_STRATEGY=leveled</code></li>
+<li>Decrease <code>SIZE_RATIO</code></li>
+</ol>
+<h3 id="payload-too-large-errors"><a class="header" href="#payload-too-large-errors">Payload Too Large Errors</a></h3>
+<ol>
+<li>Increase <code>MAX_JSON_PAYLOAD_SIZE</code></li>
+<li>Increase <code>MAX_RAW_PAYLOAD_SIZE</code></li>
+<li>Consider implementing pagination</li>
+</ol>
+<h3 id="too-many-open-files"><a class="header" href="#too-many-open-files">Too Many Open Files</a></h3>
+<ol>
+<li>Increase system file descriptor limit: <code>ulimit -n 65536</code></li>
+<li>Reduce <code>MAX_LEVEL_COUNT</code></li>
+<li>Decrease <code>LEVEL0_COMPACTION_THRESHOLD</code></li>
+<li>Increase <code>SIZE_RATIO</code></li>
+</ol>
+<h2 id="monitoring-configuration-impact"><a class="header" href="#monitoring-configuration-impact">Monitoring Configuration Impact</a></h2>
+<pre><code class="language-bash"># Enable detailed logging
+RUST_LOG=debug cargo run --features api --bin apexstore-server
+
+# Watch server startup for configuration values
+# The server prints all active config on startup
+
+# Monitor metrics via /stats endpoint
+curl http://localhost:8080/stats/all
+</code></pre>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<ol>
+<li><strong>Start with defaults</strong> - They work well for most workloads</li>
+<li><strong>Profile first</strong> - Understand your workload before tuning</li>
+<li><strong>Change one at a time</strong> - Easier to understand impact</li>
+<li><strong>Monitor metrics</strong> - Use <code>/stats/all</code> endpoint</li>
+<li><strong>Test in dev</strong> - Before applying to production</li>
+<li><strong>Document changes</strong> - Track what works and what doesn't</li>
+<li><strong>Use profiles</strong> - Quick starting points for common patterns</li>
+</ol>
+<h2 id="environment-specific-configs"><a class="header" href="#environment-specific-configs">Environment-Specific Configs</a></h2>
+<h3 id="development"><a class="header" href="#development">Development</a></h3>
+<pre><code class="language-bash">RUST_LOG=debug
+MAX_JSON_PAYLOAD_SIZE=104857600
+WAL_SYNC_MODE=manual
+</code></pre>
+<h3 id="staging"><a class="header" href="#staging">Staging</a></h3>
+<pre><code class="language-bash">RUST_LOG=info
+MAX_JSON_PAYLOAD_SIZE=52428800
+WAL_SYNC_MODE=every_second
+</code></pre>
+<h3 id="production"><a class="header" href="#production">Production</a></h3>
+<pre><code class="language-bash">RUST_LOG=warn
+MAX_JSON_PAYLOAD_SIZE=10485760
+WAL_SYNC_MODE=always
+SERVER_WORKERS=8
+</code></pre>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
+<ul>
+<li><a href="https://www.cs.umb.edu/~poneil/lsmtree.pdf">LSM-Tree Paper</a></li>
+<li><a href="https://github.com/facebook/rocksdb/wiki/RocksDB-Tuning-Guide">RocksDB Tuning Guide</a></li>
+<li><a href="https://actix.rs/docs/server/">Actix-Web Configuration</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="development-setup-guide"><a class="header" href="#development-setup-guide">Development Setup Guide</a></h1>
+<p>This guide will help you set up a development environment for ApexStore.</p>
+<h2 id="-system-requirements"><a class="header" href="#-system-requirements">💻 System Requirements</a></h2>
+<h3 id="minimum-requirements"><a class="header" href="#minimum-requirements">Minimum Requirements</a></h3>
+<ul>
+<li><strong>OS</strong>: Linux, macOS, or Windows (with WSL2 recommended)</li>
+<li><strong>RAM</strong>: 4GB (8GB+ recommended for large workloads)</li>
+<li><strong>Disk</strong>: 2GB free space</li>
+<li><strong>CPU</strong>: Any modern CPU (multi-core recommended for testing)</li>
+</ul>
+<h3 id="recommended-setup"><a class="header" href="#recommended-setup">Recommended Setup</a></h3>
+<ul>
+<li><strong>OS</strong>: Ubuntu 22.04 LTS or macOS 13+</li>
+<li><strong>RAM</strong>: 16GB</li>
+<li><strong>Disk</strong>: 10GB free space (SSD preferred)</li>
+<li><strong>CPU</strong>: 4+ cores</li>
+</ul>
+<hr />
+<h2 id="-installing-prerequisites"><a class="header" href="#-installing-prerequisites">🛠️ Installing Prerequisites</a></h2>
+<h3 id="1-rust-toolchain"><a class="header" href="#1-rust-toolchain">1. Rust Toolchain</a></h3>
+<h4 id="installation"><a class="header" href="#installation">Installation</a></h4>
+<pre><code class="language-bash"># Install Rust using rustup (recommended)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Follow the prompts, then reload your shell
+source $HOME/.cargo/env
+</code></pre>
+<h4 id="verify-installation"><a class="header" href="#verify-installation">Verify Installation</a></h4>
+<pre><code class="language-bash"># Check Rust version (should be 1.70+)
+rustc --version
+# Output: rustc 1.75.0 (or higher)
+
+# Check Cargo version
+cargo --version
+# Output: cargo 1.75.0 (or higher)
+</code></pre>
+<h4 id="additional-components"><a class="header" href="#additional-components">Additional Components</a></h4>
+<pre><code class="language-bash"># Install Clippy (linter)
+rustup component add clippy
+
+# Install rustfmt (formatter)
+rustup component add rustfmt
+
+# Install rust-src (for IDE support)
+rustup component add rust-src
+</code></pre>
+<h3 id="2-git"><a class="header" href="#2-git">2. Git</a></h3>
+<h4 id="linux-ubuntudebian"><a class="header" href="#linux-ubuntudebian">Linux (Ubuntu/Debian)</a></h4>
+<pre><code class="language-bash">sudo apt-get update
+sudo apt-get install git
+</code></pre>
+<h4 id="macos"><a class="header" href="#macos">macOS</a></h4>
+<pre><code class="language-bash"># Using Homebrew
+brew install git
+
+# Or install Xcode Command Line Tools
+xcode-select --install
+</code></pre>
+<h4 id="windows"><a class="header" href="#windows">Windows</a></h4>
+<p>Download from <a href="https://git-scm.com/download/win">git-scm.com</a></p>
+<h4 id="verify-installation-1"><a class="header" href="#verify-installation-1">Verify Installation</a></h4>
+<pre><code class="language-bash">git --version
+# Output: git version 2.x.x
+</code></pre>
+<h3 id="3-code-editor-recommended-vs-code"><a class="header" href="#3-code-editor-recommended-vs-code">3. Code Editor (Recommended: VS Code)</a></h3>
+<h4 id="install-vs-code"><a class="header" href="#install-vs-code">Install VS Code</a></h4>
+<ul>
+<li>Download from <a href="https://code.visualstudio.com/">code.visualstudio.com</a></li>
+<li>Or use package manager:
+<pre><code class="language-bash"># Ubuntu/Debian
+sudo snap install code --classic
+
+# macOS
+brew install --cask visual-studio-code
+</code></pre>
+</li>
+</ul>
+<h4 id="install-extensions"><a class="header" href="#install-extensions">Install Extensions</a></h4>
+<p><strong>Essential</strong>:</p>
+<ol>
+<li>
+<p><strong>rust-analyzer</strong> - Rust language support</p>
+<ul>
+<li>ID: <code>rust-lang.rust-analyzer</code></li>
+<li>Features: Auto-completion, go-to-definition, inline errors</li>
+</ul>
+</li>
+<li>
+<p><strong>CodeLLDB</strong> (optional) - Debugging support</p>
+<ul>
+<li>ID: <code>vadimcn.vscode-lldb</code></li>
+</ul>
+</li>
+</ol>
+<p><strong>Recommended</strong>:
+3. <strong>Better TOML</strong> - TOML syntax highlighting</p>
+<ul>
+<li>ID: <code>bungcip.better-toml</code></li>
+</ul>
+<ol start="4">
+<li>
+<p><strong>Error Lens</strong> - Inline error highlighting</p>
+<ul>
+<li>ID: <code>usernamehw.errorlens</code></li>
+</ul>
+</li>
+<li>
+<p><strong>crates</strong> - Cargo.toml dependency management</p>
+<ul>
+<li>ID: <code>serayuzgur.crates</code></li>
+</ul>
+</li>
+</ol>
+<h4 id="vs-code-settings"><a class="header" href="#vs-code-settings">VS Code Settings</a></h4>
+<p>Create <code>.vscode/settings.json</code> in project root:</p>
+<pre><code class="language-json">{
+  &quot;rust-analyzer.checkOnSave.command&quot;: &quot;clippy&quot;,
+  &quot;rust-analyzer.cargo.features&quot;: &quot;all&quot;,
+  &quot;editor.formatOnSave&quot;: true,
+  &quot;[rust]&quot;: {
+    &quot;editor.defaultFormatter&quot;: &quot;rust-lang.rust-analyzer&quot;
+  }
+}
+</code></pre>
+<hr />
+<h2 id="-project-setup"><a class="header" href="#-project-setup">📦 Project Setup</a></h2>
+<h3 id="1-clone-the-repository"><a class="header" href="#1-clone-the-repository">1. Clone the Repository</a></h3>
+<pre><code class="language-bash"># Clone your fork
+git clone https://github.com/YOUR_USERNAME/ApexStore.git
+cd ApexStore
+
+# Add upstream remote
+git remote add upstream https://github.com/ElioNeto/ApexStore.git
+
+# Verify remotes
+git remote -v
+</code></pre>
+<h3 id="2-build-the-project"><a class="header" href="#2-build-the-project">2. Build the Project</a></h3>
+<pre><code class="language-bash"># Debug build (faster compilation)
+cargo build
+
+# Release build (optimized)
+cargo build --release
+
+# Build with API feature
+cargo build --release --features api
+</code></pre>
+<p><strong>First build may take 5-10 minutes</strong> as Cargo downloads and compiles dependencies.</p>
+<h3 id="3-run-tests"><a class="header" href="#3-run-tests">3. Run Tests</a></h3>
+<pre><code class="language-bash"># Run all tests
+cargo test
+
+# Run tests with output
+cargo test -- --nocapture
+
+# Run specific test
+cargo test test_memtable_insert
+</code></pre>
+<h3 id="4-configuration"><a class="header" href="#4-configuration">4. Configuration</a></h3>
+<pre><code class="language-bash"># Copy environment template
+cp .env.example .env
+
+# Edit configuration (optional)
+nano .env
+</code></pre>
+<p><strong>Example Development Configuration</strong> (<code>.env</code>):</p>
+<pre><code class="language-bash"># Server
+HOST=127.0.0.1
+PORT=8080
+
+# LSM Engine
+DATA_DIR=.lsm_data_dev
+MEMTABLE_MAX_SIZE=2097152  # 2MB for faster flushing in dev
+BLOCK_CACHE_SIZE_MB=32
+
+# Logging
+RUST_LOG=debug
+ENABLE_METRICS=true
+</code></pre>
+<hr />
+<h2 id="-development-workflow"><a class="header" href="#-development-workflow">🧪 Development Workflow</a></h2>
+<h3 id="running-the-cli"><a class="header" href="#running-the-cli">Running the CLI</a></h3>
+<pre><code class="language-bash"># Debug mode
+cargo run
+
+# Release mode (faster)
+cargo run --release
+</code></pre>
+<p><strong>Available REPL Commands</strong>:</p>
+<pre><code>&gt; help                 # Show available commands
+&gt; put key value        # Insert or update key
+&gt; get key              # Retrieve value
+&gt; delete key           # Delete key (tombstone)
+&gt; stats                # Show statistics
+&gt; exit                 # Exit REPL
+</code></pre>
+<h3 id="running-the-api-server"><a class="header" href="#running-the-api-server">Running the API Server</a></h3>
+<pre><code class="language-bash"># Debug mode
+cargo run --features api --bin apexstore-server
+
+# Release mode
+cargo run --release --features api --bin apexstore-server
+
+# With custom port
+PORT=3000 cargo run --release --features api --bin apexstore-server
+</code></pre>
+<p><strong>Testing the API</strong>:</p>
+<pre><code class="language-bash"># Insert a key
+curl -X POST http://localhost:8080/keys \
+  -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;key&quot;: &quot;user:1&quot;, &quot;value&quot;: &quot;Alice&quot;}'
+
+# Get a key
+curl http://localhost:8080/keys/user:1
+
+# Get statistics
+curl http://localhost:8080/stats/all
+</code></pre>
+<h3 id="code-quality-checks"><a class="header" href="#code-quality-checks">Code Quality Checks</a></h3>
+<pre><code class="language-bash"># Format code
+cargo fmt
+
+# Check formatting (CI mode)
+cargo fmt -- --check
+
+# Run Clippy linter
+cargo clippy
+
+# Clippy with strict mode (CI mode)
+cargo clippy -- -D warnings
+
+# Check for unused dependencies
+cargo machete  # Requires: cargo install cargo-machete
+</code></pre>
+<h3 id="running-benchmarks"><a class="header" href="#running-benchmarks">Running Benchmarks</a></h3>
+<pre><code class="language-bash"># Install criterion
+cargo install cargo-criterion
+
+# Run all benchmarks
+cargo bench
+
+# Run specific benchmark
+cargo bench memtable_insert
+
+# Generate HTML report
+open target/criterion/report/index.html
+</code></pre>
+<hr />
+<h2 id="-docker-development"><a class="header" href="#-docker-development">🐳 Docker Development</a></h2>
+<h3 id="build-docker-image"><a class="header" href="#build-docker-image">Build Docker Image</a></h3>
+<pre><code class="language-bash"># Build production image
+docker build -t apexstore:dev .
+
+# Run in development mode with volume mount
+docker run -d \
+  --name apexstore-dev \
+  -p 8080:8080 \
+  -v $(pwd)/data:/data \
+  -v $(pwd)/.env:/app/.env \
+  apexstore:dev
+</code></pre>
+<h3 id="docker-compose-development"><a class="header" href="#docker-compose-development">Docker Compose Development</a></h3>
+<pre><code class="language-bash"># Start services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f apexstore
+
+# Restart after code changes
+docker-compose restart
+
+# Stop services
+docker-compose down
+</code></pre>
+<hr />
+<h2 id="-debugging"><a class="header" href="#-debugging">🛠️ Debugging</a></h2>
+<h3 id="using-lldb-vs-code"><a class="header" href="#using-lldb-vs-code">Using LLDB (VS Code)</a></h3>
+<ol>
+<li>Install CodeLLDB extension</li>
+<li>Create <code>.vscode/launch.json</code>:</li>
+</ol>
+<pre><code class="language-json">{
+  &quot;version&quot;: &quot;0.2.0&quot;,
+  &quot;configurations&quot;: [
+    {
+      &quot;type&quot;: &quot;lldb&quot;,
+      &quot;request&quot;: &quot;launch&quot;,
+      &quot;name&quot;: &quot;Debug CLI&quot;,
+      &quot;cargo&quot;: {
+        &quot;args&quot;: [&quot;build&quot;, &quot;--bin=apexstore&quot;]
+      },
+      &quot;args&quot;: [],
+      &quot;cwd&quot;: &quot;${workspaceFolder}&quot;
+    },
+    {
+      &quot;type&quot;: &quot;lldb&quot;,
+      &quot;request&quot;: &quot;launch&quot;,
+      &quot;name&quot;: &quot;Debug Server&quot;,
+      &quot;cargo&quot;: {
+        &quot;args&quot;: [&quot;build&quot;, &quot;--features&quot;, &quot;api&quot;, &quot;--bin=apexstore-server&quot;]
+      },
+      &quot;args&quot;: [],
+      &quot;cwd&quot;: &quot;${workspaceFolder}&quot;
+    },
+    {
+      &quot;type&quot;: &quot;lldb&quot;,
+      &quot;request&quot;: &quot;launch&quot;,
+      &quot;name&quot;: &quot;Debug Test&quot;,
+      &quot;cargo&quot;: {
+        &quot;args&quot;: [&quot;test&quot;, &quot;--no-run&quot;, &quot;--lib&quot;]
+      },
+      &quot;args&quot;: [&quot;test_memtable_insert&quot;],
+      &quot;cwd&quot;: &quot;${workspaceFolder}&quot;
+    }
+  ]
+}
+</code></pre>
+<ol start="3">
+<li>Set breakpoints in code</li>
+<li>Press <code>F5</code> to start debugging</li>
+</ol>
+<h3 id="using-println-debugging"><a class="header" href="#using-println-debugging">Using <code>println!</code> Debugging</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// In your code
+pub fn put(&amp;mut self, key: &amp;[u8], value: &amp;str) -&gt; Result&lt;()&gt; {
+    println!(&quot;[DEBUG] Inserting key: {:?}&quot;, String::from_utf8_lossy(key));
+    self.wal.append(key, value)?;
+    println!(&quot;[DEBUG] WAL append successful&quot;);
+    self.memtable.insert(key, value);
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Run with:</p>
+<pre><code class="language-bash">cargo run -- 2&gt;&amp;1 | grep DEBUG
+</code></pre>
+<h3 id="using-rust_log"><a class="header" href="#using-rust_log">Using <code>RUST_LOG</code></a></h3>
+<pre><code class="language-bash"># Set log level
+export RUST_LOG=debug
+
+# Or inline
+RUST_LOG=trace cargo run
+
+# Filter by module
+RUST_LOG=apexstore::core::engine=debug cargo run
+</code></pre>
+<hr />
+<h2 id="-performance-profiling"><a class="header" href="#-performance-profiling">📈 Performance Profiling</a></h2>
+<h3 id="cpu-profiling-linux"><a class="header" href="#cpu-profiling-linux">CPU Profiling (Linux)</a></h3>
+<pre><code class="language-bash"># Install flamegraph
+cargo install flamegraph
+
+# Generate flamegraph
+sudo cargo flamegraph --bin apexstore-server
+
+# Open flamegraph.svg in browser
+firefox flamegraph.svg
+</code></pre>
+<h3 id="memory-profiling"><a class="header" href="#memory-profiling">Memory Profiling</a></h3>
+<pre><code class="language-bash"># Using valgrind (Linux)
+valgrind --leak-check=full --track-origins=yes \
+  ./target/debug/apexstore
+
+# Using heaptrack (Linux)
+heaptrack ./target/debug/apexstore
+heaptrack_gui heaptrack.apexstore.*.gz
+</code></pre>
+<h3 id="benchmark-profiling"><a class="header" href="#benchmark-profiling">Benchmark Profiling</a></h3>
+<pre><code class="language-bash"># Profile specific benchmark
+cargo bench --bench memtable_bench -- --profile-time=10
+
+# With flamegraph
+cargo flamegraph --bench memtable_bench
+</code></pre>
+<hr />
+<h2 id="-testing"><a class="header" href="#-testing">🧰 Testing</a></h2>
+<h3 id="unit-tests"><a class="header" href="#unit-tests">Unit Tests</a></h3>
+<pre><code class="language-bash"># Run all unit tests
+cargo test --lib
+
+# Run tests in specific module
+cargo test --lib core::memtable
+
+# Run single test
+cargo test test_memtable_insert
+</code></pre>
+<h3 id="integration-tests"><a class="header" href="#integration-tests">Integration Tests</a></h3>
+<pre><code class="language-bash"># Run all integration tests
+cargo test --test '*'
+
+# Run specific integration test file
+cargo test --test recovery_test
+</code></pre>
+<h3 id="test-coverage"><a class="header" href="#test-coverage">Test Coverage</a></h3>
+<pre><code class="language-bash"># Install tarpaulin (Linux only)
+cargo install cargo-tarpaulin
+
+# Generate coverage report
+cargo tarpaulin --out Html
+
+# Open report
+firefox tarpaulin-report.html
+</code></pre>
+<h3 id="stress-testing"><a class="header" href="#stress-testing">Stress Testing</a></h3>
+<pre><code class="language-bash"># Create stress test script
+cat &gt; stress_test.sh &lt;&lt; 'EOF'
+#!/bin/bash
+for i in {1..10000}; do
+  curl -X POST http://localhost:8080/keys \
+    -H &quot;Content-Type: application/json&quot; \
+    -d &quot;{\&quot;key\&quot;: \&quot;key_$i\&quot;, \&quot;value\&quot;: \&quot;value_$i\&quot;}&quot; &amp;
+done
+wait
+EOF
+
+chmod +x stress_test.sh
+
+# Run stress test
+./stress_test.sh
+</code></pre>
+<hr />
+<h2 id="-documentation"><a class="header" href="#-documentation">📚 Documentation</a></h2>
+<h3 id="generating-documentation"><a class="header" href="#generating-documentation">Generating Documentation</a></h3>
+<pre><code class="language-bash"># Generate and open docs
+cargo doc --open
+
+# Include private items
+cargo doc --document-private-items --open
+
+# Generate for all features
+cargo doc --all-features --open
+</code></pre>
+<h3 id="writing-documentation"><a class="header" href="#writing-documentation">Writing Documentation</a></h3>
+<p>All public APIs should have documentation:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>/// Brief description (appears in summary).
+///
+/// Longer description with more details.
+///
+/// # Arguments
+///
+/// * `key` - Description of key parameter
+/// * `value` - Description of value parameter
+///
+/// # Returns
+///
+/// Description of return value
+///
+/// # Errors
+///
+/// Description of possible errors
+///
+/// # Examples
+///
+/// ```
+/// let engine = LsmEngine::new(config)?;
+/// engine.put(b&quot;key&quot;, &quot;value&quot;)?;
+/// ```
+///
+/// # Panics
+///
+/// Description of panic conditions (if any)
+///
+/// # Safety
+///
+/// Description of safety requirements (for unsafe functions)
+pub fn put(&amp;mut self, key: &amp;[u8], value: &amp;str) -&gt; Result&lt;()&gt; {
+    // Implementation
+}
+<span class="boring">}</span></code></pre></pre>
+<hr />
+<h2 id="-troubleshooting"><a class="header" href="#-troubleshooting">🐞 Troubleshooting</a></h2>
+<h3 id="common-issues"><a class="header" href="#common-issues">Common Issues</a></h3>
+<h4 id="issue-compilation-errors-after-update"><a class="header" href="#issue-compilation-errors-after-update">Issue: Compilation Errors After Update</a></h4>
+<pre><code class="language-bash"># Clean build artifacts
+cargo clean
+
+# Update dependencies
+cargo update
+
+# Rebuild
+cargo build
+</code></pre>
+<h4 id="issue-tests-failing-randomly"><a class="header" href="#issue-tests-failing-randomly">Issue: Tests Failing Randomly</a></h4>
+<pre><code class="language-bash"># Run tests serially (not in parallel)
+cargo test -- --test-threads=1
+</code></pre>
+<h4 id="issue-port-already-in-use"><a class="header" href="#issue-port-already-in-use">Issue: Port Already in Use</a></h4>
+<pre><code class="language-bash"># Find process using port 8080
+lsof -i :8080  # macOS/Linux
+
+# Kill process
+kill -9 &lt;PID&gt;
+
+# Or use different port
+PORT=3000 cargo run --features api --bin apexstore-server
+</code></pre>
+<h4 id="issue-out-of-disk-space"><a class="header" href="#issue-out-of-disk-space">Issue: Out of Disk Space</a></h4>
+<pre><code class="language-bash"># Clean target directory (safe, can be rebuilt)
+rm -rf target/
+
+# Clean cargo cache
+cargo cache --autoclean
+</code></pre>
+<h4 id="issue-slow-compilation"><a class="header" href="#issue-slow-compilation">Issue: Slow Compilation</a></h4>
+<pre><code class="language-bash"># Use faster linker (Linux)
+sudo apt-get install lld
+export RUSTFLAGS=&quot;-C link-arg=-fuse-ld=lld&quot;
+
+# Or use mold (even faster)
+cargo install mold
+export RUSTFLAGS=&quot;-C link-arg=-fuse-ld=mold&quot;
+
+# Enable incremental compilation (in Cargo.toml)
+[profile.dev]
+incremental = true
+</code></pre>
+<hr />
+<h2 id="-next-steps"><a class="header" href="#-next-steps">🚀 Next Steps</a></h2>
+<ol>
+<li>✅ Read <a href="CONTRIBUTING.html">CONTRIBUTING.md</a> for contribution guidelines</li>
+<li>✅ Explore the codebase structure</li>
+<li>✅ Pick an issue to work on</li>
+<li>✅ Join discussions on GitHub</li>
+</ol>
+<hr />
+<h2 id="-getting-help"><a class="header" href="#-getting-help">💬 Getting Help</a></h2>
+<ul>
+<li><strong>Documentation</strong>: Run <code>cargo doc --open</code></li>
+<li><strong>Issues</strong>: <a href="https://github.com/ElioNeto/ApexStore/issues">GitHub Issues</a></li>
+<li><strong>Discussions</strong>: <a href="https://github.com/ElioNeto/ApexStore/discussions">GitHub Discussions</a></li>
+<li><strong>Email</strong>: netoo.elio@hotmail.com</li>
+</ul>
+<hr />
+<p><strong>Happy Coding!</strong> 🦀</p>
+<p><em>Last updated: March 2026</em></p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="contributing-to-apexstore"><a class="header" href="#contributing-to-apexstore">Contributing to ApexStore</a></h1>
+<p>First off, thank you for considering contributing to ApexStore! 🎉</p>
+<p>This document provides guidelines and instructions for contributing to the project. Following these guidelines helps maintain code quality and makes the review process smoother.</p>
+<h2 id="-table-of-contents"><a class="header" href="#-table-of-contents">📜 Table of Contents</a></h2>
+<ul>
+<li><a href="CONTRIBUTING.html#code-of-conduct">Code of Conduct</a></li>
+<li><a href="CONTRIBUTING.html#getting-started">Getting Started</a></li>
+<li><a href="CONTRIBUTING.html#development-workflow">Development Workflow</a></li>
+<li><a href="CONTRIBUTING.html#coding-standards">Coding Standards</a></li>
+<li><a href="CONTRIBUTING.html#testing-guidelines">Testing Guidelines</a></li>
+<li><a href="CONTRIBUTING.html#commit-messages">Commit Messages</a></li>
+<li><a href="CONTRIBUTING.html#pull-request-process">Pull Request Process</a></li>
+<li><a href="CONTRIBUTING.html#project-structure">Project Structure</a></li>
+<li><a href="CONTRIBUTING.html#areas-for-contribution">Areas for Contribution</a></li>
+</ul>
+<hr />
+<h2 id="-code-of-conduct"><a class="header" href="#-code-of-conduct">🤝 Code of Conduct</a></h2>
+<h3 id="our-pledge"><a class="header" href="#our-pledge">Our Pledge</a></h3>
+<p>We are committed to providing a welcoming and inspiring community for all. We pledge to:</p>
+<ul>
+<li>Be respectful and inclusive</li>
+<li>Accept constructive criticism gracefully</li>
+<li>Focus on what is best for the community</li>
+<li>Show empathy towards other community members</li>
+</ul>
+<h3 id="expected-behavior"><a class="header" href="#expected-behavior">Expected Behavior</a></h3>
+<ul>
+<li>Use welcoming and inclusive language</li>
+<li>Be respectful of differing viewpoints and experiences</li>
+<li>Gracefully accept constructive criticism</li>
+<li>Focus on what is best for the community</li>
+</ul>
+<h3 id="unacceptable-behavior"><a class="header" href="#unacceptable-behavior">Unacceptable Behavior</a></h3>
+<ul>
+<li>Trolling, insulting/derogatory comments, and personal or political attacks</li>
+<li>Public or private harassment</li>
+<li>Publishing others' private information without explicit permission</li>
+<li>Other conduct which could reasonably be considered inappropriate</li>
+</ul>
+<hr />
+<h2 id="-getting-started"><a class="header" href="#-getting-started">🚀 Getting Started</a></h2>
+<h3 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h3>
+<ol>
+<li>
+<p><strong>Rust Toolchain</strong> (1.70 or later)</p>
+<pre><code class="language-bash">curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+</code></pre>
+</li>
+<li>
+<p><strong>Git</strong></p>
+<pre><code class="language-bash"># Ubuntu/Debian
+sudo apt-get install git
+
+# macOS
+brew install git
+</code></pre>
+</li>
+<li>
+<p><strong>Code Editor</strong> (Recommended: VS Code with rust-analyzer)</p>
+<ul>
+<li>Install <a href="https://code.visualstudio.com/">VS Code</a></li>
+<li>Install <a href="https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer">rust-analyzer extension</a></li>
+</ul>
+</li>
+</ol>
+<h3 id="initial-setup"><a class="header" href="#initial-setup">Initial Setup</a></h3>
+<ol>
+<li>
+<p><strong>Fork the Repository</strong></p>
+<ul>
+<li>Visit <a href="https://github.com/ElioNeto/ApexStore">https://github.com/ElioNeto/ApexStore</a></li>
+<li>Click the &quot;Fork&quot; button in the top-right corner</li>
+</ul>
+</li>
+<li>
+<p><strong>Clone Your Fork</strong></p>
+<pre><code class="language-bash">git clone https://github.com/YOUR_USERNAME/ApexStore.git
+cd ApexStore
+</code></pre>
+</li>
+<li>
+<p><strong>Add Upstream Remote</strong></p>
+<pre><code class="language-bash">git remote add upstream https://github.com/ElioNeto/ApexStore.git
+</code></pre>
+</li>
+<li>
+<p><strong>Install Dependencies</strong></p>
+<pre><code class="language-bash">cargo build
+</code></pre>
+</li>
+<li>
+<p><strong>Run Tests</strong></p>
+<pre><code class="language-bash">cargo test
+</code></pre>
+</li>
+</ol>
+<p>For detailed setup instructions, see <a href="SETUP.html">SETUP.md</a>.</p>
+<hr />
+<h2 id="-development-workflow-1"><a class="header" href="#-development-workflow-1">🔄 Development Workflow</a></h2>
+<h3 id="automated-workflow-overview"><a class="header" href="#automated-workflow-overview">Automated Workflow Overview</a></h3>
+<p>ApexStore uses GitHub Actions to automate the development workflow:</p>
+<ul>
+<li><strong>Feature/Fix branches</strong> → Auto-create PR to <code>develop</code> + run tests</li>
+<li><strong>Develop</strong> → Auto-create release PR to <code>main</code></li>
+<li><strong>Main</strong> → Create release tag + close related issues</li>
+</ul>
+<p>See <a href="WORKFLOWS.html">WORKFLOWS.md</a> for complete documentation.</p>
+<h3 id="1-create-a-feature-branch"><a class="header" href="#1-create-a-feature-branch">1. Create a Feature Branch</a></h3>
+<pre><code class="language-bash"># Update your fork
+git checkout main
+git pull upstream main
+
+# Create a new branch from main
+git checkout -b feature/your-feature-name
+</code></pre>
+<p><strong>Branch Naming Conventions</strong>:</p>
+<ul>
+<li><code>feature/</code> - New features (e.g., <code>feature/compaction-strategy</code>)</li>
+<li><code>fix/</code> - Bug fixes (e.g., <code>fix/wal-corruption</code>)</li>
+<li><code>docs/</code> - Documentation changes (e.g., <code>docs/api-guide</code>)</li>
+<li><code>refactor/</code> - Code refactoring (e.g., <code>refactor/codec-interface</code>)</li>
+<li><code>test/</code> - Test additions/improvements (e.g., <code>test/integration-suite</code>)</li>
+<li><code>perf/</code> - Performance improvements (e.g., <code>perf/bloom-filter-optimization</code>)</li>
+</ul>
+<h3 id="2-make-your-changes"><a class="header" href="#2-make-your-changes">2. Make Your Changes</a></h3>
+<pre><code class="language-bash"># Make changes to the code
+vim src/core/engine.rs
+
+# Test your changes
+cargo test --all-features
+
+# Format code
+cargo fmt
+
+# Check for issues
+cargo clippy --all-features -- -D warnings
+</code></pre>
+<h3 id="3-commit-your-changes"><a class="header" href="#3-commit-your-changes">3. Commit Your Changes</a></h3>
+<pre><code class="language-bash">git add .
+git commit -m &quot;feat: add compaction strategy interface (#55)&quot;
+</code></pre>
+<p><strong>Important</strong>: Reference issues in commit messages using <code>#issue_number</code> for automatic tracking.</p>
+<p>See <a href="CONTRIBUTING.html#commit-messages">Commit Messages</a> for formatting guidelines.</p>
+<h3 id="4-push-to-your-fork"><a class="header" href="#4-push-to-your-fork">4. Push to Your Fork</a></h3>
+<pre><code class="language-bash">git push origin feature/your-feature-name
+</code></pre>
+<p><strong>What Happens Next:</strong></p>
+<ul>
+<li>✅ GitHub Actions automatically runs tests</li>
+<li>✅ Auto-creates PR to <code>develop</code> branch</li>
+<li>✅ Adds comment to referenced issues (if any)</li>
+<li>✅ Runs Clippy and format checks</li>
+</ul>
+<h3 id="5-pull-request-review"><a class="header" href="#5-pull-request-review">5. Pull Request Review</a></h3>
+<p>Once the automated PR is created:</p>
+<ol>
+<li>Review the PR description</li>
+<li>Wait for CI checks to pass</li>
+<li>Address any reviewer feedback</li>
+<li>PR will be merged to <code>develop</code> once approved</li>
+</ol>
+<p><strong>Note</strong>: You don't need to manually create PRs - the workflow handles this automatically!</p>
+<hr />
+<h2 id="-coding-standards"><a class="header" href="#-coding-standards">📝 Coding Standards</a></h2>
+<h3 id="rust-style-guide"><a class="header" href="#rust-style-guide">Rust Style Guide</a></h3>
+<p>We follow the <a href="https://rust-lang.github.io/api-guidelines/">Rust API Guidelines</a> and <a href="https://doc.rust-lang.org/1.0.0/style/">Rust Style Guide</a>.</p>
+<p><strong>Key Principles</strong>:</p>
+<ol>
+<li>
+<p><strong>Use <code>cargo fmt</code></strong> - All code must be formatted</p>
+<pre><code class="language-bash">cargo fmt --all
+</code></pre>
+</li>
+<li>
+<p><strong>Pass <code>cargo clippy</code></strong> - Zero warnings policy</p>
+<pre><code class="language-bash">cargo clippy --all-features -- -D warnings
+</code></pre>
+</li>
+<li>
+<p><strong>Write Documentation</strong> - Public APIs must have doc comments</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>/// Retrieves a value from the store by key.
+///
+/// # Arguments
+///
+/// * `key` - The key to look up
+///
+/// # Returns
+///
+/// * `Ok(Some(value))` - Key found
+/// * `Ok(None)` - Key not found
+/// * `Err(e)` - Error occurred
+///
+/// # Example
+///
+/// ```
+/// let value = engine.get(b&quot;user:123&quot;)?;
+/// ```
+pub fn get(&amp;self, key: &amp;[u8]) -&gt; Result&lt;Option&lt;String&gt;&gt; {
+    // Implementation
+}
+<span class="boring">}</span></code></pre></pre>
+</li>
+</ol>
+<h3 id="solid-principles"><a class="header" href="#solid-principles">SOLID Principles</a></h3>
+<p>This project follows SOLID principles:</p>
+<ul>
+<li><strong>Single Responsibility</strong>: Each module/struct has one clear purpose</li>
+<li><strong>Open/Closed</strong>: Extend behavior through traits, not modification</li>
+<li><strong>Liskov Substitution</strong>: Implementations must be interchangeable</li>
+<li><strong>Interface Segregation</strong>: Small, focused traits</li>
+<li><strong>Dependency Inversion</strong>: Depend on abstractions, not concretions</li>
+</ul>
+<p><strong>Example</strong>:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ✅ Good - depends on trait
+pub struct LsmEngine&lt;W: WriteAheadLog&gt; {
+    wal: W,
+}
+
+// ❌ Bad - depends on concrete type
+pub struct LsmEngine {
+    wal: FileBasedWal,
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="error-handling"><a class="header" href="#error-handling">Error Handling</a></h3>
+<ol>
+<li>
+<p><strong>Use <code>Result&lt;T, LsmError&gt;</code></strong> for fallible operations</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub fn put(&amp;mut self, key: &amp;[u8], value: &amp;str) -&gt; Result&lt;()&gt; {
+    self.wal.append(key, value)?;
+    self.memtable.insert(key, value);
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+</li>
+<li>
+<p><strong>Provide Context</strong> with error types</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum LsmError {
+    #[error(&quot;WAL corruption at offset {0}&quot;)]
+    WalCorruption(u64),
+    
+    #[error(&quot;Key too large: {size} bytes (max: {max})&quot;)]
+    KeyTooLarge { size: usize, max: usize },
+}
+<span class="boring">}</span></code></pre></pre>
+</li>
+<li>
+<p><strong>Don't Panic</strong> in library code (use <code>Result</code> instead)</p>
+</li>
+</ol>
+<h3 id="performance-considerations"><a class="header" href="#performance-considerations">Performance Considerations</a></h3>
+<ol>
+<li>
+<p><strong>Minimize Allocations</strong></p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ✅ Good - reuse buffer
+let mut buffer = Vec::with_capacity(1024);
+for item in items {
+    buffer.clear();
+    serialize_into(&amp;mut buffer, item)?;
+}
+
+// ❌ Bad - allocate each iteration
+for item in items {
+    let buffer = serialize(item)?;
+}
+<span class="boring">}</span></code></pre></pre>
+</li>
+<li>
+<p><strong>Use Appropriate Data Structures</strong></p>
+<ul>
+<li><code>BTreeMap</code> for sorted data</li>
+<li><code>HashMap</code> for fast lookups</li>
+<li><code>Vec</code> for sequential access</li>
+</ul>
+</li>
+<li>
+<p><strong>Benchmark Changes</strong></p>
+<pre><code class="language-bash">cargo bench
+</code></pre>
+</li>
+</ol>
+<hr />
+<h2 id="-testing-guidelines"><a class="header" href="#-testing-guidelines">🧪 Testing Guidelines</a></h2>
+<h3 id="test-types"><a class="header" href="#test-types">Test Types</a></h3>
+<ol>
+<li>
+<p><strong>Unit Tests</strong> - Test individual functions/modules</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_memtable_insert() {
+        let mut memtable = MemTable::new();
+        memtable.insert(b&quot;key&quot;, &quot;value&quot;);
+        assert_eq!(memtable.get(b&quot;key&quot;), Some(&quot;value&quot;.to_string()));
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+</li>
+<li>
+<p><strong>Integration Tests</strong> - Test component interactions</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// tests/integration_test.rs
+#[test]
+fn test_engine_recovery() {
+    let config = LsmConfig::default();
+    let mut engine = LsmEngine::new(config).unwrap();
+    
+    engine.put(b&quot;key&quot;, &quot;value&quot;).unwrap();
+    drop(engine);
+    
+    let engine = LsmEngine::new(config).unwrap();
+    assert_eq!(engine.get(b&quot;key&quot;).unwrap(), Some(&quot;value&quot;.to_string()));
+}
+<span class="boring">}</span></code></pre></pre>
+</li>
+<li>
+<p><strong>Property Tests</strong> - Test invariants (optional, using <code>proptest</code>)</p>
+</li>
+</ol>
+<h3 id="test-requirements"><a class="header" href="#test-requirements">Test Requirements</a></h3>
+<ul>
+<li><strong>All new code must have tests</strong></li>
+<li><strong>Tests must pass on all platforms</strong></li>
+<li><strong>Test coverage should increase, not decrease</strong></li>
+<li><strong>Use descriptive test names</strong>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[test]
+fn test_get_returns_none_for_nonexistent_key() { /* ... */ }
+<span class="boring">}</span></code></pre></pre>
+</li>
+</ul>
+<h3 id="running-tests"><a class="header" href="#running-tests">Running Tests</a></h3>
+<pre><code class="language-bash"># Run all tests
+cargo test --all-features
+
+# Run specific test
+cargo test test_memtable_insert
+
+# Run with output
+cargo test -- --nocapture
+
+# Run integration tests only
+cargo test --test '*'
+
+# Run with coverage (requires tarpaulin)
+cargo tarpaulin --out Html
+</code></pre>
+<hr />
+<h2 id="-commit-messages"><a class="header" href="#-commit-messages">📝 Commit Messages</a></h2>
+<p>We follow the <a href="https://www.conventionalcommits.org/">Conventional Commits</a> specification.</p>
+<h3 id="format"><a class="header" href="#format">Format</a></h3>
+<pre><code>&lt;type&gt;(&lt;scope&gt;): &lt;subject&gt; (#issue)
+
+&lt;body&gt;
+
+&lt;footer&gt;
+</code></pre>
+<h3 id="types"><a class="header" href="#types">Types</a></h3>
+<ul>
+<li><code>feat</code> - New feature</li>
+<li><code>fix</code> - Bug fix</li>
+<li><code>docs</code> - Documentation changes</li>
+<li><code>style</code> - Code style changes (formatting, etc.)</li>
+<li><code>refactor</code> - Code refactoring</li>
+<li><code>perf</code> - Performance improvements</li>
+<li><code>test</code> - Test additions/modifications</li>
+<li><code>chore</code> - Build process, dependencies, tooling</li>
+<li><code>ci</code> - CI/CD changes</li>
+</ul>
+<h3 id="examples"><a class="header" href="#examples">Examples</a></h3>
+<p><strong>Simple commit</strong>:</p>
+<pre><code>feat: add bloom filter to SSTable reader
+</code></pre>
+<p><strong>With scope and issue</strong>:</p>
+<pre><code>fix(wal): prevent corruption on unclean shutdown (#42)
+</code></pre>
+<p><strong>With body</strong>:</p>
+<pre><code>feat(compaction): implement leveled compaction strategy (#47)
+
+Adds a new LeveledCompaction struct that implements the Compaction
+trait. This strategy reduces read amplification by maintaining
+sorted levels with exponentially increasing sizes.
+
+Closes #47
+</code></pre>
+<p><strong>Breaking change</strong>:</p>
+<pre><code>feat(api)!: change SSTable format to V2
+
+BREAKING CHANGE: SSTable V2 is incompatible with V1.
+Migration tool will be provided in v1.4.
+</code></pre>
+<p><strong>Referencing Issues</strong>:</p>
+<ul>
+<li><code>#123</code> - Reference issue</li>
+<li><code>fixes #123</code>, <code>closes #123</code> - Will auto-close issue when PR merges</li>
+<li><code>resolves #123</code> - Alternative close syntax</li>
+</ul>
+<hr />
+<h2 id="-pull-request-process"><a class="header" href="#-pull-request-process">🔍 Pull Request Process</a></h2>
+<h3 id="before-pushing"><a class="header" href="#before-pushing">Before Pushing</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+Code compiles without errors</li>
+<li><input disabled="" type="checkbox"/>
+All tests pass (<code>cargo test --all-features</code>)</li>
+<li><input disabled="" type="checkbox"/>
+No clippy warnings (<code>cargo clippy --all-features -- -D warnings</code>)</li>
+<li><input disabled="" type="checkbox"/>
+Code is formatted (<code>cargo fmt</code>)</li>
+<li><input disabled="" type="checkbox"/>
+Documentation is updated (if applicable)</li>
+<li><input disabled="" type="checkbox"/>
+Tests are added for new functionality</li>
+</ul>
+<h3 id="automated-pr-creation"><a class="header" href="#automated-pr-creation">Automated PR Creation</a></h3>
+<p>When you push to a <code>feature/*</code> or <code>fix/*</code> branch:</p>
+<ol>
+<li>✅ <strong>Tests run automatically</strong> (CI/CD)</li>
+<li>✅ <strong>PR is auto-created</strong> to <code>develop</code> branch</li>
+<li>✅ <strong>Issues are commented</strong> (if referenced in commits)</li>
+<li>✅ <strong>Checks must pass</strong> before merge</li>
+</ol>
+<h3 id="manual-steps-if-needed"><a class="header" href="#manual-steps-if-needed">Manual Steps (If Needed)</a></h3>
+<p>If you need to create a PR manually:</p>
+<ol>
+<li>Go to your fork on GitHub</li>
+<li>Click &quot;New Pull Request&quot;</li>
+<li>Select <code>develop</code> as the base branch</li>
+<li>Fill out the PR template</li>
+<li>Submit the PR</li>
+</ol>
+<h3 id="pr-template"><a class="header" href="#pr-template">PR Template</a></h3>
+<p>When creating a PR manually, use this template:</p>
+<pre><code class="language-markdown">## Description
+
+Brief description of changes.
+
+## Type of Change
+
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Documentation update
+
+## Related Issues
+
+Closes #123
+Related to #456
+
+## Testing
+
+Describe how you tested your changes:
+- [ ] Unit tests added
+- [ ] Integration tests added
+- [ ] Manual testing performed
+
+## Checklist
+
+- [ ] Code compiles
+- [ ] Tests pass
+- [ ] Clippy checks pass
+- [ ] Code is formatted
+- [ ] Documentation updated
+
+## Screenshots (if applicable)
+
+## Additional Notes
+</code></pre>
+<h3 id="review-process"><a class="header" href="#review-process">Review Process</a></h3>
+<ol>
+<li><strong>Automated Checks</strong> - CI runs tests and linters</li>
+<li><strong>Code Review</strong> - Maintainer reviews code</li>
+<li><strong>Feedback</strong> - Address review comments</li>
+<li><strong>Approval</strong> - Maintainer approves PR</li>
+<li><strong>Merge</strong> - Squash and merge to <code>develop</code></li>
+</ol>
+<h3 id="review-timeline"><a class="header" href="#review-timeline">Review Timeline</a></h3>
+<ul>
+<li><strong>Simple PRs</strong>: 1-3 days</li>
+<li><strong>Complex PRs</strong>: 3-7 days</li>
+<li><strong>Breaking Changes</strong>: 7-14 days</li>
+</ul>
+<hr />
+<h2 id="-project-structure"><a class="header" href="#-project-structure">📁 Project Structure</a></h2>
+<pre><code>ApexStore/
+├── src/
+│   ├── core/              # Core domain logic
+│   │   ├── engine.rs      # LSM engine orchestration
+│   │   ├── memtable.rs    # In-memory storage
+│   │   └── log_record.rs  # Data model
+│   ├── storage/           # Persistence layer
+│   │   ├── wal.rs         # Write-ahead log
+│   │   ├── sstable.rs     # SSTable reader
+│   │   └── builder.rs     # SSTable writer
+│   ├── infra/             # Infrastructure
+│   │   ├── codec.rs       # Serialization
+│   │   ├── error.rs       # Error types
+│   │   └── config.rs      # Configuration
+│   ├── api/               # HTTP API (feature-gated)
+│   ├── cli/               # CLI interface
+│   └── features/          # Feature flags
+├── tests/                 # Integration tests
+├── benches/               # Benchmarks
+└── docs/                  # Documentation
+</code></pre>
+<h3 id="module-guidelines"><a class="header" href="#module-guidelines">Module Guidelines</a></h3>
+<ul>
+<li><strong><code>core/</code></strong> - Domain logic, no external dependencies</li>
+<li><strong><code>storage/</code></strong> - File I/O, persistence</li>
+<li><strong><code>infra/</code></strong> - Cross-cutting concerns</li>
+<li><strong><code>api/</code></strong> - External interfaces (feature-gated)</li>
+</ul>
+<hr />
+<h2 id="-areas-for-contribution"><a class="header" href="#-areas-for-contribution">🎯 Areas for Contribution</a></h2>
+<h3 id="high-priority"><a class="header" href="#high-priority">High Priority</a></h3>
+<ol>
+<li>
+<p><strong>CI/CD Testing Pipeline</strong> (#55)</p>
+<ul>
+<li>Difficulty: Easy</li>
+<li>Impact: High</li>
+<li>Skills: GitHub Actions, YAML</li>
+</ul>
+</li>
+<li>
+<p><strong>Compaction Implementation</strong> (#47)</p>
+<ul>
+<li>Difficulty: Hard</li>
+<li>Impact: High</li>
+<li>Skills: Rust, algorithms, file I/O</li>
+</ul>
+</li>
+<li>
+<p><strong>Efficient Iterators</strong> (#21, #22, #23)</p>
+<ul>
+<li>Difficulty: Medium</li>
+<li>Impact: High</li>
+<li>Skills: Rust, data structures</li>
+</ul>
+</li>
+</ol>
+<h3 id="medium-priority"><a class="header" href="#medium-priority">Medium Priority</a></h3>
+<ol start="4">
+<li>
+<p><strong>Benchmarking Suite</strong> (#48)</p>
+<ul>
+<li>Difficulty: Easy</li>
+<li>Impact: Medium</li>
+<li>Skills: Rust, criterion</li>
+</ul>
+</li>
+<li>
+<p><strong>CLI Command Equalization</strong> (#65)</p>
+<ul>
+<li>Difficulty: Medium</li>
+<li>Impact: Medium</li>
+<li>Skills: Rust, CLI design</li>
+</ul>
+</li>
+<li>
+<p><strong>Checksums &amp; Integrity</strong> (#25)</p>
+<ul>
+<li>Difficulty: Easy</li>
+<li>Impact: High</li>
+<li>Skills: Rust, CRC32</li>
+</ul>
+</li>
+</ol>
+<h3 id="good-first-issues"><a class="header" href="#good-first-issues">Good First Issues</a></h3>
+<ol start="7">
+<li>
+<p><strong>Add More Tests</strong></p>
+<ul>
+<li>Difficulty: Easy</li>
+<li>Impact: Medium</li>
+<li>Skills: Rust, testing</li>
+</ul>
+</li>
+<li>
+<p><strong>Binary Search Optimization</strong> (#37)</p>
+<ul>
+<li>Difficulty: Easy</li>
+<li>Impact: Medium</li>
+<li>Skills: Rust, algorithms</li>
+</ul>
+</li>
+<li>
+<p><strong>Documentation Improvements</strong></p>
+<ul>
+<li>Difficulty: Easy</li>
+<li>Impact: Medium</li>
+<li>Skills: Technical writing</li>
+</ul>
+</li>
+</ol>
+<h3 id="advanced-topics"><a class="header" href="#advanced-topics">Advanced Topics</a></h3>
+<ol start="10">
+<li>
+<p><strong>Replication Support</strong></p>
+<ul>
+<li>Difficulty: Very Hard</li>
+<li>Impact: Very High</li>
+<li>Skills: Distributed systems, Raft</li>
+</ul>
+</li>
+<li>
+<p><strong>Snapshot Isolation</strong></p>
+<ul>
+<li>Difficulty: Hard</li>
+<li>Impact: High</li>
+<li>Skills: Concurrency, MVCC</li>
+</ul>
+</li>
+</ol>
+<hr />
+<h2 id="-questions"><a class="header" href="#-questions">❓ Questions?</a></h2>
+<ul>
+<li><strong>Issues</strong>: <a href="https://github.com/ElioNeto/ApexStore/issues">GitHub Issues</a></li>
+<li><strong>Discussions</strong>: <a href="https://github.com/ElioNeto/ApexStore/discussions">GitHub Discussions</a></li>
+<li><strong>Documentation</strong>: <a href="docs/">docs/</a></li>
+<li><strong>Email</strong>: netoo.elio@hotmail.com</li>
+</ul>
+<hr />
+<h2 id="-ready-to-contribute"><a class="header" href="#-ready-to-contribute">🚀 Ready to Contribute?</a></h2>
+<ol>
+<li>Find an issue or create one</li>
+<li>Comment that you're working on it</li>
+<li>Fork the repo and create a branch from <code>main</code></li>
+<li>Make your changes with tests</li>
+<li>Push to your fork (automated PR will be created)</li>
+<li>Wait for review and address feedback</li>
+</ol>
+<p><strong>Thank you for contributing!</strong> 🎉</p>
+<hr />
+<p><em>Last updated: March 2026</em></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+    </div>
+    </body>
+</html>
