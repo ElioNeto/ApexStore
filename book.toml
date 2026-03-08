@@ -1,0 +1,8 @@
+[book]
+authors = ["Elio Neto"]
+language = "en"
+src = "docs"
+title = "ApexStore Documentation"
+
+[output.html]
+git-repository-url = "https://github.com/ElioNeto/ApexStore"
