@@ -3,37 +3,37 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Configurar tracing
+    // Configure tracing
     tracing_subscriber::fmt()
         .with_target(false)
         .with_level(true)
         .init();
 
-    println!("    ___                       _____ __");
-    println!("   /   |  ____  ___ _  ______/ ___// /_____  Jl");
-    println!(r"  / /| | / __ \/ _ \ |/_/___/\__ \/ __/ __ \/ __/");
-    println!(r" / ___ |/ /_/ /  __/>  <    ___/ / /_/ /_/ / /_");
-    println!(r"/_/  |_/ .___/\___/_/|_|   /____/\__/\____/\__/");
+    println!("    ___                     _____ __                 ");
+    println!("   /   |  ____  ___  _  __ / ___// /_____  _____ ___ ");
+    println!(r"  / /| | / __ \/ _ \| |/_/ \__ \/ __/ __ \/ ___// _ \");
+    println!(r" / ___ |/ /_/ /  __/>  <   ___/ / /_/ /_/ / /  /  __/");
+    println!(r"/_/  |_/ .___/\___/_/|_|  /____/\__/\____/_/   \___/ ");
     println!("      /_/   High-Performance LSM-Tree Engine\n");
 
-    // Configuração
+    // Configuration
     let config = LsmConfig::builder()
         .dir_path(PathBuf::from("./.lsm_data"))
-        .memtable_max_size(4 * 1024) // 4KB para testes
+        .memtable_max_size(4 * 1024) // 4KB for tests
         .build()?;
 
-    println!("📂 Diretório de dados: {}", config.core.dir_path.display());
+    println!("📂 Data directory: {}", config.core.dir_path.display());
 
-    println!("Inicializando engine...");
+    println!("Initializing engine...");
     let engine = LsmEngine::new(config)?;
-    println!("✓ Engine inicializado com sucesso!\n");
+    println!("✓ Engine initialized successfully!\n");
 
     print_help();
     println!();
 
     // REPL Loop
     loop {
-        print!("lsm> ");
+        print!("ApexStore (CLI): ");
         io::stdout().flush()?;
 
         let mut input = String::new();
@@ -44,27 +44,28 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        let parts: Vec<&str> = input.splitn(4, ' ').collect();
+        let parts: Vec<&str> = input.splitn(3, ' ').collect();
         let command = parts[0].to_uppercase();
 
         match command.as_str() {
             "SET" => {
                 if parts.len() < 3 {
-                    println!("❌ Uso: SET <key> <value>");
+                    println!("❌ Usage: SET <key> <value>");
                     continue;
                 }
                 let key = parts[1].to_string();
                 let value = parts[2].as_bytes().to_vec();
+                //let value = parts[2..].join(" ").as_bytes().to_vec();
 
                 match engine.set(key.clone(), value) {
-                    Ok(_) => println!("✓ SET '{}' executado com sucesso", key),
-                    Err(e) => println!("❌ Erro: {}", e),
+                    Ok(_) => println!("✓ SET '{}' executed successfully", key),
+                    Err(e) => println!("❌ Error: {}", e),
                 }
             }
 
             "GET" => {
                 if parts.len() < 2 {
-                    println!("❌ Uso: GET <key>");
+                    println!("❌ Usage: GET <key>");
                     continue;
                 }
                 let key = parts[1];
@@ -74,21 +75,21 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let value_str = String::from_utf8_lossy(&value);
                         println!("✓ '{}' = '{}'", key, value_str);
                     }
-                    Ok(None) => println!("⚠ Chave '{}' não encontrada", key),
-                    Err(e) => println!("❌ Erro: {}", e),
+                    Ok(None) => println!("⚠ Key '{}' not found", key),
+                    Err(e) => println!("❌ Error: {}", e),
                 }
             }
 
             "DELETE" | "DEL" => {
                 if parts.len() < 2 {
-                    println!("❌ Uso: DELETE <key>");
+                    println!("❌ Usage: DELETE <key>");
                     continue;
                 }
                 let key = parts[1].to_string();
 
                 match engine.delete(key.clone()) {
-                    Ok(_) => println!("✓ DELETE '{}' executado (tombstone criado)", key),
-                    Err(e) => println!("❌ Erro: {}", e),
+                    Ok(_) => println!("✓ DELETE '{}' executed (tombstone created)", key),
+                    Err(e) => println!("❌ Error: {}", e),
                 }
             }
 
@@ -98,9 +99,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                     match engine.stats_all() {
                         Ok(stats) => match serde_json::to_string_pretty(&stats) {
                             Ok(json) => println!("{}", json),
-                            Err(e) => println!("❌ Erro ao serializar JSON: {}", e),
+                            Err(e) => println!("❌ Error serializing JSON: {}", e),
                         },
-                        Err(e) => println!("❌ Erro: {}", e),
+                        Err(e) => println!("❌ Error: {}", e),
                     }
                 } else {
                     println!("{}", engine.stats());
@@ -109,7 +110,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             "SEARCH" => {
                 if parts.len() < 2 {
-                    println!("❌ Uso: SEARCH <query> [--prefix]");
+                    println!("❌ Usage: SEARCH <query> [--prefix]");
                     continue;
                 }
 
@@ -125,16 +126,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match results {
                     Ok(records) => {
                         if records.is_empty() {
-                            println!("⚠ Nenhum registro encontrado");
+                            println!("⚠ No records found");
                         } else {
-                            println!("✓ {} registro(s) encontrado(s):\n", records.len());
+                            println!("✓ {} record(s) found:\n", records.len());
                             for (key, value) in records {
                                 let value_str = String::from_utf8_lossy(&value);
                                 println!("  {} = {}", key, value_str);
                             }
                         }
                     }
-                    Err(e) => println!("❌ Erro: {}", e),
+                    Err(e) => println!("❌ Error: {}", e),
                 }
             }
 
@@ -144,13 +145,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             "CLEAR" => {
                 print!("\x1B[2J\x1B[1;1H"); // Clear screen ANSI code
-                println!("╔═══════════════════════════════════════════════════════╗");
-                println!("║     LSM-Tree Key-Value Store - Interactive CLI       ║");
-                println!("╚═══════════════════════════════════════════════════════╝\n");
+                println!("    ___                     _____ __                 ");
+                println!("   /   |  ____  ___  _  __ / ___// /_____  _____ ___ ");
+                println!(r"  / /| | / __ \/ _ \| |/_/ \__ \/ __/ __ \/ ___// _ \");
+                println!(r" / ___ |/ /_/ /  __/>  <   ___/ / /_/ /_/ / /  /  __/");
+                println!(r"/_/  |_/ .___/\___/_/|_|  /____/\__/\____/_/   \___/ ");
+                println!("      /_/   High-Performance LSM-Tree Engine\n");
             }
 
             "EXIT" | "QUIT" | "Q" => {
-                println!("👋 Encerrando LSM-Tree CLI...");
+                println!("👋 Closing ApexStore... See you later");
                 break;
             }
 
@@ -162,7 +166,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if parts.len() >= 3 && parts[1].to_uppercase() == "SET" {
                     // BATCH SET <file>
                     let file_path = parts[2];
-                    println!("Importando de {}...", file_path);
+                    println!("Importing from {}...", file_path);
 
                     match std::fs::read_to_string(file_path) {
                         Ok(content) => {
@@ -182,37 +186,37 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     match engine.set(key.to_string(), value.as_bytes().to_vec()) {
                                         Ok(_) => count += 1,
                                         Err(e) => {
-                                            println!("⚠ Erro na linha {}: {}", line_num + 1, e);
+                                            println!("⚠ Error on line {}: {}", line_num + 1, e);
                                             errors += 1;
                                         }
                                     }
                                 } else {
                                     println!(
-                                        "⚠ Linha {} inválida (formato esperado: key=value)",
+                                        "⚠ Invalid line {} (expected format: key=value)",
                                         line_num + 1
                                     );
                                     errors += 1;
                                 }
                             }
 
-                            println!("✓ {} registro(s) importado(s)", count);
+                            println!("✓ {} record(s) imported", count);
                             if errors > 0 {
-                                println!("⚠ {} erro(s) encontrado(s)", errors);
+                                println!("⚠ {} error(s) found", errors);
                             }
                         }
-                        Err(e) => println!("❌ Erro ao ler arquivo: {}", e),
+                        Err(e) => println!("❌ Error reading file: {}", e),
                     }
                 } else if parts.len() >= 2 {
                     // BATCH <count> (existing functionality)
                     let count: usize = match parts[1].parse() {
                         Ok(n) => n,
                         Err(_) => {
-                            println!("❌ Count inválido");
+                            println!("❌ Invalid count");
                             continue;
                         }
                     };
 
-                    println!("Inserindo {} registros...", count);
+                    println!("Inserting {} records...", count);
                     let start = std::time::Instant::now();
 
                     for i in 0..count {
@@ -222,16 +226,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     let elapsed = start.elapsed();
-                    println!("✓ {} registros inseridos em {:.2?}", count, elapsed);
-                    println!("  Taxa: {:.0} ops/s", count as f64 / elapsed.as_secs_f64());
+                    println!("✓ {} records inserted in {:.2?}", count, elapsed);
+                    println!("  Rate: {:.0} ops/s", count as f64 / elapsed.as_secs_f64());
                 } else {
-                    println!("❌ Uso: BATCH <count> | BATCH SET <file>");
+                    println!("❌ Usage: BATCH <count> | BATCH SET <file>");
                 }
             }
 
             "SCAN" => {
                 if parts.len() < 2 {
-                    println!("❌ Uso: SCAN <prefix>");
+                    println!("❌ Usage: SCAN <prefix>");
                     continue;
                 }
                 let prefix = parts[1];
@@ -240,32 +244,28 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match engine.search_prefix(prefix) {
                     Ok(records) => {
                         if records.is_empty() {
-                            println!("⚠ Nenhum registro encontrado com prefixo '{}'", prefix);
+                            println!("⚠ No records found with prefix '{}'", prefix);
                         } else {
-                            println!(
-                                "✓ {} registro(s) com prefixo '{}':\n",
-                                records.len(),
-                                prefix
-                            );
+                            println!("✓ {} record(s) with prefix '{}':\n", records.len(), prefix);
                             for (key, value) in records {
                                 let value_str = String::from_utf8_lossy(&value);
                                 println!("  {} = {}", key, value_str);
                             }
                         }
                     }
-                    Err(e) => println!("❌ Erro: {}", e),
+                    Err(e) => println!("❌ Error: {}", e),
                 }
             }
 
             "ALL" => {
-                println!("Listando todos os registros...\n");
+                println!("Listing all records...\n");
                 match engine.scan() {
                     Ok(records) => {
                         if records.is_empty() {
-                            println!("⚠ Banco de dados vazio");
+                            println!("⚠ Database is empty");
                         } else {
                             println!("┌─────────────────────────────────────────────────┐");
-                            println!("│  Chave                │  Valor                 │");
+                            println!("│  Key                  │  Value                 │");
                             println!("├─────────────────────────────────────────────────┤");
 
                             for (key, value) in records {
@@ -286,32 +286,32 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                             println!("└─────────────────────────────────────────────────┘");
                         }
                     }
-                    Err(e) => println!("❌ Erro ao escanear: {}", e),
+                    Err(e) => println!("❌ Error scanning: {}", e),
                 }
             }
 
             "KEYS" => match engine.keys() {
                 Ok(keys) => {
                     if keys.is_empty() {
-                        println!("⚠ Nenhuma chave encontrada");
+                        println!("⚠ No keys found");
                     } else {
-                        println!("Total de chaves: {}\n", keys.len());
+                        println!("Total keys: {}\n", keys.len());
                         for (i, key) in keys.iter().enumerate() {
                             println!("  {}. {}", i + 1, key);
                         }
                     }
                 }
-                Err(e) => println!("❌ Erro: {}", e),
+                Err(e) => println!("❌ Error: {}", e),
             },
 
             "COUNT" => match engine.count() {
-                Ok(count) => println!("✓ Total de registros ativos: {}", count),
-                Err(e) => println!("❌ Erro: {}", e),
+                Ok(count) => println!("✓ Total active records: {}", count),
+                Err(e) => println!("❌ Error: {}", e),
             },
 
             _ => {
-                println!("❌ Comando desconhecido: '{}'", command);
-                println!("   Digite HELP para ver comandos disponíveis");
+                println!("❌ Unknown command: '{}'", command);
+                println!("   Type HELP to see available commands");
             }
         }
     }
@@ -320,36 +320,36 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn print_help() {
-    println!("Comandos disponíveis:");
-    println!("  SET <key> <value>         - Insere ou atualiza um par chave-valor");
-    println!("  GET <key>                 - Recupera o valor de uma chave");
-    println!("  DELETE <key>              - Remove uma chave (cria tombstone)");
-    println!("  SEARCH <query> [--prefix] - Busca registros (opcionalmente por prefixo)");
-    println!("  SCAN <prefix>             - Lista registros com prefixo específico");
-    println!("  ALL                       - Lista todos os registros do banco");
-    println!("  KEYS                      - Lista apenas as chaves");
-    println!("  COUNT                     - Conta registros ativos");
-    println!("  STATS [ALL]               - Exibe estatísticas (básicas ou detalhadas)");
-    println!("  BATCH <count>             - Insere N registros de teste");
-    println!("  BATCH SET <file>          - Importa registros de arquivo");
-    println!("  DEMO                      - Executa demonstração de features");
-    println!("  CLEAR                     - Limpa a tela");
-    println!("  HELP ou ?                 - Exibe esta ajuda");
-    println!("  EXIT, QUIT ou Q           - Sai do programa");
+    println!("Available commands:");
+    println!("  SET <key> <value>         - Insert or update a key-value pair");
+    println!("  GET <key>                 - Retrieve the value of a key");
+    println!("  DELETE <key>              - Remove a key (creates tombstone)");
+    println!("  SEARCH <query> [--prefix] - Search records (optionally by prefix)");
+    println!("  SCAN <prefix>             - List records with specific prefix");
+    println!("  ALL                       - List all database records");
+    println!("  KEYS                      - List only the keys");
+    println!("  COUNT                     - Count active records");
+    println!("  STATS [ALL]               - Display statistics (basic or detailed)");
+    println!("  BATCH <count>             - Insert N test records");
+    println!("  BATCH SET <file>          - Import records from file");
+    println!("  DEMO                      - Run feature demonstration");
+    println!("  CLEAR                     - Clear the screen");
+    println!("  HELP or ?                 - Display this help");
+    println!("  EXIT, QUIT or Q           - Exit the program");
 }
 
 fn run_demo(engine: &LsmEngine) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n╔═══════════════════════════════════════════════════════╗");
-    println!("║                  DEMO AUTOMÁTICA                      ║");
+    println!("║                  AUTOMATIC DEMO                       ║");
     println!("╚═══════════════════════════════════════════════════════╝\n");
 
-    println!("1. Inserindo dados de exemplo...");
+    println!("1. Inserting sample data...");
     engine.set("user:alice".to_string(), b"Alice Silva".to_vec())?;
     engine.set("user:bob".to_string(), b"Bob Santos".to_vec())?;
     engine.set("user:charlie".to_string(), b"Charlie Costa".to_vec())?;
-    println!("   ✓ 3 usuários inseridos\n");
+    println!("   ✓ 3 users inserted\n");
 
-    println!("2. Lendo dados...");
+    println!("2. Reading data...");
     if let Some(v) = engine.get("user:alice")? {
         println!("   user:alice = {}", String::from_utf8_lossy(&v));
     }
@@ -358,66 +358,59 @@ fn run_demo(engine: &LsmEngine) -> Result<(), Box<dyn std::error::Error>> {
     }
     println!();
 
-    println!("3. Atualizando user:alice...");
+    println!("3. Updating user:alice...");
     engine.set("user:alice".to_string(), b"Alice Silva Santos".to_vec())?;
     if let Some(v) = engine.get("user:alice")? {
-        println!(
-            "   user:alice = {} (atualizado)",
-            String::from_utf8_lossy(&v)
-        );
+        println!("   user:alice = {} (updated)", String::from_utf8_lossy(&v));
     }
     println!();
 
-    println!("4. Deletando user:bob...");
+    println!("4. Deleting user:bob...");
     engine.delete("user:bob".to_string())?;
     match engine.get("user:bob")? {
-        Some(_) => println!("   ❌ Erro: ainda existe"),
-        None => println!("   ✓ user:bob deletado com sucesso"),
+        Some(_) => println!("   ❌ Error: still exists"),
+        None => println!("   ✓ user:bob deleted successfully"),
     }
     println!();
 
-    println!("5. Forçando múltiplas escritas para flush...");
+    println!("5. Forcing multiple writes to trigger flush...");
     for i in 0..10 {
         engine.set(
             format!("product:{}", i),
-            format!(
-                "Product {} - Descrição longa para forçar flush automático",
-                i
-            )
-            .into_bytes(),
+            format!("Product {} - Long description to force automatic flush", i).into_bytes(),
         )?;
     }
-    println!("   ✓ 10 produtos inseridos\n");
+    println!("   ✓ 10 products inserted\n");
 
-    println!("6. Testando novos comandos...");
+    println!("6. Testing new commands...");
     println!("   - SEARCH user:");
     match engine.search("user:") {
-        Ok(results) => println!("     Encontrados {} registros", results.len()),
-        Err(e) => println!("     Erro: {}", e),
+        Ok(results) => println!("     Found {} records", results.len()),
+        Err(e) => println!("     Error: {}", e),
     }
 
     println!("   - SEARCH user: --prefix");
     match engine.search_prefix("user:") {
-        Ok(results) => println!("     Encontrados {} registros", results.len()),
-        Err(e) => println!("     Erro: {}", e),
+        Ok(results) => println!("     Found {} records", results.len()),
+        Err(e) => println!("     Error: {}", e),
     }
     println!();
 
-    println!("7. Estatísticas finais (básicas):");
+    println!("7. Final statistics (basic):");
     println!("{}", engine.stats());
 
-    println!("\n8. Estatísticas detalhadas:");
+    println!("\n8. Detailed statistics:");
     match engine.stats_all() {
         Ok(stats) => {
             if let Ok(json) = serde_json::to_string_pretty(&stats) {
                 println!("{}", json);
             }
         }
-        Err(e) => println!("   Erro: {}", e),
+        Err(e) => println!("   Error: {}", e),
     }
 
     println!("\n╔═══════════════════════════════════════════════════════╗");
-    println!("║               DEMO CONCLUÍDA                          ║");
+    println!("║               DEMO COMPLETED                          ║");
     println!("╚═══════════════════════════════════════════════════════╝\n");
 
     Ok(())
