@@ -199,7 +199,7 @@ jobs:
 
             if [ "$ISSUE_STATE" = "OPEN" ]; then
               # Get recent commits for this branch
-              RECENT_COMMITS=$(git log "origin/develop..${{ github.ref_name }}"-n 3 --pretty=format:'- %s (%h)')
+              RECENT_COMMITS=$(git log "origin/develop..${{ github.ref_name }}" -n 3 --pretty=format:'- %s (%h)')
 
               gh issue comment "$ISSUE_NUM" --body "🔄 **Update from \`${{ github.ref_name }}\`**
 
