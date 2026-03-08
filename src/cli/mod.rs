@@ -9,9 +9,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_level(true)
         .init();
 
-    println!("    ___                      _____ __                 ");
-    println!("   /   |  ____  ___  _  __ / ___// /_____  ________ ");
-    println!(r"  / /| | / __ \/ _ \| |/_/ \__ \/ __/ __ \/ ___/ _ \");
+    println!("    ___                     _____ __                 ");
+    println!("   /   |  ____  ___  _  __ / ___// /_____  _____ ___ ");
+    println!(r"  / /| | / __ \/ _ \| |/_/ \__ \/ __/ __ \/ ___// _ \");
     println!(r" / ___ |/ /_/ /  __/>  <   ___/ / /_/ /_/ / /  /  __/");
     println!(r"/_/  |_/ .___/\___/_/|_|  /____/\__/\____/_/   \___/ ");
     println!("      /_/   High-Performance LSM-Tree Engine\n");
@@ -242,11 +242,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if records.is_empty() {
                             println!("⚠ No records found with prefix '{}'", prefix);
                         } else {
-                            println!(
-                                "✓ {} record(s) with prefix '{}':\n",
-                                records.len(),
-                                prefix
-                            );
+                            println!("✓ {} record(s) with prefix '{}':\n", records.len(), prefix);
                             for (key, value) in records {
                                 let value_str = String::from_utf8_lossy(&value);
                                 println!("  {} = {}", key, value_str);
@@ -361,10 +357,7 @@ fn run_demo(engine: &LsmEngine) -> Result<(), Box<dyn std::error::Error>> {
     println!("3. Updating user:alice...");
     engine.set("user:alice".to_string(), b"Alice Silva Santos".to_vec())?;
     if let Some(v) = engine.get("user:alice")? {
-        println!(
-            "   user:alice = {} (updated)",
-            String::from_utf8_lossy(&v)
-        );
+        println!("   user:alice = {} (updated)", String::from_utf8_lossy(&v));
     }
     println!();
 
@@ -380,11 +373,7 @@ fn run_demo(engine: &LsmEngine) -> Result<(), Box<dyn std::error::Error>> {
     for i in 0..10 {
         engine.set(
             format!("product:{}", i),
-            format!(
-                "Product {} - Long description to force automatic flush",
-                i
-            )
-            .into_bytes(),
+            format!("Product {} - Long description to force automatic flush", i).into_bytes(),
         )?;
     }
     println!("   ✓ 10 products inserted\n");
