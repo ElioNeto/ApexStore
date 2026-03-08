@@ -9,10 +9,12 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_level(true)
         .init();
 
-    println!("╔═══════════════════════════════════════════════════════╗");
-    println!("║     LSM-Tree Key-Value Store - Interactive CLI       ║");
-    println!("║                    Fase 1: Storage Engine             ║");
-    println!("╚═══════════════════════════════════════════════════════╝\n");
+    println!("    ___                       _____ __");
+    println!("   /   |  ____  ___ _  ______/ ___// /_____  Jl");
+    println!(r"  / /| | / __ \/ _ \ |/_/___/\__ \/ __/ __ \/ __/");
+    println!(r" / ___ |/ /_/ /  __/>  <    ___/ / /_/ /_/ / /_");
+    println!(r"/_/  |_/ .___/\___/_/|_|   /____/\__/\____/\__/");
+    println!("      /_/   High-Performance LSM-Tree Engine\n");
 
     // Configuração
     let config = LsmConfig::builder()
