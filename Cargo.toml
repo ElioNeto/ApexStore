@@ -1,22 +1,36 @@
 [package]
-name = "apexstore"
+name = "apex-store-rs" # Alterado para ser único no crates.io
 version = "2.1.0"
 edition = "2021"
 authors = ["Elio Neto <netoo.elio@hotmail.com>"]
 license = "MIT"
 repository = "https://github.com/ElioNeto/ApexStore"
-description = "A high-performance LSM-tree storage engine with SSTable V2 format"
+homepage = "https://github.com/ElioNeto/ApexStore"
+documentation = "https://elioneto.github.io/ApexStore/"
+readme = "README.md"
+description = "A high-performance, embedded LSM-tree storage engine with SSTable V2 format, LZ4 compression, and Bloom Filters."
+keywords = ["database", "lsm-tree", "key-value", "storage-engine", "embedded"]
+categories = ["database-implementations", "data-structures"]
+# Impede que arquivos de banco de dados locais sejam enviados no pacote
+exclude = [
+    "data/*",
+    "target/*",
+    "*.sst",
+    "*.log",
+    ".env",
+    "docs/assets/*"
+]
 
 [[bin]]
 name = "apexstore-server"
 path = "src/bin/server.rs"
 
 [[bin]]
-name = "cli"
+name = "apexstore-cli" # Renomeado de 'cli' para evitar conflitos globais
 path = "src/bin/cli.rs"
 
 [lib]
-name = "apexstore"
+name = "apexstore" # Mantido para que você use `use apexstore;` no seu código
 path = "src/lib.rs"
 
 [features]
@@ -55,6 +69,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 opt-level = 3
 lto = true
 codegen-units = 1
+panic = "abort" # Opcional: reduz o tamanho do binário
 
 [profile.bench]
 inherits = "release"
