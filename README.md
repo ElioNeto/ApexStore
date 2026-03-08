@@ -16,6 +16,7 @@
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.70%2B-orange.svg" alt="Rust Version"></a>
   <a href="https://github.com/ElioNeto/ApexStore/releases"><img src="https://img.shields.io/badge/version-1.4.0-blue.svg" alt="Version"></a>
   <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker"></a>
+  <a href="https://github.com/ElioNeto/ApexStore/actions"><img src="https://github.com/ElioNeto/ApexStore/actions/workflows/deploy-docs.yml/badge.svg" alt="CI"></a>
 </p>
 
 ---
