@@ -33,7 +33,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // REPL Loop
     loop {
-        print!("lsm> ");
+        print!("ApexStore (CLI): ");
         io::stdout().flush()?;
 
         let mut input = String::new();
@@ -44,7 +44,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        let parts: Vec<&str> = input.splitn(4, ' ').collect();
+        let parts: Vec<&str> = input.splitn(3, ' ').collect();
         let command = parts[0].to_uppercase();
 
         match command.as_str() {
@@ -55,6 +55,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 let key = parts[1].to_string();
                 let value = parts[2].as_bytes().to_vec();
+                //let value = parts[2..].join(" ").as_bytes().to_vec();
 
                 match engine.set(key.clone(), value) {
                     Ok(_) => println!("✓ SET '{}' executed successfully", key),
@@ -144,13 +145,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             "CLEAR" => {
                 print!("\x1B[2J\x1B[1;1H"); // Clear screen ANSI code
-                println!("╔═══════════════════════════════════════════════════════╗");
-                println!("║     LSM-Tree Key-Value Store - Interactive CLI       ║");
-                println!("╚═══════════════════════════════════════════════════════╝\n");
+                println!("    ___                     _____ __                 ");
+                println!("   /   |  ____  ___  _  __ / ___// /_____  _____ ___ ");
+                println!(r"  / /| | / __ \/ _ \| |/_/ \__ \/ __/ __ \/ ___// _ \");
+                println!(r" / ___ |/ /_/ /  __/>  <   ___/ / /_/ /_/ / /  /  __/");
+                println!(r"/_/  |_/ .___/\___/_/|_|  /____/\__/\____/_/   \___/ ");
+                println!("      /_/   High-Performance LSM-Tree Engine\n");
             }
 
             "EXIT" | "QUIT" | "Q" => {
-                println!("👋 Closing LSM-Tree CLI...");
+                println!("👋 Closing ApexStore... See you later");
                 break;
             }
 
