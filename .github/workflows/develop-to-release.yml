@@ -31,31 +31,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine version bump
+      - name: Determine version and extract info
         id: version
         run: |
-          # Fetch all tags to ensure we have the latest
           git fetch --tags --force
           
-          # Get the latest tag (preferably from main branch)
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "Last tag: $LAST_TAG"
 
-          # Parse version
           LAST_VERSION=${LAST_TAG#v}
           IFS='.' read -ra VERSION_PARTS <<< "$LAST_VERSION"
           MAJOR=${VERSION_PARTS[0]:-0}
           MINOR=${VERSION_PARTS[1]:-0}
           PATCH=${VERSION_PARTS[2]:-0}
 
-          # Get commits since last tag
           if [ "$LAST_TAG" = "v0.0.0" ]; then
             COMMITS=$(git log --pretty=format:"%s")
           else
             COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%s")
           fi
 
-          # Determine bump type based on conventional commits
+          # Determine bump type
           if echo "$COMMITS" | grep -qiE "^(BREAKING CHANGE|feat!|fix!):"; then
             MAJOR=$((MAJOR + 1))
             MINOR=0
@@ -72,9 +68,7 @@ jobs:
 
           NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
           
-          # Check if this version already exists as a tag and increment if needed
           while git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; do
-            echo "⚠️ Tag v${NEW_VERSION} already exists, incrementing patch version..."
             PATCH=$((PATCH + 1))
             NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
           done
@@ -82,7 +76,20 @@ jobs:
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "bump_type=$BUMP_TYPE" >> "$GITHUB_OUTPUT"
           echo "last_tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
-          echo "✅ New version will be: v$NEW_VERSION (${BUMP_TYPE} bump from $LAST_TAG)"
+          
+          # Extract issues
+          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?) #[0-9]+' | grep -oE '#[0-9]+' | sort -u | tr '\n' ' ' || echo "")
+          echo "issues=$ISSUES" >> "$GITHUB_OUTPUT"
+          
+          # Generate changelog
+          if [ "$LAST_TAG" = "v0.0.0" ]; then
+            CHANGELOG=$(git log --pretty=format:'- %s `%h`' | head -20)
+          else
+            CHANGELOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:'- %s `%h`')
+          fi
+          echo "changelog<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGELOG" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Create or update release branch
         env:
@@ -94,98 +101,38 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           if git ls-remote --heads origin "$RELEASE_BRANCH" | grep -q "$RELEASE_BRANCH"; then
-            echo "📌 Branch $RELEASE_BRANCH já existe, atualizando..."
             git fetch origin "$RELEASE_BRANCH"
             git checkout "$RELEASE_BRANCH"
             git merge origin/develop --no-edit
           else
-            echo "🆕 Criando nova branch $RELEASE_BRANCH"
             git checkout -b "$RELEASE_BRANCH"
           fi
 
           git push origin "$RELEASE_BRANCH"
-          echo "RELEASE_BRANCH=$RELEASE_BRANCH" >> "$GITHUB_ENV"
 
-      - name: Check if PR exists
-        id: check-pr
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NEW_VERSION: ${{ steps.version.outputs.new_version }}
-        run: |
-          RELEASE_BRANCH="release/v${NEW_VERSION}"
-
-          PR_EXISTS=$(gh pr list --head "$RELEASE_BRANCH" --base main --json number --jq 'length')
-          echo "pr_exists=$PR_EXISTS" >> "$GITHUB_OUTPUT"
-
-          if [ "$PR_EXISTS" -gt 0 ]; then
-            PR_NUMBER=$(gh pr list --head "$RELEASE_BRANCH" --base main --json number --jq '.[0].number')
-            echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Extract issues from commits
-        id: extract-issues
-        env:
-          LAST_TAG: ${{ steps.version.outputs.last_tag }}
-        run: |
-          if [ "$LAST_TAG" = "v0.0.0" ]; then
-            COMMITS=$(git log --pretty=format:'%s' | head -50)
-          else
-            COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:'%s')
-          fi
-
-          # Extract issue numbers (Closes #123, Fixes #456, #789)
-          ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?) #[0-9]+' | grep -oE '#[0-9]+' | sort -u | tr '\n' ' ' || echo "")
-          echo "issues=$ISSUES" >> "$GITHUB_OUTPUT"
-          
-          if [ -n "$ISSUES" ]; then
-            echo "Found issues: $ISSUES"
-          else
-            echo "No issues referenced in commits"
-          fi
-
-      - name: Generate changelog
-        id: changelog
-        env:
-          LAST_TAG: ${{ steps.version.outputs.last_tag }}
-        run: |
-          if [ "$LAST_TAG" = "v0.0.0" ]; then
-            CHANGELOG=$(git log --pretty=format:'- %s `%h`' | head -20)
-          else
-            CHANGELOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:'- %s `%h`')
-          fi
-
-          echo "$CHANGELOG" > /tmp/changelog.txt
-
-      - name: Create or update PR to main
+      - name: Check and create PR
         env:
           GH_TOKEN: ${{ github.token }}
           NEW_VERSION: ${{ steps.version.outputs.new_version }}
           BUMP_TYPE: ${{ steps.version.outputs.bump_type }}
-          ISSUES: ${{ steps.extract-issues.outputs.issues }}
+          ISSUES: ${{ steps.version.outputs.issues }}
           LAST_TAG: ${{ steps.version.outputs.last_tag }}
+          CHANGELOG: ${{ steps.version.outputs.changelog }}
         run: |
           RELEASE_BRANCH="release/v${NEW_VERSION}"
-          CHANGELOG=$(cat /tmp/changelog.txt)
+          
+          PR_EXISTS=$(gh pr list --head "$RELEASE_BRANCH" --base main --json number --jq 'length')
 
-          # Format issues list for PR body (optional section)
-          ISSUES_SECTION=""
-          if [ -n "$ISSUES" ]; then
-            ISSUES_LIST=""
-            for ISSUE in $ISSUES; do
-              ISSUE_NUM=${ISSUE#\#}
-              ISSUES_LIST+="- $ISSUE\n"
-            done
-            ISSUES_SECTION="### 🐛 Issues Resolvidas
-          $ISSUES_LIST
+          if [ "$PR_EXISTS" -eq 0 ]; then
+            ISSUES_SECTION=""
+            if [ -n "$ISSUES" ]; then
+              ISSUES_LIST=""
+              for ISSUE in $ISSUES; do
+                ISSUES_LIST+="- $ISSUE\n"
+              done
+              ISSUES_SECTION="### 🐛 Issues Resolvidas\n$ISSUES_LIST\n\n---\n\n"
+            fi
 
-          _Essas issues serão fechadas automaticamente quando este PR for mergeado._
-
-          ---
-
-          "
-          fi
-
-          if [ "${{ steps.check-pr.outputs.pr_exists }}" -eq 0 ]; then
             gh pr create \
               --base main \
               --head "$RELEASE_BRANCH" \
@@ -197,16 +144,9 @@ jobs:
           ---
 
           ### ⚙️ Release Configuration
-          **Escolha o tipo de release editando abaixo:**
-
           Release Type: [lts]
 
-          **Opções válidas:**
-          - \`alpha\` - Release alpha (instável, desenvolvimento)
-          - \`beta\` - Release beta (pré-release, testes)
-          - \`lts\` - Release estável de longo prazo (produção)
-
-          **📝 Instruções:** Edite este PR e substitua \`lts\` acima por \`alpha\`, \`beta\` ou mantenha \`lts\`.
+          **Options:** \`alpha\`, \`beta\`, \`lts\`
 
           ---
 
@@ -215,20 +155,8 @@ jobs:
 
           ---
 
-          ### ✅ Checklist antes do merge
-          - [ ] Revisei as mudanças
-          - [ ] Defini o tipo de release correto
-          - [ ] Testes passaram em develop
-          - [ ] Documentação atualizada (se necessário)
-
-          ---
-
-          _Este PR foi gerado automaticamente pelo workflow develop-to-release_" \
+          _Auto-generated by develop-to-release workflow_" \
               --draft
-
-            echo "✅ PR criado: release/v${NEW_VERSION} → main (draft)"
-          else
-            echo "ℹ️ PR já existe (#${{ steps.check-pr.outputs.pr_number }})"
           fi
 
   close-issues-on-release:
@@ -243,20 +171,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Extract version from branch
-        id: version
-        run: |
-          BRANCH_NAME="${{ github.head_ref }}"
-          VERSION=${BRANCH_NAME#release/}
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Checking for issues to close in release $VERSION"
-
       - name: Extract and close issues
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # Get the last tag before this release
+          BRANCH_NAME="${{ github.head_ref }}"
+          VERSION=${BRANCH_NAME#release/}
+          
           LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
           if [ -n "$LAST_TAG" ]; then
@@ -265,40 +186,21 @@ jobs:
             COMMITS=$(git log --pretty=format:'%s')
           fi
 
-          # Extract all issue references
           ISSUES=$(echo "$COMMITS" | grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?|#)[[:space:]]*#[0-9]+' | grep -oE '#[0-9]+' | sort -u || echo "")
 
           if [ -z "$ISSUES" ]; then
-            echo "ℹ️ No issues referenced in commits - skipping issue closure"
-            echo "This is normal if commits didn't reference any issues."
             exit 0
           fi
 
-          echo "Found issues to close: $ISSUES"
-
           for ISSUE in $ISSUES; do
             ISSUE_NUM=${ISSUE#\#}
-            echo "Processing issue #$ISSUE_NUM"
 
-            # Check if issue exists
             if gh issue view "$ISSUE_NUM" &>/dev/null; then
-              # Add comment to issue
               gh issue comment "$ISSUE_NUM" --body "✅ **Resolved in Release $VERSION**
 
-          This issue has been fixed and released in version \`$VERSION\`.
+          **Release:** [View Release](https://github.com/${{ github.repository }}/releases/tag/$VERSION)
+          **PR:** #${{ github.event.pull_request.number }}" 2>/dev/null || true
 
-          **Release Details:**
-          - 🏷️ Version: $VERSION
-          - 📦 Release: [View Release](https://github.com/${{ github.repository }}/releases/tag/$VERSION)
-          - 🔀 PR: #${{ github.event.pull_request.number }}
-
-          Thank you for your contribution!" 2>/dev/null || echo "⚠️ Could not comment on issue #$ISSUE_NUM"
-
-              # Close the issue
-              gh issue close "$ISSUE_NUM" --reason completed 2>/dev/null && echo "✅ Issue #$ISSUE_NUM closed" || echo "⚠️ Could not close issue #$ISSUE_NUM (may already be closed)"
-            else
-              echo "⚠️ Issue #$ISSUE_NUM not found - skipping"
+              gh issue close "$ISSUE_NUM" --reason completed 2>/dev/null || true
             fi
           done
-
-          echo "✅ Issue processing complete"
