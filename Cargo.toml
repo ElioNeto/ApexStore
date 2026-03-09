@@ -1,5 +1,5 @@
 [package]
-name = "apex-store-rs" # Alterado para ser único no crates.io
+name = "apex-store-rs"
 version = "2.1.0"
 edition = "2021"
 authors = ["Elio Neto <netoo.elio@hotmail.com>"]
@@ -11,7 +11,6 @@ readme = "README.md"
 description = "A high-performance, embedded LSM-tree storage engine with SSTable V2 format, LZ4 compression, and Bloom Filters."
 keywords = ["database", "lsm-tree", "key-value", "storage-engine", "embedded"]
 categories = ["database-implementations", "data-structures"]
-# Impede que arquivos de banco de dados locais sejam enviados no pacote
 exclude = [
     "data/*",
     "target/*",
@@ -26,11 +25,15 @@ name = "apexstore-server"
 path = "src/bin/server.rs"
 
 [[bin]]
-name = "apexstore-cli" # Renomeado de 'cli' para evitar conflitos globais
+name = "apexstore-cli"
 path = "src/bin/cli.rs"
 
+[[bin]]
+name = "apexstore-tui"
+path = "src/bin/tui.rs"
+
 [lib]
-name = "apexstore" # Mantido para que você use `use apexstore;` no seu código
+name = "apexstore"
 path = "src/lib.rs"
 
 [features]
@@ -60,6 +63,11 @@ parking_lot = "0.12"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 rand = "0.8"
+# TUI dependencies
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+chrono = "0.4"
+tui-input = "0.10"
 
 [dev-dependencies]
 tempfile = "3.24"
@@ -69,7 +77,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 opt-level = 3
 lto = true
 codegen-units = 1
-panic = "abort" # Opcional: reduz o tamanho do binário
+panic = "abort"
 
 [profile.bench]
 inherits = "release"
