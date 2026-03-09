@@ -5,6 +5,7 @@ on:
     branches:
       - "feature/**"
       - "fix/**"
+      - "feat**"
   pull_request:
     types:
       - opened
