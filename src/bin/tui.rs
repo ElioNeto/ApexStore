@@ -551,10 +551,10 @@ fn main() -> io::Result<()> {
         .dir_path(PathBuf::from("./.lsm_data"))
         .memtable_max_size(64 * 1024) // 64 KB
         .build()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     let engine =
-        LsmEngine::new(config).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        LsmEngine::new(config).map_err(|e| io::Error::other(e.to_string()))?;
 
     let mut terminal = setup()?;
     let mut app = App::new(engine);
@@ -566,11 +566,9 @@ fn main() -> io::Result<()> {
         if event::poll(tick)? {
             match event::read()? {
                 Event::Key(k) => {
-                    if matches!(k.code, KeyCode::Char('c'))
-                        && k.modifiers.contains(KeyModifiers::CONTROL)
+                    if (matches!(k.code, KeyCode::Char('c')) && k.modifiers.contains(KeyModifiers::CONTROL))
+                        || matches!(k.code, KeyCode::Esc)
                     {
-                        app.should_quit = true;
-                    } else if matches!(k.code, KeyCode::Esc) {
                         app.should_quit = true;
                     } else if app.focus == Focus::Input {
                         match k.code {
