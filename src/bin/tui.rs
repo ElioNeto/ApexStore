@@ -1,25 +1,40 @@
-//! ApexStore Interactive TUI Dashboard
+//! ApexStore — Interactive TUI Dashboard
 //!
-//! Run with: `cargo run --bin apexstore-tui`
-//! Quit with: `q` or `Esc`
+//! Run : `cargo run --bin apexstore-tui`
+//! Quit: `q`, `quit`, `exit`, or Esc / Ctrl-C
 //!
-//! Commands available in the input panel:
-//!   get <key>            - Simulate a GET operation
-//!   set <key> <value>    - Simulate a SET operation
-//!   del <key>            - Simulate a DELETE operation
-//!   stats                - Print current statistics
-//!   clear                - Clear the command log
-//!   help                 - Show help
+//! All commands are identical to the CLI:
+//!   SET <key> <value>
+//!   GET <key>
+//!   DEL <key>
+//!   SEARCH <query> [--prefix]
+//!   SCAN <prefix>
+//!   ALL
+//!   KEYS
+//!   COUNT
+//!   STATS [ALL]
+//!   BATCH <n>  |  BATCH SET <file>
+//!   DEMO
+//!   CLEAR
+//!   HELP
 
+use apexstore::{
+    core::engine::LsmStats,
+    infra::config::LsmConfig,
+    LsmEngine,
+};
 use chrono::Local;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode,
+        KeyModifiers, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
@@ -31,352 +46,539 @@ use std::{
     collections::VecDeque,
     io,
     panic,
+    path::PathBuf,
     time::{Duration, Instant},
 };
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
-// ─── Color Palette ─────────────────────────────────────────────────────────────
-const C_APEX_ORANGE: Color = Color::Rgb(255, 110, 30);
-const C_APEX_AMBER: Color = Color::Rgb(255, 180, 0);
-const C_DEEP_SPACE: Color = Color::Rgb(10, 14, 26);
-const C_PANEL_BG: Color = Color::Rgb(18, 22, 38);
-const C_BORDER_DIM: Color = Color::Rgb(55, 65, 100);
-const C_BORDER_ACTIVE: Color = Color::Rgb(100, 130, 220);
-const C_TEXT_PRIMARY: Color = Color::Rgb(220, 225, 245);
-const C_TEXT_DIM: Color = Color::Rgb(100, 110, 150);
-const C_SUCCESS: Color = Color::Rgb(80, 220, 130);
-const C_WARNING: Color = Color::Rgb(255, 200, 50);
-const C_ERROR: Color = Color::Rgb(255, 80, 80);
+// ─── Palette ─────────────────────────────────────────────────────────────────
+const C_ORANGE: Color = Color::Rgb(255, 110, 30);
+const C_AMBER: Color = Color::Rgb(255, 185, 0);
+const C_DEEP: Color = Color::Rgb(10, 14, 26);
+const C_PANEL: Color = Color::Rgb(18, 22, 38);
+const C_BORDER: Color = Color::Rgb(55, 65, 100);
+const C_ACTIVE: Color = Color::Rgb(100, 140, 240);
+const C_TEXT: Color = Color::Rgb(220, 225, 245);
+const C_DIM: Color = Color::Rgb(90, 100, 140);
+const C_OK: Color = Color::Rgb(80, 220, 130);
+const C_WARN: Color = Color::Rgb(255, 200, 50);
+const C_ERR: Color = Color::Rgb(255, 80, 80);
 const C_CLOCK: Color = Color::Rgb(130, 200, 255);
-const C_GAUGE_LOW: Color = Color::Rgb(80, 220, 130);
-const C_GAUGE_MED: Color = Color::Rgb(255, 200, 50);
-const C_GAUGE_HIGH: Color = Color::Rgb(255, 80, 80);
+const C_BAR: Color = Color::Rgb(255, 110, 30);
+const C_BAR2: Color = Color::Rgb(100, 180, 255);
 
-// ─── App State ─────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum FocusedPanel {
+// ─── Focus ───────────────────────────────────────────────────────────────────
+#[derive(PartialEq, Clone, Copy)]
+enum Focus {
     Stats,
     Log,
     Input,
 }
 
-struct LsmStats {
-    ops_per_sec: f64,
-    writes_per_sec: f64,
-    reads_per_sec: f64,
-    memtable_usage_pct: u8,
-    compaction_pct: u8,
-    bloom_filter_hits: u64,
-    sstable_count: u64,
-    total_keys: u64,
-    write_amplification: f64,
-    read_amplification: f64,
-    // Ring buffers for sparkline history (last N samples)
-    ops_history: VecDeque<u64>,
-    write_history: VecDeque<u64>,
-}
-
-impl LsmStats {
-    fn new() -> Self {
-        let mut ops_history = VecDeque::with_capacity(20);
-        let mut write_history = VecDeque::with_capacity(20);
-        // Seed with initial mock values
-        for i in 0..20usize {
-            let base = 800.0 + (i as f64 * 7.3).sin() * 200.0;
-            ops_history.push_back(base as u64);
-            write_history.push_back((base * 0.6) as u64);
-        }
-        Self {
-            ops_per_sec: 950.0,
-            writes_per_sec: 570.0,
-            reads_per_sec: 380.0,
-            memtable_usage_pct: 34,
-            compaction_pct: 12,
-            bloom_filter_hits: 14_302,
-            sstable_count: 8,
-            total_keys: 50_230,
-            write_amplification: 1.8,
-            read_amplification: 1.2,
-            ops_history,
-            write_history,
-        }
-    }
-
-    fn tick(&mut self, elapsed_ms: u64) {
-        use std::f64::consts::PI;
-        let t = elapsed_ms as f64 / 1000.0;
-
-        // Simulate fluctuating metrics
-        self.ops_per_sec = 900.0 + (t * 0.7).sin() * 300.0 + (t * 1.3).cos() * 100.0;
-        self.writes_per_sec = self.ops_per_sec * 0.6 + (t * 2.1).sin() * 50.0;
-        self.reads_per_sec = self.ops_per_sec - self.writes_per_sec;
-
-        self.memtable_usage_pct = {
-            let v = 30.0 + (t * 0.3).sin() * 25.0 + (t * 0.9).cos() * 10.0;
-            v.clamp(5.0, 95.0) as u8
-        };
-        self.compaction_pct = {
-            let v = 10.0 + (t * 0.15 + PI).sin() * 15.0;
-            v.clamp(0.0, 100.0) as u8
-        };
-        self.total_keys += (self.writes_per_sec * elapsed_ms as f64 / 1000.0) as u64;
-        self.bloom_filter_hits +=
-            (self.reads_per_sec * 0.92 * elapsed_ms as f64 / 1000.0) as u64;
-        self.write_amplification = 1.5 + (t * 0.2).cos() * 0.5;
-        self.read_amplification = 1.0 + (t * 0.4).sin().abs() * 0.4;
-
-        // Push to history rings
-        if self.ops_history.len() >= 20 {
-            self.ops_history.pop_front();
-            self.write_history.pop_front();
-        }
-        self.ops_history.push_back(self.ops_per_sec as u64);
-        self.write_history.push_back(self.writes_per_sec as u64);
-    }
-}
-
+// ─── App State ───────────────────────────────────────────────────────────────
 struct App {
-    focus: FocusedPanel,
+    engine: LsmEngine,
+    focus: Focus,
     input: Input,
-    log: VecDeque<(String, Color)>, // (message, color)
-    stats: LsmStats,
+    log: VecDeque<(String, Color)>,
+    // Real stats – refreshed every tick
+    stats: Option<LsmStats>,
+    // OPS-rate tracking
+    ops_count: u64,            // total ops since start
+    ops_last_count: u64,       // ops at last rate sample
+    ops_last_sample: Instant,
+    ops_per_sec: f64,
+    ops_history: VecDeque<u64>, // ring-buffer of ops/s samples (max 24)
+    // Misc
     start: Instant,
-    last_tick: Instant,
-    should_quit: bool,
+    uptime: u64,
     mouse_pos: (u16, u16),
-    total_ops: u64,
-    uptime_secs: u64,
+    should_quit: bool,
 }
 
 impl App {
-    fn new() -> Self {
-        let mut log = VecDeque::with_capacity(200);
-        log.push_back((
-            "Welcome to ApexStore TUI Dashboard".into(),
-            C_APEX_AMBER,
-        ));
-        log.push_back(("Type 'help' for available commands.".into(), C_TEXT_DIM));
-        log.push_back(("─".repeat(50), C_BORDER_DIM));
+    fn new(engine: LsmEngine) -> Self {
+        let mut log = VecDeque::with_capacity(300);
+        log.push_back(("ApexStore TUI Dashboard — engine ready.".into(), C_AMBER));
+        log.push_back(("Type HELP for available commands.".into(), C_DIM));
+        log.push_back(("─".repeat(54), C_BORDER));
+        let mut ops_history = VecDeque::with_capacity(24);
+        for _ in 0..24 {
+            ops_history.push_back(0u64);
+        }
         Self {
-            focus: FocusedPanel::Input,
+            engine,
+            focus: Focus::Input,
             input: Input::default(),
             log,
-            stats: LsmStats::new(),
+            stats: None,
+            ops_count: 0,
+            ops_last_count: 0,
+            ops_last_sample: Instant::now(),
+            ops_per_sec: 0.0,
+            ops_history,
             start: Instant::now(),
-            last_tick: Instant::now(),
-            should_quit: false,
+            uptime: 0,
             mouse_pos: (0, 0),
-            total_ops: 0,
-            uptime_secs: 0,
+            should_quit: false,
         }
     }
 
-    fn on_tick(&mut self) {
-        let elapsed_ms = self.last_tick.elapsed().as_millis() as u64;
-        self.last_tick = Instant::now();
-        self.uptime_secs = self.start.elapsed().as_secs();
-        self.total_ops += (self.stats.ops_per_sec * elapsed_ms as f64 / 1000.0) as u64;
-        self.stats.tick(self.start.elapsed().as_millis() as u64);
+    // Called every tick (250 ms) to refresh real stats and OPS rate
+    fn tick(&mut self) {
+        self.uptime = self.start.elapsed().as_secs();
+
+        // Refresh real stats from engine
+        self.stats = self.engine.stats_all().ok();
+
+        // Compute ops/s over last interval
+        let elapsed = self.ops_last_sample.elapsed().as_secs_f64();
+        if elapsed >= 0.25 {
+            let delta = self.ops_count.saturating_sub(self.ops_last_count);
+            self.ops_per_sec = delta as f64 / elapsed;
+            self.ops_last_count = self.ops_count;
+            self.ops_last_sample = Instant::now();
+
+            if self.ops_history.len() >= 24 {
+                self.ops_history.pop_front();
+            }
+            self.ops_history.push_back(self.ops_per_sec as u64);
+        }
     }
 
-    fn push_log(&mut self, msg: impl Into<String>, color: Color) {
-        if self.log.len() >= 200 {
+    fn log_push(&mut self, msg: impl Into<String>, color: Color) {
+        if self.log.len() >= 300 {
             self.log.pop_front();
         }
         self.log.push_back((msg.into(), color));
     }
 
-    fn execute_command(&mut self, raw: &str) {
-        let cmd = raw.trim().to_string();
+    fn incr_ops(&mut self) {
+        self.ops_count += 1;
+    }
+
+    // ── Command dispatcher ─────────────────────────────────────────────────
+    fn execute(&mut self, raw: &str) {
+        let cmd = raw.trim();
         if cmd.is_empty() {
             return;
         }
-        self.push_log(format!("› {}", cmd), C_TEXT_PRIMARY);
+        self.log_push(format!("› {}", cmd), C_TEXT);
 
         let parts: Vec<&str> = cmd.splitn(3, ' ').collect();
-        match parts[0].to_lowercase().as_str() {
-            "help" => {
-                self.push_log("Available commands:", C_APEX_AMBER);
-                self.push_log("  get <key>            - Retrieve a value", C_TEXT_DIM);
-                self.push_log("  set <key> <value>    - Store a key-value pair", C_TEXT_DIM);
-                self.push_log("  del <key>            - Delete a key", C_TEXT_DIM);
-                self.push_log("  stats                - Show current statistics", C_TEXT_DIM);
-                self.push_log("  clear                - Clear command log", C_TEXT_DIM);
-                self.push_log("  quit / q             - Exit dashboard", C_TEXT_DIM);
-            }
-            "get" => {
-                if parts.len() < 2 {
-                    self.push_log("Error: missing <key>", C_ERROR);
-                } else {
-                    let key = parts[1];
-                    self.push_log(
-                        format!("GET {} → \"mock_value_{}\"", key, &key[..key.len().min(4)]),
-                        C_SUCCESS,
-                    );
-                    self.stats.reads_per_sec += 1.0;
-                }
-            }
-            "set" => {
+        match parts[0].to_uppercase().as_str() {
+
+            // ── SET ────────────────────────────────────────────────────────
+            "SET" => {
                 if parts.len() < 3 {
-                    self.push_log("Error: usage: set <key> <value>", C_ERROR);
-                } else {
-                    self.push_log(
-                        format!("SET {} = {} → OK", parts[1], parts[2]),
-                        C_SUCCESS,
-                    );
-                    self.stats.total_keys += 1;
-                    self.stats.writes_per_sec += 1.0;
+                    self.log_push("\u274c Usage: SET <key> <value>", C_ERR);
+                    return;
+                }
+                let key = parts[1].to_string();
+                let val = parts[2].as_bytes().to_vec();
+                match self.engine.set(key.clone(), val) {
+                    Ok(_) => {
+                        self.log_push(format!("\u2713 SET '{}' OK", key), C_OK);
+                        self.incr_ops();
+                    }
+                    Err(e) => self.log_push(format!("\u274c {}", e), C_ERR),
                 }
             }
-            "del" | "delete" => {
+
+            // ── GET ────────────────────────────────────────────────────────
+            "GET" => {
                 if parts.len() < 2 {
-                    self.push_log("Error: missing <key>", C_ERROR);
-                } else {
-                    self.push_log(format!("DEL {} → OK (tombstone written)", parts[1]), C_WARNING);
-                    self.stats.writes_per_sec += 1.0;
+                    self.log_push("\u274c Usage: GET <key>", C_ERR);
+                    return;
+                }
+                match self.engine.get(parts[1]) {
+                    Ok(Some(v)) => {
+                        self.log_push(
+                            format!("\u2713 '{}' = '{}'", parts[1], String::from_utf8_lossy(&v)),
+                            C_OK,
+                        );
+                        self.incr_ops();
+                    }
+                    Ok(None) => self.log_push(format!("\u26a0 Key '{}' not found", parts[1]), C_WARN),
+                    Err(e) => self.log_push(format!("\u274c {}", e), C_ERR),
                 }
             }
-            "stats" => {
-                self.push_log("─── Current Statistics ───".to_string(), C_APEX_ORANGE);
-                self.push_log(
-                    format!("  OPS/s: {:.0}", self.stats.ops_per_sec),
-                    C_TEXT_PRIMARY,
-                );
-                self.push_log(
-                    format!("  Writes/s: {:.0}", self.stats.writes_per_sec),
-                    C_TEXT_PRIMARY,
-                );
-                self.push_log(
-                    format!("  Reads/s:  {:.0}", self.stats.reads_per_sec),
-                    C_TEXT_PRIMARY,
-                );
-                self.push_log(
-                    format!("  Total Keys: {}", self.stats.total_keys),
-                    C_TEXT_PRIMARY,
-                );
-                self.push_log(
-                    format!("  MemTable: {}%", self.stats.memtable_usage_pct),
-                    C_TEXT_PRIMARY,
-                );
-                self.push_log(
-                    format!("  SSTable files: {}", self.stats.sstable_count),
-                    C_TEXT_PRIMARY,
-                );
-                self.push_log(
-                    format!(
-                        "  Write Amp: {:.2}x  Read Amp: {:.2}x",
-                        self.stats.write_amplification, self.stats.read_amplification
-                    ),
-                    C_TEXT_PRIMARY,
+
+            // ── DEL / DELETE ───────────────────────────────────────────────
+            "DEL" | "DELETE" => {
+                if parts.len() < 2 {
+                    self.log_push("\u274c Usage: DEL <key>", C_ERR);
+                    return;
+                }
+                let key = parts[1].to_string();
+                match self.engine.delete(key.clone()) {
+                    Ok(_) => {
+                        self.log_push(format!("\u2713 DEL '{}' (tombstone written)", key), C_OK);
+                        self.incr_ops();
+                    }
+                    Err(e) => self.log_push(format!("\u274c {}", e), C_ERR),
+                }
+            }
+
+            // ── SEARCH ─────────────────────────────────────────────────────
+            "SEARCH" => {
+                if parts.len() < 2 {
+                    self.log_push("\u274c Usage: SEARCH <query> [--prefix]", C_ERR);
+                    return;
+                }
+                let query = parts[1];
+                let prefix_mode = parts.len() > 2 && parts[2] == "--prefix";
+                let result = if prefix_mode {
+                    self.engine.search_prefix(query)
+                } else {
+                    self.engine.search(query)
+                };
+                match result {
+                    Ok(rows) if rows.is_empty() => self.log_push("\u26a0 No records found", C_WARN),
+                    Ok(rows) => {
+                        self.log_push(format!("\u2713 {} record(s) found:", rows.len()), C_OK);
+                        for (k, v) in rows.iter().take(20) {
+                            self.log_push(
+                                format!("  {} = {}", k, String::from_utf8_lossy(v)),
+                                C_TEXT,
+                            );
+                        }
+                        if rows.len() > 20 {
+                            self.log_push(format!("  ... and {} more", rows.len() - 20), C_DIM);
+                        }
+                        self.incr_ops();
+                    }
+                    Err(e) => self.log_push(format!("\u274c {}", e), C_ERR),
+                }
+            }
+
+            // ── SCAN ───────────────────────────────────────────────────────
+            "SCAN" => {
+                if parts.len() < 2 {
+                    self.log_push("\u274c Usage: SCAN <prefix>", C_ERR);
+                    return;
+                }
+                match self.engine.search_prefix(parts[1]) {
+                    Ok(rows) if rows.is_empty() => {
+                        self.log_push(format!("\u26a0 No records with prefix '{}'", parts[1]), C_WARN);
+                    }
+                    Ok(rows) => {
+                        self.log_push(format!("\u2713 {} record(s) [prefix='{}']:", rows.len(), parts[1]), C_OK);
+                        for (k, v) in rows.iter().take(20) {
+                            self.log_push(format!("  {} = {}", k, String::from_utf8_lossy(v)), C_TEXT);
+                        }
+                        if rows.len() > 20 {
+                            self.log_push(format!("  ... and {} more", rows.len() - 20), C_DIM);
+                        }
+                        self.incr_ops();
+                    }
+                    Err(e) => self.log_push(format!("\u274c {}", e), C_ERR),
+                }
+            }
+
+            // ── ALL ────────────────────────────────────────────────────────
+            "ALL" => {
+                match self.engine.scan() {
+                    Ok(rows) if rows.is_empty() => self.log_push("\u26a0 Database is empty", C_WARN),
+                    Ok(rows) => {
+                        self.log_push(format!("\u2713 {} record(s):", rows.len()), C_OK);
+                        for (k, v) in rows.iter().take(30) {
+                            self.log_push(format!("  {} = {}", k, String::from_utf8_lossy(v)), C_TEXT);
+                        }
+                        if rows.len() > 30 {
+                            self.log_push(format!("  ... and {} more", rows.len() - 30), C_DIM);
+                        }
+                        self.incr_ops();
+                    }
+                    Err(e) => self.log_push(format!("\u274c {}", e), C_ERR),
+                }
+            }
+
+            // ── KEYS ───────────────────────────────────────────────────────
+            "KEYS" => {
+                match self.engine.keys() {
+                    Ok(keys) if keys.is_empty() => self.log_push("\u26a0 No keys found", C_WARN),
+                    Ok(keys) => {
+                        self.log_push(format!("\u2713 {} key(s):", keys.len()), C_OK);
+                        for (i, k) in keys.iter().enumerate().take(30) {
+                            self.log_push(format!("  {}. {}", i + 1, k), C_TEXT);
+                        }
+                        if keys.len() > 30 {
+                            self.log_push(format!("  ... and {} more", keys.len() - 30), C_DIM);
+                        }
+                        self.incr_ops();
+                    }
+                    Err(e) => self.log_push(format!("\u274c {}", e), C_ERR),
+                }
+            }
+
+            // ── COUNT ──────────────────────────────────────────────────────
+            "COUNT" => {
+                match self.engine.count() {
+                    Ok(n) => {
+                        self.log_push(format!("\u2713 Total active records: {}", n), C_OK);
+                        self.incr_ops();
+                    }
+                    Err(e) => self.log_push(format!("\u274c {}", e), C_ERR),
+                }
+            }
+
+            // ── STATS ──────────────────────────────────────────────────────
+            "STATS" => {
+                let all_mode = parts.len() > 1 && parts[1].to_uppercase() == "ALL";
+                if all_mode {
+                    match self.engine.stats_all() {
+                        Ok(s) => {
+                            self.log_push("─── Detailed Statistics ───".to_string(), C_ORANGE);
+                            self.log_push(format!("  MemTable records : {}", s.mem_records), C_TEXT);
+                            self.log_push(format!("  MemTable size    : {} KB / {} KB", s.mem_kb, s.memtable_max_size), C_TEXT);
+                            self.log_push(format!("  SSTable files    : {}", s.sst_files), C_TEXT);
+                            self.log_push(format!("  SSTable records  : {}", s.sst_records), C_TEXT);
+                            self.log_push(format!("  SSTable size     : {} KB", s.sst_kb), C_TEXT);
+                            self.log_push(format!("  WAL size         : {} KB", s.wal_kb), C_TEXT);
+                            self.log_push(format!("  Total records    : {}", s.total_records), C_TEXT);
+                        }
+                        Err(e) => self.log_push(format!("\u274c {}", e), C_ERR),
+                    }
+                } else {
+                    let s = self.engine.stats();
+                    for line in s.lines() {
+                        self.log_push(line.to_string(), C_TEXT);
+                    }
+                }
+            }
+
+            // ── BATCH ──────────────────────────────────────────────────────
+            "BATCH" => {
+                if parts.len() >= 3 && parts[1].to_uppercase() == "SET" {
+                    // BATCH SET <file>
+                    let file_path = parts[2];
+                    match std::fs::read_to_string(file_path) {
+                        Ok(content) => {
+                            let mut ok = 0usize;
+                            let mut err = 0usize;
+                            let t = Instant::now();
+                            for (line_no, line) in content.lines().enumerate() {
+                                let line = line.trim();
+                                if line.is_empty() || line.starts_with('#') {
+                                    continue;
+                                }
+                                if let Some((k, v)) = line.split_once('=') {
+                                    match self.engine.set(k.trim().to_string(), v.trim().as_bytes().to_vec()) {
+                                        Ok(_) => { ok += 1; self.incr_ops(); }
+                                        Err(e) => {
+                                            self.log_push(format!("  line {}: {}", line_no + 1, e), C_ERR);
+                                            err += 1;
+                                        }
+                                    }
+                                } else {
+                                    self.log_push(format!("  line {}: bad format (expected key=value)", line_no + 1), C_WARN);
+                                    err += 1;
+                                }
+                            }
+                            self.log_push(
+                                format!("\u2713 {} imported, {} errors  [{:.1?}]", ok, err, t.elapsed()),
+                                C_OK,
+                            );
+                        }
+                        Err(e) => self.log_push(format!("\u274c Cannot read '{}': {}", file_path, e), C_ERR),
+                    }
+                } else if parts.len() >= 2 {
+                    // BATCH <n>
+                    match parts[1].parse::<usize>() {
+                        Ok(n) => {
+                            let t = Instant::now();
+                            self.log_push(format!("Inserting {} records...", n), C_DIM);
+                            let mut errs = 0usize;
+                            for i in 0..n {
+                                let k = format!("batch:{:06}", i);
+                                let v = format!("value_{}", i).into_bytes();
+                                match self.engine.set(k, v) {
+                                    Ok(_) => { self.incr_ops(); }
+                                    Err(_) => { errs += 1; }
+                                }
+                            }
+                            let elapsed = t.elapsed();
+                            let rate = n as f64 / elapsed.as_secs_f64();
+                            self.log_push(
+                                format!("\u2713 {} records in {:.2?}  ({:.0} ops/s)  errors={}", n, elapsed, rate, errs),
+                                C_OK,
+                            );
+                        }
+                        Err(_) => self.log_push("\u274c BATCH: invalid count".to_string(), C_ERR),
+                    }
+                } else {
+                    self.log_push("\u274c Usage: BATCH <n>  |  BATCH SET <file>", C_ERR);
+                }
+            }
+
+            // ── DEMO ───────────────────────────────────────────────────────
+            "DEMO" => {
+                self.log_push("─── Running Demo ───".to_string(), C_ORANGE);
+                let t = Instant::now();
+
+                // 100 SETs
+                for i in 0..100 {
+                    let _ = self.engine.set(
+                        format!("demo:{:04}", i),
+                        format!("demo-value-{}", i).into_bytes(),
+                    );
+                    self.incr_ops();
+                }
+                self.log_push("  100 SET ops done".to_string(), C_TEXT);
+
+                // 10 GETs
+                for i in (0..100).step_by(10) {
+                    let _ = self.engine.get(&format!("demo:{:04}", i));
+                    self.incr_ops();
+                }
+                self.log_push("  10 GET ops done".to_string(), C_TEXT);
+
+                // 10 DELs
+                for i in 0..10 {
+                    let _ = self.engine.delete(format!("demo:{:04}", i));
+                    self.incr_ops();
+                }
+                self.log_push("  10 DEL ops done".to_string(), C_TEXT);
+
+                let count = self.engine.count().unwrap_or(0);
+                self.log_push(
+                    format!("\u2713 Demo done in {:.2?}  active keys={}", t.elapsed(), count),
+                    C_OK,
                 );
             }
-            "clear" => {
+
+            // ── CLEAR ──────────────────────────────────────────────────────
+            "CLEAR" => {
                 self.log.clear();
-                self.push_log("Log cleared.".to_string(), C_TEXT_DIM);
+                self.log_push("Log cleared.".to_string(), C_DIM);
             }
-            "quit" | "q" | "exit" => {
+
+            // ── HELP ───────────────────────────────────────────────────────
+            "HELP" | "?" => {
+                self.log_push("─ Available Commands ─".to_string(), C_ORANGE);
+                for line in [
+                    "  SET <key> <value>         insert/update",
+                    "  GET <key>                 retrieve value",
+                    "  DEL <key>                 delete (tombstone)",
+                    "  SEARCH <q> [--prefix]     search records",
+                    "  SCAN <prefix>             scan by prefix",
+                    "  ALL                       list all records",
+                    "  KEYS                      list all keys",
+                    "  COUNT                     count active records",
+                    "  STATS [ALL]               engine statistics",
+                    "  BATCH <n>                 insert N test records",
+                    "  BATCH SET <file>          import key=value file",
+                    "  DEMO                      run quick demo",
+                    "  CLEAR                     clear this log",
+                    "  HELP                      show this help",
+                    "  Q / QUIT / EXIT           quit dashboard",
+                ] {
+                    self.log_push(line.to_string(), C_DIM);
+                }
+            }
+
+            // ── QUIT ───────────────────────────────────────────────────────
+            "Q" | "QUIT" | "EXIT" => {
                 self.should_quit = true;
             }
+
             unknown => {
-                self.push_log(
-                    format!("Unknown command: '{}'. Type 'help' for usage.", unknown),
-                    C_ERROR,
+                self.log_push(
+                    format!("\u274c Unknown command '{}'. Type HELP.", unknown),
+                    C_ERR,
                 );
             }
         }
     }
 }
 
-// ─── Terminal Setup / Teardown ──────────────────────────────────────────────────
+// ─── Terminal helpers ─────────────────────────────────────────────────────────
 
-fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
+fn setup() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    Terminal::new(backend)
+    let mut out = io::stdout();
+    execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
+    Terminal::new(CrosstermBackend::new(out))
 }
 
-fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+fn restore(t: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()
+    execute!(t.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    t.show_cursor()
 }
 
-// ─── Main ───────────────────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() -> io::Result<()> {
-    // Install panic hook so terminal is always restored on panic
-    let original_hook = panic::take_hook();
+    // Panic hook: always restore terminal
+    let original = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
-        let mut stdout = io::stdout();
-        let _ = execute!(stdout, LeaveAlternateScreen, DisableMouseCapture);
-        original_hook(info);
+        let mut out = io::stdout();
+        let _ = execute!(out, LeaveAlternateScreen, DisableMouseCapture);
+        original(info);
     }));
 
-    let mut terminal = setup_terminal()?;
-    let mut app = App::new();
-    let tick_rate = Duration::from_millis(250);
+    // Init engine
+    let config = LsmConfig::builder()
+        .dir_path(PathBuf::from("./.lsm_data"))
+        .memtable_max_size(64 * 1024) // 64 KB
+        .build()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+
+    let engine = LsmEngine::new(config)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+
+    let mut terminal = setup()?;
+    let mut app = App::new(engine);
+    let tick = Duration::from_millis(250);
 
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
 
-        if event::poll(tick_rate)? {
+        if event::poll(tick)? {
             match event::read()? {
-                Event::Key(key) => {
-                    // Global quit shortcuts
-                    if matches!(key.code, KeyCode::Char('c'))
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                Event::Key(k) => {
+                    if matches!(k.code, KeyCode::Char('c'))
+                        && k.modifiers.contains(KeyModifiers::CONTROL)
                     {
                         app.should_quit = true;
-                    } else if matches!(key.code, KeyCode::Esc) {
+                    } else if matches!(k.code, KeyCode::Esc) {
                         app.should_quit = true;
-                    } else if app.focus == FocusedPanel::Input {
-                        match key.code {
+                    } else if app.focus == Focus::Input {
+                        match k.code {
                             KeyCode::Enter => {
                                 let cmd = app.input.value().to_string();
                                 app.input.reset();
-                                app.execute_command(&cmd);
+                                app.execute(&cmd);
                             }
-                            KeyCode::Tab => {
-                                app.focus = FocusedPanel::Log;
-                            }
-                            _ => {
-                                app.input.handle_event(&Event::Key(key));
-                            }
+                            KeyCode::Tab => app.focus = Focus::Log,
+                            _ => { app.input.handle_event(&Event::Key(k)); }
                         }
                     } else {
-                        match key.code {
-                            KeyCode::Tab | KeyCode::Enter => {
-                                app.focus = FocusedPanel::Input;
-                            }
-                            KeyCode::Char('1') => app.focus = FocusedPanel::Stats,
-                            KeyCode::Char('2') => app.focus = FocusedPanel::Log,
-                            KeyCode::Char('3') => app.focus = FocusedPanel::Input,
+                        match k.code {
+                            KeyCode::Tab | KeyCode::Enter => app.focus = Focus::Input,
+                            KeyCode::Char('1') => app.focus = Focus::Stats,
+                            KeyCode::Char('2') => app.focus = Focus::Log,
+                            KeyCode::Char('3') => app.focus = Focus::Input,
                             _ => {}
                         }
                     }
                 }
-                Event::Mouse(mouse) => {
-                    app.mouse_pos = (mouse.column, mouse.row);
-                    if mouse.kind == MouseEventKind::Down(event::MouseButton::Left) {
-                        // Clicking anywhere re-focuses input
-                        app.focus = FocusedPanel::Input;
+                Event::Mouse(m) => {
+                    app.mouse_pos = (m.column, m.row);
+                    if m.kind == MouseEventKind::Down(event::MouseButton::Left) {
+                        app.focus = Focus::Input;
                     }
                 }
                 Event::Resize(_, _) => {}
                 _ => {}
             }
         } else {
-            // No event – run tick to update live metrics
-            app.on_tick();
+            // No event in window → tick
+            app.tick();
         }
 
         if app.should_quit {
@@ -384,262 +586,266 @@ fn main() -> io::Result<()> {
         }
     }
 
-    restore_terminal(&mut terminal)?;
-    Ok(())
+    restore(&mut terminal)
 }
 
-// ─── UI Rendering ───────────────────────────────────────────────────────────────
+// ─── UI root ─────────────────────────────────────────────────────────────────
 
 fn ui(f: &mut Frame, app: &mut App) {
     let area = f.area();
+    f.render_widget(Block::default().style(Style::default().bg(C_DEEP)), area);
 
-    // Fill background
-    f.render_widget(
-        Block::default().style(Style::default().bg(C_DEEP_SPACE)),
-        area,
-    );
+    let rows = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(10),
+        Constraint::Length(1),
+    ])
+    .split(area);
 
-    // ─ Outer vertical split: title bar + body + status bar
-    let root = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // title
-            Constraint::Min(10),   // body
-            Constraint::Length(1), // status
-        ])
-        .split(area);
-
-    render_title_bar(f, root[0], app);
-    render_body(f, root[1], app);
-    render_status_bar(f, root[2], app);
+    render_title(f, rows[0], app);
+    render_body(f, rows[1], app);
+    render_statusbar(f, rows[2], app);
 }
 
-// ─── Title Bar ──────────────────────────────────────────────────────────────────
+// ─── Title ────────────────────────────────────────────────────────────────────
 
-fn render_title_bar(f: &mut Frame, area: Rect, app: &App) {
-    let now = Local::now().format("%Y-%m-%d  %H:%M:%S").to_string();
-    let uptime = format_uptime(app.uptime_secs);
+fn render_title(f: &mut Frame, area: Rect, app: &App) {
+    let now_str = Local::now().format("%Y-%m-%d  %H:%M:%S").to_string();
+    let uptime_str = fmt_uptime(app.uptime);
+    let total = app.stats.as_ref().map(|s| s.total_records).unwrap_or(0);
 
-    let title = Block::default()
+    let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(C_APEX_ORANGE))
-        .style(Style::default().bg(C_PANEL_BG))
+        .border_style(Style::default().fg(C_ORANGE))
+        .style(Style::default().bg(C_PANEL))
         .title(Line::from(vec![
-            Span::styled(" ⚡ ", Style::default().fg(C_APEX_ORANGE).add_modifier(Modifier::BOLD)),
-            Span::styled(
-                "APEXSTORE",
-                Style::default()
-                    .fg(C_APEX_ORANGE)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" TUI DASHBOARD ", Style::default().fg(C_TEXT_DIM)),
+            Span::styled(" \u26a1 ", Style::default().fg(C_ORANGE).add_modifier(Modifier::BOLD)),
+            Span::styled("APEXSTORE", Style::default().fg(C_ORANGE).add_modifier(Modifier::BOLD)),
+            Span::styled(" TUI DASHBOARD ", Style::default().fg(C_DIM)),
         ]))
         .title_bottom(Line::from(vec![
-            Span::styled(" 🕒 ", Style::default().fg(C_CLOCK)),
-            Span::styled(now, Style::default().fg(C_CLOCK).add_modifier(Modifier::BOLD)),
-            Span::styled("  ⏱ up ", Style::default().fg(C_TEXT_DIM)),
-            Span::styled(uptime, Style::default().fg(C_APEX_AMBER)),
-            Span::styled("  ops: ", Style::default().fg(C_TEXT_DIM)),
+            Span::styled(" \ud83d\udd52 ", Style::default()),
+            Span::styled(&now_str, Style::default().fg(C_CLOCK).add_modifier(Modifier::BOLD)),
+            Span::styled("  \u23f1 ", Style::default().fg(C_DIM)),
+            Span::styled(uptime_str, Style::default().fg(C_AMBER)),
+            Span::styled("  records: ", Style::default().fg(C_DIM)),
             Span::styled(
-                format!("{}", app.total_ops),
-                Style::default().fg(C_SUCCESS).add_modifier(Modifier::BOLD),
+                format!("{}", total),
+                Style::default().fg(C_OK).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ops/s: ", Style::default().fg(C_DIM)),
+            Span::styled(
+                format!("{:.0}", app.ops_per_sec),
+                Style::default().fg(C_ORANGE).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" ", Style::default()),
         ]));
 
-    f.render_widget(title, area);
+    f.render_widget(block, area);
 }
 
-// ─── Body ───────────────────────────────────────────────────────────────────────
+// ─── Body ─────────────────────────────────────────────────────────────────────
 
 fn render_body(f: &mut Frame, area: Rect, app: &mut App) {
-    // Horizontal split: [left stats column] | [right: log + input]
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
-        .split(area);
+    let cols = Layout::horizontal([
+        Constraint::Percentage(42),
+        Constraint::Percentage(58),
+    ])
+    .split(area);
 
-    render_left_column(f, columns[0], app);
-    render_right_column(f, columns[1], app);
+    render_left(f, cols[0], app);
+    render_right(f, cols[1], app);
 }
 
-// ─── Left Column: Stats + Clock Gadget ──────────────────────────────────────────
+// ─── Left column: Stats + Clock ───────────────────────────────────────────────
 
-fn render_left_column(f: &mut Frame, area: Rect, app: &App) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
-        .split(area);
-
-    render_stats_panel(f, rows[0], app);
-    render_clock_gadget(f, rows[1], app);
+fn render_left(f: &mut Frame, area: Rect, app: &App) {
+    let rows = Layout::vertical([
+        Constraint::Percentage(65),
+        Constraint::Percentage(35),
+    ])
+    .split(area);
+    render_stats(f, rows[0], app);
+    render_clock(f, rows[1], app);
 }
 
-fn render_stats_panel(f: &mut Frame, area: Rect, app: &App) {
-    let is_focused = app.focus == FocusedPanel::Stats;
-    let border_color = if is_focused { C_BORDER_ACTIVE } else { C_BORDER_DIM };
+fn render_stats(f: &mut Frame, area: Rect, app: &App) {
+    let focused = app.focus == Focus::Stats;
+    let border_col = if focused { C_ACTIVE } else { C_BORDER };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(C_PANEL_BG))
+        .border_style(Style::default().fg(border_col))
+        .style(Style::default().bg(C_PANEL))
         .padding(Padding::horizontal(1))
         .title(Line::from(vec![
-            Span::styled(" ", Style::default()),
-            Span::styled("📊", Style::default()),
+            Span::styled(" \ud83d\udcca ", Style::default()),
             Span::styled(
-                " LSM-Tree Statistics ",
-                Style::default()
-                    .fg(C_APEX_AMBER)
-                    .add_modifier(Modifier::BOLD),
+                "LSM-Tree Statistics ",
+                Style::default().fg(C_AMBER).add_modifier(Modifier::BOLD),
             ),
         ]));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Sub-layout inside the stats panel
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(4), // Throughput bar chart
-            Constraint::Length(2), // Spacer label
-            Constraint::Length(3), // MemTable gauge
-            Constraint::Length(3), // Compaction gauge
-            Constraint::Min(2),    // Key metrics text
-        ])
-        .split(inner);
+    // -- Layout inside stats --
+    let rows = Layout::vertical([
+        Constraint::Length(5), // ops/s bar chart history
+        Constraint::Length(1), // spacer
+        Constraint::Length(3), // MemTable gauge
+        Constraint::Length(3), // SSTable gauge
+        Constraint::Min(3),    // key metrics text
+    ])
+    .split(inner);
 
-    // Throughput BarChart
-    let ops_data: Vec<(&str, u64)> = vec![
-        ("OPS", app.stats.ops_per_sec as u64),
-        ("WR", app.stats.writes_per_sec as u64),
-        ("RD", app.stats.reads_per_sec as u64),
-        ("BF", (app.stats.bloom_filter_hits % 1500)),
-    ];
+    // -- Ops/s BarChart (last 24 samples) --
+    let hist_data: Vec<(&str, u64)> = app
+        .ops_history
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| {
+            // We use a static array of labels to avoid borrow issues
+            let label: &'static str = HIST_LABELS[i % HIST_LABELS.len()];
+            (label, v)
+        })
+        .collect();
 
     let bar_chart = BarChart::default()
-        .data(&ops_data)
-        .bar_width(5)
-        .bar_gap(2)
-        .bar_style(Style::default().fg(C_APEX_ORANGE))
-        .value_style(
-            Style::default()
-                .fg(C_DEEP_SPACE)
-                .bg(C_APEX_ORANGE)
-                .add_modifier(Modifier::BOLD),
-        )
-        .label_style(Style::default().fg(C_TEXT_DIM));
+        .data(&hist_data)
+        .bar_width(2)
+        .bar_gap(0)
+        .bar_style(Style::default().fg(C_BAR))
+        .value_style(Style::default().fg(C_DEEP).bg(C_BAR))
+        .label_style(Style::default().fg(Color::Reset)) // hide individual labels
+        .block(
+            Block::default()
+                .title(Span::styled(
+                    " Ops/s (last 6s) ",
+                    Style::default().fg(C_DIM).add_modifier(Modifier::ITALIC),
+                ))
+                .borders(Borders::NONE),
+        );
     f.render_widget(bar_chart, rows[0]);
 
-    // Section header
-    let section_label = Paragraph::new(Line::from(vec![
-        Span::styled("  ● ", Style::default().fg(C_APEX_ORANGE)),
-        Span::styled(
-            "Resource Usage",
-            Style::default().fg(C_TEXT_DIM).add_modifier(Modifier::ITALIC),
-        ),
+    // -- Spacer label with storage sizes --
+    let st = app.stats.as_ref();
+    let sst_kb = st.map(|s| s.sst_kb).unwrap_or(0);
+    let wal_kb = st.map(|s| s.wal_kb).unwrap_or(0);
+    let spacer = Paragraph::new(Line::from(vec![
+        Span::styled("  SST: ", Style::default().fg(C_DIM)),
+        Span::styled(format!("{} KB", sst_kb), Style::default().fg(C_BAR2)),
+        Span::styled("   WAL: ", Style::default().fg(C_DIM)),
+        Span::styled(format!("{} KB", wal_kb), Style::default().fg(C_BAR2)),
     ]))
-    .style(Style::default().bg(C_PANEL_BG));
-    f.render_widget(section_label, rows[1]);
+    .style(Style::default().bg(C_PANEL));
+    f.render_widget(spacer, rows[1]);
 
-    // MemTable Gauge
-    let mem_pct = app.stats.memtable_usage_pct as f64 / 100.0;
-    let mem_color = gauge_color(app.stats.memtable_usage_pct);
+    // -- MemTable gauge (real: mem_kb / memtable_max_size) --
+    let (mem_pct, mem_kb, mem_max, mem_records) = if let Some(s) = st {
+        let pct = if s.memtable_max_size > 0 {
+            (s.mem_kb as f64 / s.memtable_max_size as f64).min(1.0)
+        } else {
+            0.0
+        };
+        (pct, s.mem_kb, s.memtable_max_size, s.mem_records)
+    } else {
+        (0.0, 0, 0, 0)
+    };
+    let mem_color = pct_color((mem_pct * 100.0) as u8);
     let mem_gauge = Gauge::default()
         .block(
             Block::default()
                 .title(Span::styled(
                     " MemTable ",
-                    Style::default().fg(C_TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                    Style::default().fg(C_TEXT).add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(C_BORDER_DIM)),
+                .border_style(Style::default().fg(C_BORDER)),
         )
         .gauge_style(
             Style::default()
                 .fg(mem_color)
-                .bg(Color::Rgb(30, 35, 55))
+                .bg(Color::Rgb(25, 30, 50))
                 .add_modifier(Modifier::BOLD),
         )
         .ratio(mem_pct)
         .label(Span::styled(
-            format!(" {}%  ({:.0} MB used) ", app.stats.memtable_usage_pct, mem_pct * 64.0),
-            Style::default().fg(C_TEXT_PRIMARY),
+            format!(" {} KB / {} KB  ({} records) ", mem_kb, mem_max, mem_records),
+            Style::default().fg(C_TEXT),
         ));
     f.render_widget(mem_gauge, rows[2]);
 
-    // Compaction Gauge
-    let cmp_pct = app.stats.compaction_pct as f64 / 100.0;
-    let cmp_color = gauge_color(app.stats.compaction_pct);
-    let cmp_gauge = Gauge::default()
+    // -- SSTable gauge (files, capped at 20 for display) --
+    let sst_files = st.map(|s| s.sst_files).unwrap_or(0);
+    let sst_records = st.map(|s| s.sst_records).unwrap_or(0);
+    let sst_ratio = (sst_files as f64 / 20.0_f64).min(1.0);
+    let sst_color = pct_color((sst_ratio * 100.0) as u8);
+    let sst_gauge = Gauge::default()
         .block(
             Block::default()
                 .title(Span::styled(
-                    " Compaction ",
-                    Style::default().fg(C_TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                    " SSTables ",
+                    Style::default().fg(C_TEXT).add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(C_BORDER_DIM)),
+                .border_style(Style::default().fg(C_BORDER)),
         )
         .gauge_style(
             Style::default()
-                .fg(cmp_color)
-                .bg(Color::Rgb(30, 35, 55))
+                .fg(sst_color)
+                .bg(Color::Rgb(25, 30, 50))
                 .add_modifier(Modifier::BOLD),
         )
-        .ratio(cmp_pct)
+        .ratio(sst_ratio)
         .label(Span::styled(
-            format!(" {}%  ({} SSTables) ", app.stats.compaction_pct, app.stats.sstable_count),
-            Style::default().fg(C_TEXT_PRIMARY),
+            format!(" {} files  ({} records) ", sst_files, sst_records),
+            Style::default().fg(C_TEXT),
         ));
-    f.render_widget(cmp_gauge, rows[3]);
+    f.render_widget(sst_gauge, rows[3]);
 
-    // Key Metrics text grid
+    // -- Key metrics text --
+    let total = st.map(|s| s.total_records).unwrap_or(0);
     let metrics = vec![
         Line::from(vec![
-            Span::styled("  Keys    : ", Style::default().fg(C_TEXT_DIM)),
+            Span::styled("  Total records : ", Style::default().fg(C_DIM)),
             Span::styled(
-                format!("{:>10}", app.stats.total_keys),
-                Style::default().fg(C_SUCCESS).add_modifier(Modifier::BOLD),
+                format!("{}", total),
+                Style::default().fg(C_OK).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("  BF Hits : ", Style::default().fg(C_TEXT_DIM)),
+            Span::styled("  Live ops/s   : ", Style::default().fg(C_DIM)),
             Span::styled(
-                format!("{:>10}", app.stats.bloom_filter_hits),
-                Style::default().fg(C_CLOCK),
+                format!("{:.1}", app.ops_per_sec),
+                Style::default().fg(C_ORANGE).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("  W-Amp   : ", Style::default().fg(C_TEXT_DIM)),
+            Span::styled("  Cumul. ops   : ", Style::default().fg(C_DIM)),
             Span::styled(
-                format!("{:>8.2}x", app.stats.write_amplification),
-                Style::default().fg(C_WARNING),
-            ),
-            Span::styled("  R-Amp: ", Style::default().fg(C_TEXT_DIM)),
-            Span::styled(
-                format!("{:.2}x", app.stats.read_amplification),
-                Style::default().fg(C_WARNING),
+                format!("{}", app.ops_count),
+                Style::default().fg(C_BAR2),
             ),
         ]),
     ];
-
-    let metrics_widget = Paragraph::new(metrics).style(Style::default().bg(C_PANEL_BG));
-    f.render_widget(metrics_widget, rows[4]);
+    f.render_widget(
+        Paragraph::new(metrics).style(Style::default().bg(C_PANEL)),
+        rows[4],
+    );
 }
 
-fn render_clock_gadget(f: &mut Frame, area: Rect, _app: &App) {
+fn render_clock(f: &mut Frame, area: Rect, _app: &App) {
     let now = Local::now();
     let time_str = now.format("%H:%M:%S").to_string();
-    let date_str = now.format("%A, %B %d %Y").to_string();
+    let date_str = now.format("%A, %d %B %Y").to_string();
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(C_BORDER_DIM))
-        .style(Style::default().bg(C_PANEL_BG))
+        .border_style(Style::default().fg(C_BORDER))
+        .style(Style::default().bg(C_PANEL))
         .title(Line::from(vec![
-            Span::styled(" 🕐 ", Style::default()),
+            Span::styled(" \ud83d\udd50 ", Style::default()),
             Span::styled(
                 "System Clock ",
                 Style::default().fg(C_CLOCK).add_modifier(Modifier::BOLD),
@@ -649,221 +855,189 @@ fn render_clock_gadget(f: &mut Frame, area: Rect, _app: &App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let clock_rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(1),
-        ])
-        .split(inner);
+    let rows = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .split(inner);
 
-    let time_widget = Paragraph::new(time_str)
-        .style(
-            Style::default()
-                .fg(C_CLOCK)
-                .add_modifier(Modifier::BOLD),
-        )
-        .alignment(ratatui::layout::Alignment::Center);
-    f.render_widget(time_widget, clock_rows[1]);
-
-    let date_widget = Paragraph::new(date_str)
-        .style(Style::default().fg(C_TEXT_DIM))
-        .alignment(ratatui::layout::Alignment::Center);
-    f.render_widget(date_widget, clock_rows[2]);
+    f.render_widget(
+        Paragraph::new(time_str)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(C_CLOCK).add_modifier(Modifier::BOLD)),
+        rows[1],
+    );
+    f.render_widget(
+        Paragraph::new(date_str)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(C_DIM)),
+        rows[2],
+    );
 }
 
-// ─── Right Column: Log + Input ──────────────────────────────────────────────────
+// ─── Right column: Log + Input ────────────────────────────────────────────────
 
-fn render_right_column(f: &mut Frame, area: Rect, app: &mut App) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(5), Constraint::Length(5)])
-        .split(area);
-
-    render_log_panel(f, rows[0], app);
-    render_input_panel(f, rows[1], app);
+fn render_right(f: &mut Frame, area: Rect, app: &mut App) {
+    let rows = Layout::vertical([Constraint::Min(5), Constraint::Length(5)]).split(area);
+    render_log(f, rows[0], app);
+    render_input(f, rows[1], app);
 }
 
-fn render_log_panel(f: &mut Frame, area: Rect, app: &App) {
-    let is_focused = app.focus == FocusedPanel::Log;
-    let border_color = if is_focused { C_BORDER_ACTIVE } else { C_BORDER_DIM };
+fn render_log(f: &mut Frame, area: Rect, app: &App) {
+    let focused = app.focus == Focus::Log;
+    let border_col = if focused { C_ACTIVE } else { C_BORDER };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(C_PANEL_BG))
+        .border_style(Style::default().fg(border_col))
+        .style(Style::default().bg(C_PANEL))
         .padding(Padding::horizontal(1))
         .title(Line::from(vec![
-            Span::styled(" 📋 ", Style::default()),
+            Span::styled(" \ud83d\udccb ", Style::default()),
             Span::styled(
                 "Command Log ",
-                Style::default()
-                    .fg(C_TEXT_PRIMARY)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(C_TEXT).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("({} entries) ", app.log.len()),
-                Style::default().fg(C_TEXT_DIM),
+                format!("({} lines) ", app.log.len()),
+                Style::default().fg(C_DIM),
             ),
         ]));
 
-    let inner_height = block.inner(area).height as usize;
+    let inner_h = block.inner(area).height as usize;
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Show only the last N lines that fit
     let items: Vec<ListItem> = app
         .log
         .iter()
         .rev()
-        .take(inner_height)
+        .take(inner_h)
         .rev()
-        .map(|(msg, color)| {
-            ListItem::new(Line::from(Span::styled(
-                msg.as_str(),
-                Style::default().fg(*color),
-            )))
+        .map(|(msg, col)| {
+            ListItem::new(Line::from(Span::styled(msg.as_str(), Style::default().fg(*col))))
         })
         .collect();
 
-    let list = List::new(items).style(Style::default().bg(C_PANEL_BG));
-    f.render_widget(list, inner);
+    f.render_widget(List::new(items).style(Style::default().bg(C_PANEL)), inner);
 }
 
-fn render_input_panel(f: &mut Frame, area: Rect, app: &App) {
-    let is_focused = app.focus == FocusedPanel::Input;
-    let border_color = if is_focused { C_APEX_ORANGE } else { C_BORDER_DIM };
-    let label_color = if is_focused { C_APEX_ORANGE } else { C_TEXT_DIM };
+fn render_input(f: &mut Frame, area: Rect, app: &App) {
+    let focused = app.focus == Focus::Input;
+    let border_col = if focused { C_ORANGE } else { C_BORDER };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(C_PANEL_BG))
+        .border_style(Style::default().fg(border_col))
+        .style(Style::default().bg(C_PANEL))
         .padding(Padding::horizontal(1))
         .title(Line::from(vec![
-            Span::styled(" ⌨  ", Style::default()),
+            Span::styled(" \u2328  ", Style::default()),
             Span::styled(
                 "Command Input ",
-                Style::default().fg(label_color).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(if focused { C_ORANGE } else { C_DIM })
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                if is_focused { "(active) " } else { "(Tab to focus) " },
-                Style::default().fg(C_TEXT_DIM).add_modifier(Modifier::ITALIC),
+                if focused { "(active) " } else { "(Tab to focus) " },
+                Style::default().fg(C_DIM).add_modifier(Modifier::ITALIC),
             ),
         ]))
         .title_bottom(Line::from(Span::styled(
             " Enter: run  |  Esc: quit  |  Tab: switch panel ",
-            Style::default().fg(C_TEXT_DIM),
+            Style::default().fg(C_DIM),
         )));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Input rows: prompt + input box
-    let input_rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1)])
-        .split(inner);
+    let input_rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(inner);
 
-    // Prompt hint
-    let hint = Paragraph::new(Line::from(vec![
-        Span::styled("apex", Style::default().fg(C_APEX_ORANGE).add_modifier(Modifier::BOLD)),
-        Span::styled("://", Style::default().fg(C_TEXT_DIM)),
-        Span::styled("db ", Style::default().fg(C_APEX_AMBER)),
-        Span::styled("→", Style::default().fg(C_BORDER_ACTIVE)),
-    ]))
-    .style(Style::default().bg(C_PANEL_BG));
-    f.render_widget(hint, input_rows[0]);
+    // Prompt
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("apex", Style::default().fg(C_ORANGE).add_modifier(Modifier::BOLD)),
+            Span::styled("://db ", Style::default().fg(C_DIM)),
+            Span::styled("\u2192", Style::default().fg(C_ACTIVE)),
+        ]))
+        .style(Style::default().bg(C_PANEL)),
+        input_rows[0],
+    );
 
-    // Input value
-    let input_value = app.input.value();
-    let cursor_offset = app.input.visual_cursor();
+    // Input text
+    let value = app.input.value();
+    let cursor = app.input.visual_cursor();
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(value, Style::default().fg(C_TEXT).bg(Color::Rgb(25, 30, 50))),
+            if focused {
+                Span::styled("\u2588", Style::default().fg(C_ORANGE))
+            } else {
+                Span::raw("")
+            },
+        ]))
+        .wrap(Wrap { trim: false })
+        .style(Style::default().bg(Color::Rgb(25, 30, 50))),
+        input_rows[1],
+    );
 
-    let input_widget = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "  ",
-            Style::default().fg(C_TEXT_DIM),
-        ),
-        Span::styled(
-            input_value,
-            Style::default()
-                .fg(C_TEXT_PRIMARY)
-                .bg(Color::Rgb(25, 30, 50)),
-        ),
-        if is_focused {
-            Span::styled("█", Style::default().fg(C_APEX_ORANGE))
-        } else {
-            Span::styled("", Style::default())
-        },
-    ]))
-    .style(Style::default().bg(Color::Rgb(25, 30, 50)))
-    .wrap(Wrap { trim: false });
-    f.render_widget(input_widget, input_rows[1]);
-
-    // Set cursor position for crossterm
-    if is_focused {
-        f.set_cursor_position((
-            input_rows[1].x + 2 + cursor_offset as u16,
-            input_rows[1].y,
-        ));
+    if focused {
+        f.set_cursor_position((input_rows[1].x + 2 + cursor as u16, input_rows[1].y));
     }
-
-    let _ = cursor_offset; // suppress lint
 }
 
-// ─── Status Bar ─────────────────────────────────────────────────────────────────
+// ─── Status bar ───────────────────────────────────────────────────────────────
 
-fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
-    let mouse = format!("mouse: ({}, {})", app.mouse_pos.0, app.mouse_pos.1);
+fn render_statusbar(f: &mut Frame, area: Rect, app: &App) {
     let focus_str = match app.focus {
-        FocusedPanel::Stats => "[STATS]",
-        FocusedPanel::Log => "[LOG]",
-        FocusedPanel::Input => "[INPUT]",
+        Focus::Stats => "[STATS]",
+        Focus::Log => "  [LOG]",
+        Focus::Input => "[INPUT]",
     };
-    let ops = format!(" {:.0} ops/s ", app.stats.ops_per_sec);
+    let mouse = format!("mouse ({},{})", app.mouse_pos.0, app.mouse_pos.1);
+    let data_dir = ".lsm_data";
 
-    let status = Paragraph::new(Line::from(vec![
-        Span::styled(" ApexStore v2.1.0 ", Style::default().fg(C_APEX_ORANGE).add_modifier(Modifier::BOLD)),
-        Span::styled("|", Style::default().fg(C_BORDER_DIM)),
-        Span::styled(
-            format!(" Focus: {} ", focus_str),
-            Style::default().fg(C_BORDER_ACTIVE),
-        ),
-        Span::styled("|", Style::default().fg(C_BORDER_DIM)),
-        Span::styled(ops, Style::default().fg(C_SUCCESS)),
-        Span::styled("|", Style::default().fg(C_BORDER_DIM)),
-        Span::styled(format!(" {} ", mouse), Style::default().fg(C_TEXT_DIM)),
+    let bar = Paragraph::new(Line::from(vec![
+        Span::styled(" ApexStore v2.1.0 ", Style::default().fg(C_ORANGE).add_modifier(Modifier::BOLD)),
+        Span::styled("| ", Style::default().fg(C_BORDER)),
+        Span::styled(format!("{} ", focus_str), Style::default().fg(C_ACTIVE)),
+        Span::styled("| ", Style::default().fg(C_BORDER)),
+        Span::styled(format!(" {:.0} ops/s ", app.ops_per_sec), Style::default().fg(C_OK)),
+        Span::styled("| ", Style::default().fg(C_BORDER)),
+        Span::styled(format!(" data: {} ", data_dir), Style::default().fg(C_DIM)),
+        Span::styled("| ", Style::default().fg(C_BORDER)),
+        Span::styled(format!(" {} ", mouse), Style::default().fg(C_DIM)),
     ]))
     .style(Style::default().bg(Color::Rgb(12, 16, 30)));
-    f.render_widget(status, area);
 
-    // Clear edge widgets if needed
+    f.render_widget(bar, area);
     f.render_widget(Clear, Rect::new(area.right().saturating_sub(1), area.y, 1, 1));
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-fn gauge_color(pct: u8) -> Color {
-    if pct < 60 {
-        C_GAUGE_LOW
-    } else if pct < 80 {
-        C_GAUGE_MED
-    } else {
-        C_GAUGE_HIGH
-    }
+/// Static labels pool for the bar-chart history (width=2 each, 24 bars)
+const HIST_LABELS: &[&str] = &[
+    "", "", "", "", "", "", "", "",
+    "", "", "", "", "", "", "", "",
+    "", "", "", "", "", "", "", "",
+];
+
+fn pct_color(pct: u8) -> Color {
+    if pct < 60 { Color::Rgb(80, 220, 130) }
+    else if pct < 80 { Color::Rgb(255, 200, 50) }
+    else { Color::Rgb(255, 80, 80) }
 }
 
-fn format_uptime(secs: u64) -> String {
+fn fmt_uptime(secs: u64) -> String {
     let h = secs / 3600;
     let m = (secs % 3600) / 60;
     let s = secs % 60;
-    if h > 0 {
-        format!("{}h {:02}m {:02}s", h, m, s)
-    } else if m > 0 {
-        format!("{}m {:02}s", m, s)
-    } else {
-        format!("{}s", s)
-    }
+    if h > 0 { format!("{}h {:02}m {:02}s", h, m, s) }
+    else if m > 0 { format!("{}m {:02}s", m, s) }
+    else { format!("{}s", s) }
 }
