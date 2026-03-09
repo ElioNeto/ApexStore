@@ -29,63 +29,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Check if PR already exists
-        id: check-pr
+      - name: Check and create PR
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           HEAD_BRANCH="${{ github.ref_name }}"
           PR_EXISTS=$(gh pr list --head "$HEAD_BRANCH" --base main --json number --jq 'length')
-          echo "pr_exists=$PR_EXISTS" >> "$GITHUB_OUTPUT"
 
-          if [ "$PR_EXISTS" -gt 0 ]; then
-            PR_NUMBER=$(gh pr list --head "$HEAD_BRANCH" --base main --json number --jq '.[0].number')
-            echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          fi
+          if [ "$PR_EXISTS" -eq 0 ]; then
+            VERSION="${HEAD_BRANCH#release/v}"
 
-      - name: Create PR to main
-        if: steps.check-pr.outputs.pr_exists == '0'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          HEAD_BRANCH="${{ github.ref_name }}"
-          VERSION="${HEAD_BRANCH#release/v}"
-
-          gh pr create \
-            --base main \
-            --head "$HEAD_BRANCH" \
-            --title "🚀 Release v${VERSION}" \
-            --body "## 🚀 Release v${VERSION}
+            gh pr create \
+              --base main \
+              --head "$HEAD_BRANCH" \
+              --title "🚀 Release v${VERSION}" \
+              --body "## 🚀 Release v${VERSION}
 
           ### ⚙️ Release Configuration
-          **Escolha o tipo de release editando abaixo:**
-
           Release Type: [lts]
 
-          **Opções válidas:**
-          - \`alpha\` - Release alpha (instável, desenvolvimento)
-          - \`beta\` - Release beta (pré-release, testes)
-          - \`lts\` - Release estável de longo prazo (produção)
+          **Options:** \`alpha\`, \`beta\`, \`lts\`
 
           ---
 
-          _PR criado automaticamente pelo release-workflow_" \
-            --draft
-
-      - name: PR already exists
-        if: steps.check-pr.outputs.pr_exists != '0'
-        run: |
-          echo "ℹ️ PR já existe (#${{ steps.check-pr.outputs.pr_number }}) para ${{ github.ref_name }} -> main"
+          _Auto-created by release-workflow_" \
+              --draft
+          fi
 
   create-release:
-    name: Create GitHub Release (on merge)
+    name: Create GitHub Release
     if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
 
     steps:
       - uses: actions/checkout@v4
@@ -93,7 +71,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.merge_commit_sha }}
 
-      - name: Extract version and release type
+      - name: Extract version and type
         id: extract
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -103,12 +81,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
           PR_BODY_CLEAN=$(printf '%s' "$PR_BODY" | tr -d '\r')
-
-          RELEASE_TYPE=$(printf '%s' "$PR_BODY_CLEAN" | grep -oP 'Release Type:\s*\[\K(alpha|beta|lts)(?=\])' || true)
-          if [ -z "$RELEASE_TYPE" ]; then
-            RELEASE_TYPE=$(printf '%s' "$PR_BODY_CLEAN" | grep -oP 'Release Type:\s*\K(alpha|beta|lts)' || echo "lts")
-          fi
-
+          RELEASE_TYPE=$(printf '%s' "$PR_BODY_CLEAN" | grep -oP 'Release Type:\s*\[\K(alpha|beta|lts)(?=\])' || echo "lts")
           echo "release_type=$RELEASE_TYPE" >> "$GITHUB_OUTPUT"
 
           if [ "$RELEASE_TYPE" = "lts" ]; then
@@ -118,97 +91,63 @@ jobs:
           fi
 
           echo "full_tag=$FULL_TAG" >> "$GITHUB_OUTPUT"
-          echo "✅ Version: $VERSION"
-          echo "✅ Release Type: $RELEASE_TYPE"
-          echo "✅ Full Tag: $FULL_TAG"
 
-      - name: Setup Rust
+      - name: Setup Rust and build
         uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
 
       - name: Build release artifacts
         run: |
-          echo "🔨 Building release artifacts..."
           cargo build --release
-
           mkdir -p artifacts
-          if [ -d "target/release" ]; then
-            find target/release -maxdepth 1 -type f -executable -exec cp {} artifacts/ \;
-          fi
+          find target/release -maxdepth 1 -type f -executable -exec cp {} artifacts/ \; || true
 
-          echo "📦 Artifacts criados:"
-          ls -lh artifacts/ || true
-
-      - name: Create and push tag
-        env:
-          FULL_TAG: ${{ steps.extract.outputs.full_tag }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          echo "🏷️ Creating tag $FULL_TAG"
-          git tag -a "$FULL_TAG" -m "Release $FULL_TAG"
-          git push origin "$FULL_TAG"
-          echo "✅ Tag $FULL_TAG created and pushed"
-
-      - name: Generate changelog
-        id: changelog
-        run: |
-          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-
-          if [ -z "$LAST_TAG" ]; then
-            echo "📝 Generating full changelog (first release)"
-            CHANGELOG=$(git log --pretty=format:"- %s (\`%h\`)" | head -50)
-          else
-            echo "📝 Generating changelog from $LAST_TAG"
-            CHANGELOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s (\`%h\`)")
-          fi
-
-          echo "$CHANGELOG" > /tmp/changelog.txt
-
-      - name: Create GitHub Release
+      - name: Create tag and release
         env:
           GH_TOKEN: ${{ github.token }}
           FULL_TAG: ${{ steps.extract.outputs.full_tag }}
           VERSION: ${{ steps.extract.outputs.version }}
           RELEASE_TYPE: ${{ steps.extract.outputs.release_type }}
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$FULL_TAG" -m "Release $FULL_TAG"
+          git push origin "$FULL_TAG"
+
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -z "$LAST_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s (\`%h\`)" | head -50)
+          else
+            CHANGELOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s (\`%h\`)")
+          fi
+
           PRERELEASE_FLAG=""
           RELEASE_LABEL="Stable"
 
           if [ "$RELEASE_TYPE" = "alpha" ]; then
             PRERELEASE_FLAG="--prerelease"
-            RELEASE_LABEL="Alpha (Unstable)"
+            RELEASE_LABEL="Alpha"
           elif [ "$RELEASE_TYPE" = "beta" ]; then
             PRERELEASE_FLAG="--prerelease"
-            RELEASE_LABEL="Beta (Pre-release)"
+            RELEASE_LABEL="Beta"
           elif [ "$RELEASE_TYPE" = "lts" ]; then
-            RELEASE_LABEL="LTS (Long Term Support)"
+            RELEASE_LABEL="LTS"
           fi
-
-          CHANGELOG=$(cat /tmp/changelog.txt)
 
           gh release create "$FULL_TAG" \
             --title "Release $FULL_TAG" \
-            --notes "## 🎉 Release $VERSION
-
-          ### 📦 Release Type
-          **$RELEASE_LABEL**
+            --notes "## 🎉 Release $VERSION ($RELEASE_LABEL)
 
           ### 📝 Changes
           $CHANGELOG
 
           ---
 
-          - **Pull Request**: #${{ github.event.pull_request.number }}
-
-          ---
-
-          _Released on: $(date +'%Y-%m-%d %H:%M:%S UTC')_
-          _Built from commit: \`${{ github.sha }}\`_" \
+          **PR:** #${{ github.event.pull_request.number }}
+          **Commit:** \`${{ github.sha }}\`" \
             $PRERELEASE_FLAG \
             artifacts/* 2>/dev/null || true
