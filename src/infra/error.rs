@@ -3,26 +3,56 @@ use std::io;
 use std::time::SystemTimeError;
 use thiserror::Error;
 
+/// Unified error type for the ApexStore LSM engine.
+///
+/// # Design
+///
+/// Variants are grouped by origin:
+///
+/// - **Infrastructure** (`Io`, `Codec`, `Time`) — low-level OS / serde
+///   errors that are converted automatically via `#[from]`.
+/// - **Storage format** (`InvalidSstableFormat`, `CorruptedData`,
+///   `DecompressionFailed`, `WalCorruption`) — structural problems in
+///   on-disk files.
+/// - **Engine semantics** (`KeyNotFound`, `CompactionFailed`) — logical
+///   errors arising from engine operations.
+/// - **Configuration** (`Invalid*`, `ConfigValidation`) — parameter
+///   validation failures raised at startup.
+///
+/// # Previous state → rationale for changes
+///
+/// The following variants were removed in this commit:
+///
+/// | Removed variant       | Reason |
+/// |-----------------------|--------|
+/// | `NotFound`            | Exact duplicate of `KeyNotFound` (same Display text, zero call sites) |
+/// | `InvalidSstable`      | Context-free alias for `InvalidSstableFormat(String)` (zero call sites) |
+/// | `LockPoisoned`        | `parking_lot` mutexes never poison; was unreachable dead code |
+/// | `ConcurrentModification` | Zero call sites anywhere in the codebase |
+/// | `SerializationFailed` | Zero call sites; superseded by `Codec` |
+/// | `DeserializationFailed` | Zero call sites; superseded by `Codec` |
+///
+/// `Serialization` was renamed to `Codec` to match the `infra::codec`
+/// module name and to avoid confusion between encode and decode paths.
 #[derive(Error, Debug)]
 pub enum LsmError {
+    // -------------------------------------------------------------------------
+    // Infrastructure errors — converted automatically via #[from]
+    // -------------------------------------------------------------------------
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
 
-    #[error("Serialization error: {0}")]
-    Serialization(#[from] bincode::Error),
+    /// Covers both encode and decode failures from `bincode`.
+    /// Converted automatically via `?` in `infra::codec`.
+    #[error("Codec error: {0}")]
+    Codec(#[from] bincode::Error),
 
     #[error("System time error: {0}")]
     Time(#[from] SystemTimeError),
 
-    #[error("Lock poisoned: {0}")]
-    LockPoisoned(&'static str),
-
-    #[error("Key not found")]
-    KeyNotFound,
-
-    #[error("Invalid SSTable format")]
-    InvalidSstable,
-
+    // -------------------------------------------------------------------------
+    // Storage format errors
+    // -------------------------------------------------------------------------
     #[error("Invalid SSTable format: {0}")]
     InvalidSstableFormat(String),
 
@@ -32,25 +62,21 @@ pub enum LsmError {
     #[error("Decompression failed: {0}")]
     DecompressionFailed(String),
 
-    #[error("Compaction failed: {0}")]
-    CompactionFailed(String),
-
     #[error("WAL corruption detected")]
     WalCorruption,
 
-    #[error("Serialization failed: {0}")]
-    SerializationFailed(String),
-
-    #[error("Deserialization failed: {0}")]
-    DeserializationFailed(String),
-
-    #[error("Concurrent modification detected")]
-    ConcurrentModification,
-
+    // -------------------------------------------------------------------------
+    // Engine semantics
+    // -------------------------------------------------------------------------
     #[error("Key not found")]
-    NotFound,
+    KeyNotFound,
 
-    // Configuration validation errors
+    #[error("Compaction failed: {0}")]
+    CompactionFailed(String),
+
+    // -------------------------------------------------------------------------
+    // Configuration validation
+    // -------------------------------------------------------------------------
     #[error("Invalid block size: {0}")]
     InvalidBlockSize(String),
 
