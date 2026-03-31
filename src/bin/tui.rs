@@ -315,7 +315,10 @@ impl App {
                 if all_mode {
                     match self.engine.stats_all() {
                         Ok(s) => {
-                            self.log_push("\u{2500}\u{2500}\u{2500} Detailed Statistics \u{2500}\u{2500}\u{2500}".to_string(), C_ORANGE);
+                            self.log_push(
+                                "\u{2500}\u{2500}\u{2500} Detailed Statistics \u{2500}\u{2500}\u{2500}".to_string(),
+                                C_ORANGE,
+                            );
                             self.log_push(
                                 format!("  MemTable records : {}", s.mem_records),
                                 C_TEXT,
@@ -565,10 +568,10 @@ fn main() -> io::Result<()> {
         if event::poll(tick)? {
             match event::read()? {
                 Event::Key(k) => {
-                    if (matches!(k.code, KeyCode::Char('c'))
+                    let quit = (matches!(k.code, KeyCode::Char('c'))
                         && k.modifiers.contains(KeyModifiers::CONTROL))
-                        || matches!(k.code, KeyCode::Esc)
-                    {
+                        || matches!(k.code, KeyCode::Esc);
+                    if quit {
                         app.should_quit = true;
                     } else if app.focus == Focus::Input {
                         match k.code {
