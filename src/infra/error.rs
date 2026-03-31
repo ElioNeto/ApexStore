@@ -3,26 +3,54 @@ use std::io;
 use std::time::SystemTimeError;
 use thiserror::Error;
 
+/// Unified error type for the ApexStore LSM engine.
+///
+/// # Design
+///
+/// Variants are grouped by origin:
+///
+/// - **Infrastructure** (`Io`, `Codec`, `JsonError`, `Time`) — low-level OS / serde
+///   errors converted automatically via `#[from]`.
+/// - **Storage format** (`InvalidSstableFormat`, `CorruptedData`,
+///   `DecompressionFailed`, `WalCorruption`) — structural problems in on-disk files.
+/// - **Engine semantics** (`KeyNotFound`, `CompactionFailed`, `LockPoisoned`,
+///   `ConcurrentModification`) — logical errors arising from engine operations.
+/// - **Configuration** (`Invalid*`, `ConfigValidation`) — parameter
+///   validation failures raised at startup.
+///
+/// # Variant history
+///
+/// | Removed variant       | Reason |
+/// |-----------------------|--------|
+/// | `NotFound`            | Exact duplicate of `KeyNotFound` — same Display text, zero call sites |
+/// | `InvalidSstable`      | Context-free alias for `InvalidSstableFormat(String)` — zero call sites |
+/// | `SerializationFailed(String)` | Replaced by `JsonError(#[from] serde_json::Error)` |
+/// | `DeserializationFailed(String)` | Replaced by `JsonError(#[from] serde_json::Error)` |
+///
+/// `Serialization(#[from] bincode::Error)` was renamed to `Codec` to match
+/// the `infra::codec` module name.
 #[derive(Error, Debug)]
 pub enum LsmError {
+    // -------------------------------------------------------------------------
+    // Infrastructure — converted automatically via #[from]
+    // -------------------------------------------------------------------------
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
 
-    #[error("Serialization error: {0}")]
-    Serialization(#[from] bincode::Error),
+    /// Bincode encode/decode failures from `infra::codec`.
+    #[error("Codec error: {0}")]
+    Codec(#[from] bincode::Error),
+
+    /// JSON encode/decode failures (serde_json), e.g. from `features::FeatureClient`.
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
 
     #[error("System time error: {0}")]
     Time(#[from] SystemTimeError),
 
-    #[error("Lock poisoned: {0}")]
-    LockPoisoned(&'static str),
-
-    #[error("Key not found")]
-    KeyNotFound,
-
-    #[error("Invalid SSTable format")]
-    InvalidSstable,
-
+    // -------------------------------------------------------------------------
+    // Storage format
+    // -------------------------------------------------------------------------
     #[error("Invalid SSTable format: {0}")]
     InvalidSstableFormat(String),
 
@@ -32,25 +60,31 @@ pub enum LsmError {
     #[error("Decompression failed: {0}")]
     DecompressionFailed(String),
 
-    #[error("Compaction failed: {0}")]
-    CompactionFailed(String),
-
     #[error("WAL corruption detected")]
     WalCorruption,
 
-    #[error("Serialization failed: {0}")]
-    SerializationFailed(String),
+    // -------------------------------------------------------------------------
+    // Engine semantics
+    // -------------------------------------------------------------------------
+    #[error("Key not found")]
+    KeyNotFound,
 
-    #[error("Deserialization failed: {0}")]
-    DeserializationFailed(String),
+    #[error("Compaction failed: {0}")]
+    CompactionFailed(String),
 
-    #[error("Concurrent modification detected")]
+    /// Raised when a `std::sync::Mutex` is poisoned (i.e. a thread panicked
+    /// while holding the lock). Not applicable to `parking_lot` mutexes.
+    #[error("Lock poisoned: {0}")]
+    LockPoisoned(&'static str),
+
+    /// Raised in optimistic-concurrency retry loops when all attempts are
+    /// exhausted (e.g. `FeatureClient::set_flag`).
+    #[error("Concurrent modification conflict")]
     ConcurrentModification,
 
-    #[error("Key not found")]
-    NotFound,
-
-    // Configuration validation errors
+    // -------------------------------------------------------------------------
+    // Configuration validation
+    // -------------------------------------------------------------------------
     #[error("Invalid block size: {0}")]
     InvalidBlockSize(String),
 
