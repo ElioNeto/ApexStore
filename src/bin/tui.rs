@@ -196,10 +196,7 @@ impl App {
                 let key = parts[1].to_string();
                 match self.engine.delete(key.clone()) {
                     Ok(_) => {
-                        self.log_push(
-                            format!("\u{2713} DEL '{}' (tombstone written)", key),
-                            C_OK,
-                        );
+                        self.log_push(format!("\u{2713} DEL '{}' (tombstone written)", key), C_OK);
                         self.incr_ops();
                     }
                     Err(e) => self.log_push(format!("\u{274c} {}", e), C_ERR),
@@ -232,10 +229,7 @@ impl App {
                             );
                         }
                         if rows.len() > 20 {
-                            self.log_push(
-                                format!("  ... and {} more", rows.len() - 20),
-                                C_DIM,
-                            );
+                            self.log_push(format!("  ... and {} more", rows.len() - 20), C_DIM);
                         }
                         self.incr_ops();
                     }
@@ -266,10 +260,7 @@ impl App {
                             );
                         }
                         if rows.len() > 20 {
-                            self.log_push(
-                                format!("  ... and {} more", rows.len() - 20),
-                                C_DIM,
-                            );
+                            self.log_push(format!("  ... and {} more", rows.len() - 20), C_DIM);
                         }
                         self.incr_ops();
                     }
@@ -279,9 +270,7 @@ impl App {
 
             // ALL ──────────────────────────────────────────────────────────────
             "ALL" => match self.engine.scan() {
-                Ok(rows) if rows.is_empty() => {
-                    self.log_push("\u{26a0}  Database is empty", C_WARN)
-                }
+                Ok(rows) if rows.is_empty() => self.log_push("\u{26a0}  Database is empty", C_WARN),
                 Ok(rows) => {
                     self.log_push(format!("\u{2713} {} record(s):", rows.len()), C_OK);
                     for (k, v) in rows.iter().take(30) {
@@ -447,9 +436,7 @@ impl App {
                                 C_OK,
                             );
                         }
-                        Err(_) => {
-                            self.log_push("\u{274c} BATCH: invalid count".to_string(), C_ERR)
-                        }
+                        Err(_) => self.log_push("\u{274c} BATCH: invalid count".to_string(), C_ERR),
                     }
                 } else {
                     self.log_push("\u{274c} Usage: BATCH <n>  |  BATCH SET <file>", C_ERR);
@@ -1000,8 +987,7 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let input_rows =
-        Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(inner);
+    let input_rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(inner);
 
     // Prompt line
     f.render_widget(
