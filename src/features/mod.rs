@@ -54,15 +54,15 @@ impl FeatureClient {
             Some(v) => v,
             None => {
                 let features = Features::default();
-                let json = serde_json::to_vec(&features)
-                    .map_err(|e| LsmError::SerializationFailed(e.to_string()))?;
+                // serde_json::Error converts automatically via JsonError(#[from])
+                let json = serde_json::to_vec(&features)?;
                 self.engine.set(Self::KEY.to_string(), json)?;
                 return Ok(features);
             }
         };
 
-        let features: Features = serde_json::from_slice(&bytes_vec)
-            .map_err(|e| LsmError::DeserializationFailed(e.to_string()))?;
+        // serde_json::Error converts automatically via JsonError(#[from])
+        let features: Features = serde_json::from_slice(&bytes_vec)?;
 
         let mut cache = self.cache.write().unwrap();
         *cache = Some((features.clone(), Instant::now()));
@@ -113,8 +113,8 @@ impl FeatureClient {
 
             features.version += 1;
 
-            let json = serde_json::to_vec(&features)
-                .map_err(|e| LsmError::SerializationFailed(e.to_string()))?;
+            // serde_json::Error converts automatically via JsonError(#[from])
+            let json = serde_json::to_vec(&features)?;
 
             match self.engine.set(Self::KEY.to_string(), json) {
                 Ok(_) => {
@@ -138,8 +138,8 @@ impl FeatureClient {
 
         if removed {
             features.version += 1;
-            let json = serde_json::to_vec(&features)
-                .map_err(|e| LsmError::SerializationFailed(e.to_string()))?;
+            // serde_json::Error converts automatically via JsonError(#[from])
+            let json = serde_json::to_vec(&features)?;
             self.engine.set(Self::KEY.to_string(), json)?;
             self.invalidate_cache();
         }

@@ -9,49 +9,47 @@ use thiserror::Error;
 ///
 /// Variants are grouped by origin:
 ///
-/// - **Infrastructure** (`Io`, `Codec`, `Time`) — low-level OS / serde
-///   errors that are converted automatically via `#[from]`.
+/// - **Infrastructure** (`Io`, `Codec`, `JsonError`, `Time`) — low-level OS / serde
+///   errors converted automatically via `#[from]`.
 /// - **Storage format** (`InvalidSstableFormat`, `CorruptedData`,
-///   `DecompressionFailed`, `WalCorruption`) — structural problems in
-///   on-disk files.
-/// - **Engine semantics** (`KeyNotFound`, `CompactionFailed`) — logical
-///   errors arising from engine operations.
+///   `DecompressionFailed`, `WalCorruption`) — structural problems in on-disk files.
+/// - **Engine semantics** (`KeyNotFound`, `CompactionFailed`, `LockPoisoned`,
+///   `ConcurrentModification`) — logical errors arising from engine operations.
 /// - **Configuration** (`Invalid*`, `ConfigValidation`) — parameter
 ///   validation failures raised at startup.
 ///
-/// # Previous state → rationale for changes
-///
-/// The following variants were removed in this commit:
+/// # Variant history
 ///
 /// | Removed variant       | Reason |
 /// |-----------------------|--------|
-/// | `NotFound`            | Exact duplicate of `KeyNotFound` (same Display text, zero call sites) |
-/// | `InvalidSstable`      | Context-free alias for `InvalidSstableFormat(String)` (zero call sites) |
-/// | `LockPoisoned`        | `parking_lot` mutexes never poison; was unreachable dead code |
-/// | `ConcurrentModification` | Zero call sites anywhere in the codebase |
-/// | `SerializationFailed` | Zero call sites; superseded by `Codec` |
-/// | `DeserializationFailed` | Zero call sites; superseded by `Codec` |
+/// | `NotFound`            | Exact duplicate of `KeyNotFound` — same Display text, zero call sites |
+/// | `InvalidSstable`      | Context-free alias for `InvalidSstableFormat(String)` — zero call sites |
+/// | `SerializationFailed(String)` | Replaced by `JsonError(#[from] serde_json::Error)` |
+/// | `DeserializationFailed(String)` | Replaced by `JsonError(#[from] serde_json::Error)` |
 ///
-/// `Serialization` was renamed to `Codec` to match the `infra::codec`
-/// module name and to avoid confusion between encode and decode paths.
+/// `Serialization(#[from] bincode::Error)` was renamed to `Codec` to match
+/// the `infra::codec` module name.
 #[derive(Error, Debug)]
 pub enum LsmError {
     // -------------------------------------------------------------------------
-    // Infrastructure errors — converted automatically via #[from]
+    // Infrastructure — converted automatically via #[from]
     // -------------------------------------------------------------------------
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
 
-    /// Covers both encode and decode failures from `bincode`.
-    /// Converted automatically via `?` in `infra::codec`.
+    /// Bincode encode/decode failures from `infra::codec`.
     #[error("Codec error: {0}")]
     Codec(#[from] bincode::Error),
+
+    /// JSON encode/decode failures (serde_json), e.g. from `features::FeatureClient`.
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
 
     #[error("System time error: {0}")]
     Time(#[from] SystemTimeError),
 
     // -------------------------------------------------------------------------
-    // Storage format errors
+    // Storage format
     // -------------------------------------------------------------------------
     #[error("Invalid SSTable format: {0}")]
     InvalidSstableFormat(String),
@@ -73,6 +71,16 @@ pub enum LsmError {
 
     #[error("Compaction failed: {0}")]
     CompactionFailed(String),
+
+    /// Raised when a `std::sync::Mutex` is poisoned (i.e. a thread panicked
+    /// while holding the lock). Not applicable to `parking_lot` mutexes.
+    #[error("Lock poisoned: {0}")]
+    LockPoisoned(&'static str),
+
+    /// Raised in optimistic-concurrency retry loops when all attempts are
+    /// exhausted (e.g. `FeatureClient::set_flag`).
+    #[error("Concurrent modification conflict")]
+    ConcurrentModification,
 
     // -------------------------------------------------------------------------
     // Configuration validation
