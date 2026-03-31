@@ -1,492 +1,246 @@
-  # Roadmap — LSM KV Store
+# Roadmap — ApexStore
 
-**Last Updated:** 2026-02-03  
-**Current Version:** v1.3.0  
-**Base Storage Model:** `key: String -> value: Vec<u8>` (LSM-Tree)  
-**Objective:** Evolve the project through versioned releases, adding **efficient iterators**, **compaction**, **secondary indexes**, and multi-instance support.
+**Last Updated:** 2026-03-31
+**Current Version:** v2.1.1
+**Base Storage Model:** `key: String -> value: Vec<u8>` (LSM-Tree)
+**Objective:** Evolve the project through versioned releases, adding **compaction**, **range iterators**, **secondary indexes**, and multi-instance support.
 
 ---
 
 ## Version Convention
 
-- **Regular versions** (e.g., v1.1, v1.2, v1.3): Evolutionary releases with new features
+- **Regular versions** (e.g., v2.2, v2.3): Evolutionary releases with new features
 - **LTS versions** (e.g., v3-lts, v5-lts): Stable versions, production-ready, focused on compatibility and reliability
 
 ---
 
-## v1.3.0 — SSTable V2 with Sparse Index ✅ (Released - 2026-02-03)
+## ✅ Released Versions
 
-### Objective
+### v1.0.0 — Alpha (2026-01-24)
+- MemTable (BTreeMap), WAL, basic SSTable V1 with Bloom Filters
+- CLI REPL, REST API (Actix-Web), batch operations
+- Single-instance design
 
-Replace flush logic with efficient block-based SSTables using sparse index and compression.
+### v1.1.0 — Alpha (2026-01-25)
+- GitHub Actions workflows (develop → release)
+- Feature flag management endpoints
+- Docker multi-stage build
+- Enhanced statistics
 
-### Deliverables ✅
+### v1.2.0 — Beta (2026-01-31)
+- Centralized `LsmConfig` + builder pattern
+- SOLID architecture refactoring
+- Removed duplicate configs, translated all messages to English
 
-#### Task 1.1: Block Structure ✅ (Previously Completed)
+### v1.3.0 — Stable (2026-02-03)
+- **SSTable V2 format (LSMSST02)**: block-based storage, LZ4 compression, sparse index
+- **`SstableBuilder`**: complete implementation with Bloom filter generation
+- **Configuration System**: 35+ parameters, `.env` support, 5 performance profiles
+- `docs/CONFIGURATION.md` (500+ lines)
 
-**Status**: ✅ **COMPLETE**
-- Block-based data structure implemented
-- Fixed-size blocks with automatic overflow handling
-- Efficient encoding/decoding
-- Integration with storage layer
-
-#### Task 1.2: SSTable Builder with Sparse Index ✅ (Issue #18)
-
-**Status**: ✅ **COMPLETE** (2026-02-03)
-
-**Implementation**:
-- ✅ Created `src/storage/builder.rs` module (200+ lines)
-- ✅ Defined `SstableBuilder` struct with full state management
-- ✅ Implemented buffering logic with `add(key, value)` and automatic flushing
-- ✅ Sparse index tracking via `BlockMeta { first_key, offset, size, uncompressed_size }`
-- ✅ Implemented complete `finish()` method:
-  - Writes last pending block
-  - Serializes and writes MetaBlock with all metadata
-  - Writes fixed 8-byte footer with meta offset
-- ✅ Integrated Bloom Filter generation from all keys
-- ✅ **Bonus**: Added LZ4 compression (2-4x space savings)
-- ✅ **Bonus**: Magic header (LSMSST02) for versioning
-- ✅ **Bonus**: Expanded metadata (min/max keys, record count, timestamp)
-- ✅ Comprehensive test suite (4 tests covering all scenarios)
-
-**New File Format (LSMSST02)**:
-```
-[MAGIC: LSMSST02 (8 bytes)]
-[Compressed Block 1] [Compressed Block 2] ... [Compressed Block N]
-[Compressed MetaBlock: {blocks, bloom, min_key, max_key, count, timestamp}]
-[Footer: meta_offset (u64, 8 bytes)]
-```
-
-**Performance**:
-- **Compression**: 2-4x space savings with LZ4
-- **Read**: O(log N) block lookups via sparse index
-- **Memory**: Only metadata loaded (~KB), not entire file
-- **Write**: Buffered with automatic flushing
-
-**Quality**:
-```
-✅ Compilation: Success (0 errors)
-✅ Tests: 4/4 passing
-✅ Warnings: 0
-✅ Clippy: 0 violations
-```
-
-#### Configuration System ✅ (PR #29)
-
-**Status**: ✅ **COMPLETE** (2026-02-03)
-
-**Implementation**:
-- ✅ 35+ configurable parameters via environment variables
-- ✅ `.env` file support with `dotenvy` crate
-- ✅ Created `.env.example` with comprehensive documentation
-- ✅ 5 ready-to-use performance profiles
-- ✅ Complete tuning guide (`docs/CONFIGURATION.md` - 500+ lines)
-- ✅ Zero recompilation needed for config changes
-
-**Configuration Categories**:
-1. **Server HTTP** (12 parameters) - Network, payloads, threading, limits
-2. **LSM Engine** (8 parameters) - Storage, SSTables, bloom filters, WAL
-3. **Compaction** (5 parameters) - Future-ready settings
-4. **Advanced Tuning** (6 parameters) - I/O, mmap, direct I/O
-5. **Monitoring** (4 parameters) - Logging and metrics
-
-**Key Features**:
-- 🎯 5 Performance Profiles (stress testing, high write/read, memory constrained, balanced)
-- 📊 Configuration display on server startup
-- 📚 500+ lines of documentation
-- 🔧 Trade-offs explained (memory vs performance, latency vs throughput)
-
-#### Task 1.3: SSTable Reader ⏳
-
-**Status**: 🔄 **NEXT PRIORITY** (Pending)
-
-**Requirements**:
-- Read LSMSST02 format files
-- Parse footer to locate MetaBlock
-- Load sparse index into memory
-- Binary search over blocks for key lookups
-- Decompress blocks on-demand
-- Load and query Bloom filter
-- Efficient `get(key)` implementation
-
-**Implementation Plan**:
-1. Create `src/storage/reader.rs`
-2. Define `SstableReader` struct
-3. Implement `open(path)` - load metadata
-4. Implement `get(key)` - binary search + block read
-5. Implement `scan()` - iterate all blocks in order
-6. Add comprehensive tests (matching builder tests)
-7. Benchmark against V1 format
-8. Integration tests with Builder
-
-**Expected Benefits**:
-- O(log N) key lookups (vs O(N) linear scan)
-- Memory-efficient (only sparse index loaded)
-- Bloom filter pre-filtering
-- Decompression only for accessed blocks
-
-#### Task 1.4: Engine Integration ⏳
-
-**Status**: 🔄 **PENDING** (After Task 1.3)
-
-**Requirements**:
-- Update `LsmEngine::flush()` to use `SstableBuilder`
-- Update `LsmEngine::get()` to use `SstableReader`
-- Support both V1 and V2 formats during transition
-- Migration strategy for existing databases
-- Performance benchmarking (V1 vs V2)
-- Documentation update
-
-**Migration Strategy**:
-1. New writes use V2 format (Builder)
-2. Reads support both V1 and V2 (detect magic header)
-3. Gradual migration: compaction rewrites V1 → V2
-4. Flag to force V1 compatibility mode (if needed)
-
-**Expected Impact**:
-- ✅ 2-4x space savings (compression)
-- ✅ Faster lookups (sparse index)
-- ✅ Lower memory usage
-- ✅ Better scalability
-
-### Release Status: v1.3.0 ✅
-
-**Completion Summary**:
-- ✅ Task 1.1: Block Structure (previously)
-- ✅ Task 1.2: Builder with Sparse Index (Issue #18 - 100% complete)
-- ✅ Configuration System (PR #29 - bonus feature)
-- ⏳ Task 1.3: Reader (next)
-- ⏳ Task 1.4: Engine Integration (after 1.3)
-
-**Released**: 2026-02-03  
-**Branch**: `develop`  
-**Quality**: Production-ready (all tests passing, zero warnings)
+### v2.0.0 → v2.1.1 — Current (2026-03-06)
+- **`SstableReader`**: full V2 reader with binary search on sparse index, Bloom filter, shared block cache
+- **Engine Integration**: `scan()`, `search()`, `search_prefix()`, `keys()`, `count()` fully integrated
+- **Iterator Infrastructure**: `StorageIterator` trait, `MemTableIterator`, `SstableIterator` (`src/storage/iterator.rs`, `src/storage/sst_iterator.rs`)
+- **Global Block Cache**: shared `Arc<GlobalBlockCache>` across all SSTable readers with LRU eviction
+- **Concurrent Reader**: `SstableReader` is thread-safe via `parking_lot::Mutex<File>` + immutable metadata
+- **REST API + Auth**: JWT/token auth, admin endpoints, health check, Docker Compose deployment
+- **TUI**: interactive terminal interface (`ratatui` + `crossterm`)
+- **CHANGELOG**, **MIGRATION_GUIDE**, **QUICKSTART** documentation
 
 ---
 
-## v1.4 (Planned - Next Release)
+## v2.2 — Bug Fixes & Hardening (Next — ~2 weeks)
 
 ### Objective
+Fix known correctness and durability bugs identified in the v2.1.1 audit. No new features — stability first.
 
-Complete SSTable V2 integration with Reader and Engine updates.
+### Deliverables
 
-### Deliverables ⏳
+#### 🔴 Critical Fixes
 
-#### Task 1.3: SSTable Reader
-- Implement `SstableReader` for LSMSST02 format
-- Binary search over sparse index
-- On-demand block decompression
-- Comprehensive tests
+- [ ] **#89** — Fix WAL `clear()` race condition between truncate and reopen
+  - Replace two-handle pattern with `set_len(0)` + `seek(Start(0))` on the existing fd
+  - Eliminates crash-recovery data loss window
 
-#### Task 1.4: Engine Integration
-- Update flush to use Builder
-- Update reads to use Reader
-- V1/V2 format coexistence
-- Performance benchmarks
+- [ ] **#90** — Fix `set_batch()` / `delete_batch()` non-atomic behavior
+  - Single WAL pass + single memtable lock acquisition for all items
+  - Prevents partial-write inconsistency on error mid-batch
 
-### Expected Timeline
+#### 🟡 Refactoring
 
-**Estimated**: 1-2 weeks  
-**Priority**: High (completes SSTable V2 work)
+- [ ] **#91** — Migrate `std::sync::Mutex` → `parking_lot::Mutex` / `RwLock` in `engine.rs` and `wal.rs`
+  - `sstables` upgraded to `RwLock` for concurrent reads
+  - ~30% lock overhead reduction on hot paths
+
+- [ ] **#92** — Clean up duplicate `LsmError` variants (`KeyNotFound` vs `NotFound`, serialization overlap)
+
+- [ ] **#93** — Remove `pub(crate)` field exposure from `LsmEngine`; add private fields with accessor methods
+
+#### 🟢 Optimization
+
+- [ ] **#37** — Replace linear in-block scan with `binary_search_by()` in `search_in_block()`
+  - Sparse index binary search already done; this completes the lookup chain to O(log n) inside the block
+
+### Release Criteria
+- All critical bugs (#89, #90) fixed and tested
+- Zero `std::sync` usage in hot paths
+- All existing tests passing
 
 ---
 
-## v2.0 — Operational Base + Iterators
+## v2.3 — Range Scan API & Pagination (~2 weeks after v2.2)
 
 ### Objective
+Make the API production-usable for large datasets by eliminating full-scan materializations.
 
-Create infrastructure to eliminate "full scan" for range or prefix searches.
+### Deliverables
 
-### Deliverables ⏳
+- [ ] **#24** — `GET /scan?start_key=...&end_key=...&limit=N` with cursor-based pagination
+- [ ] **#24** — `GET /keys/search?q=...&prefix=true&limit=N&cursor=...`
+- [ ] Engine: `scan_range(start: &str, end: &str)` leveraging `BTreeMap::range()` + SSTable iterator
+- [ ] CLI: `SCAN [start] [end]` and `PREFIX <prefix>` commands
+- [ ] Default limit of 1000 records per response (configurable)
+- [ ] Response includes `next_cursor` when result set is truncated
 
-#### Efficient Engine Iterators
-
-- `iter_prefix(prefix)` - Iterate keys with given prefix
-- `iter_range(min..max)` - Iterate keys in range
-- Merge-iterator combining MemTable + SSTables
-- Respect tombstones and recency order
-- Cursor-based pagination
-
-#### SSTable Read Optimization (Already Done in v1.3!)
-
-- ✅ **Internal sparse index** in SSTable (Task 1.2 complete)
-- ✅ **Binary search** over blocks
-- ✅ **Bloom filters** for fast negatives
-- Remaining: Iterator interface over blocks
-
-#### Robustness
-
-- **Integrity validation**: Checksum per block (LZ4 has built-in CRC)
-- **Fault tolerance**: Handle corrupted SSTables gracefully
-- **Better error messages**: Easier debugging
-- **Recovery improvements**: Partial SSTable recovery
-
-### Prerequisites
-
-- ✅ Task 1.2: SSTable Builder (v1.3.0)
-- ⏳ Task 1.3: SSTable Reader
-- ⏳ Task 1.4: Engine Integration
-
-### Completion Criteria
-
-Read `user:*` keys by prefix with **pagination** without full database scan.
-
-**Expected Timeline**: 2-4 weeks after v1.4
+### Release Criteria
+- `GET /scan` on a 10M-key database returns in < 100ms for limit=100
+- Full scan no longer materializes all records in memory
 
 ---
 
-## v3-lts — Compaction 🏷️
+## v2.4 — Benchmark Suite (~1 week after v2.3)
 
 ### Objective
+Replace informal performance claims with real `criterion` benchmarks.
 
-Make system sustainable for continuous operation without performance degradation.
+### Deliverables
 
-### Deliverables ⏳
+- [ ] **#48** — Create `benches/` directory with:
+  - `write_bench.rs`: single write, batch write, WAL overhead
+  - `read_bench.rs`: MemTable hit, SSTable cold/warm cache, Bloom filter
+  - `mixed_bench.rs`: YCSB-style workloads A/B/C/D/F
+  - `scan_bench.rs`: full scan, range scan, prefix scan
+- [ ] CI integration: run benchmarks on `main` push, alert on >10% regression
+- [ ] Update README with real measured numbers
+- [ ] Create `docs/PERFORMANCE.md`
 
-#### Compaction Implementation
+---
 
-- Compaction strategy (leveled or size-tiered)
-- Remove duplicates (keep most recent version)
-- Permanently remove tombstones when safe
-- Control active SSTable count
-- Background compaction threads
+## v3-lts — Compaction 🏷️ (~6–10 weeks)
 
-#### Configuration (Already Ready in v1.3!)
+### Objective
+Make the system sustainable for continuous operation. Without compaction, SSTable count grows unboundedly, reads degrade, and disk space is never reclaimed.
 
-- ✅ Configurable compaction parameters (v1.3.0)
-  - `COMPACTION_STRATEGY` (leveled/tiered/lazy_leveling)
-  - `SIZE_RATIO`, `LEVEL0_COMPACTION_THRESHOLD`
-  - `MAX_LEVEL_COUNT`, `COMPACTION_THREADS`
-- Compaction operation logging
-- Performance monitoring
+### Deliverables
 
-#### Admin Tools
+#### Core Compaction Infrastructure
 
-- `POST /admin/compact` - Force manual compaction
-- `POST /admin/verify` - Verify integrity
-- `GET /admin/compaction/status` - Check status
-- Compaction statistics
+- [ ] **#47** — `src/storage/compaction/` module:
+  - `CompactionStrategy` trait
+  - `CompactionPicker` — selects SSTables to merge
+  - `CompactionExecutor` — performs merge via MergeIterator, writes new SSTable, atomically swaps old files
+  - `BackgroundScheduler` — tokio task that triggers compaction on threshold breach
 
-### Completion Criteria
+#### Strategy 1: Size-Tiered Compaction (STC)
+- Group SSTables into size buckets
+- Merge when bucket reaches 4+ files
+- Low write amplification (~2–3x), good for write-heavy workloads
 
-- SSTable count stabilizes over time
-- Read latency doesn't degrade with writes
-- System operates for weeks without issues
-- Space reclamation works correctly
+#### Strategy 2: Leveled Compaction (LC)
+- L0 (new flushes, may overlap) → L1..Ln (non-overlapping, sorted by key range)
+- Industry standard (RocksDB, LevelDB)
+- Better read amplification, higher write amplification (~10–20x)
 
-### LTS Status
+#### Tombstone GC
+- Remove tombstones permanently during compaction when no older SSTables reference the key
 
-✅ **First LTS version** — Production-ready KV store suitable for:
-- Cache systems
-- Log storage
-- Blob storage
-- Time-series data
+#### Admin API
+- `POST /admin/compact` — trigger manual compaction
+- `GET /admin/compaction/status` — monitor progress
 
-**Expected Timeline**: 4-6 weeks after v2.0
+#### Checksums
+- [ ] **#25** — CRC32 per block (append 4 bytes to block encoding)
+- Verify on read; return `LsmError::CorruptedData` on mismatch
+
+### LTS Criteria
+- SSTable count stabilizes over 72h of continuous writes
+- Read latency p99 does not degrade after 1M writes
+- Space reclamation works correctly (tombstones removed)
+- All correctness tests passing under concurrent load
+
+**Expected Timeline:** 6–10 weeks after v2.4
 
 ---
 
 ## v4 — Secondary Indexes (Posting Lists)
 
 ### Objective
+Enable value-based queries without full scan.
 
-Enable **value queries** without full scan using secondary indexes.
+### Deliverables
 
-### Deliverables ⏳
+- Index Registry: `indexes.toml` config, multiple extractor types (`raw`, `json_path`, `bson_path`)
+- Posting Lists stored as LSM keys: `idx:{index}:{term}:blk:{N} -> [pk1, pk2, ...]`
+- `POST /query` endpoint with mandatory index usage (no scan fallback)
+- On-write index maintenance; lazy delete; compaction integration
 
-#### Index Registry
-
-- Configuration file for index definitions (`indexes.toml` or `indexes.json`)
-- Support for multiple index types (equality, range, text)
-- Extractor plugins:
-  - `raw`: Direct indexing
-  - `json_path`: Extract JSON field
-  - `bson_path`: Extract BSON field
-  - `custom`: User-defined function
-
-#### Posting Lists in Blocks
-
-```
-idx:{index}:{term}:meta -> { last_block, total_postings, ... }
-idx:{index}:{term}:blk:{000001} -> [pk1, pk2, ...]
-idx:{index}:{term}:blk:{000002} -> [pk3, pk4, ...]
-```
-
-#### Index Maintenance
-
-- **On SET**: Extract terms and append to current block
-- **On DELETE**: Lazy deletion (mark, cleanup later)
-- **Compaction Integration**: Clean up during compaction
-
-#### Query API
-
-- `POST /query` endpoint
-- Mandatory index usage (no scan fallback)
-- Pagination with cursors
-- Query parameters: `index`, `term`, `cursor`, `limit`
-
-### Completion Criteria
-
-Query `city=PortoAlegre` returns results using **only** index lookups (no scan).
-
-**Expected Timeline**: 6-8 weeks after v3-lts
+**Expected Timeline:** 6–8 weeks after v3-lts
 
 ---
 
 ## v5-lts — Production Indexed Queries 🏷️
 
 ### Objective
-
 Make indexed queries reliable and operable in production.
 
-### Deliverables ⏳
+### Deliverables
 
-#### Composite Queries
-
-- Posting list intersection (AND queries)
+- Posting list intersection (AND/OR/NOT)
 - Skip pointers for optimization
-- Query planning (choose most selective index)
-- OR and NOT operators
-
-#### Pagination
-
 - Stable cursors: `(term, block_id, offset)`
-- Works with concurrent writes
-- Snapshot reads or versioning
+- Query timeouts, result limits, `max_postings_scanned` protection
+- Index management endpoints (`GET/POST/DELETE /indexes`)
 
-#### Limits and Protection
-
-- Query timeouts (`timeout` parameter)
-- Result limits (`limit` parameter)
-- `max_postings_scanned` protection
-
-#### Index Management
-
-- `GET /indexes` - List registered indexes
-- `POST /indexes` - Create new index
-- `DELETE /indexes/{name}` - Remove index
-- `POST /indexes/{name}/rebuild` - Rebuild index (admin)
-- Index statistics
-
-### LTS Status
-
-✅ **Second LTS version** — Production-ready with indexed queries, suitable for:
-- Application databases
-- Query-heavy workloads
-- Filtered searches
-
-**Expected Timeline**: 4-6 weeks after v4
+**Expected Timeline:** 4–6 weeks after v4
 
 ---
 
 ## v6-lts — Multi-Instance + Per-Instance Codec 🏷️
 
 ### Objective
+Run multiple independent engine instances on the same server.
 
-Run **multiple instances** on the same server with independent configurations.
+### Deliverables
 
-### Deliverables ⏳
+- `lsm.toml` with `[[instance]]` definitions
+- Per-instance routing: `GET /db/{instance}/keys/{key}`
+- Codec layer: `raw`, `json`, `bson`
+- Complete data isolation per instance
 
-#### Configuration File `lsm.toml`
-
-```toml
-[[instance]]
-name = "app"
-data_dir = "./.lsm_app"
-memtable_max_size = 4194304  # 4MB
-codec = "bson"
-query = true
-indexes_file = "./indexes_app.toml"
-
-[[instance]]
-name = "log"
-data_dir = "./.lsm_log"
-memtable_max_size = 16777216  # 16MB
-codec = "raw"
-query = false
-```
-
-#### Per-Instance Routing
-
-- `POST /db/{instance}/keys`
-- `GET /db/{instance}/keys/{key}`
-- `POST /db/{instance}/query`
-- Complete isolation per instance
-
-#### Codec Layer
-
-- `raw`: Bytes (base64 over HTTP)
-- `json`: UTF-8 JSON
-- `bson`: Binary JSON (better type preservation)
-
-### LTS Status
-
-✅ **Third LTS version** — Multi-instance ready for:
-- Heterogeneous workloads (app + logs + cache)
-- Different tuning per workload
-- Isolated performance
-
-**Expected Timeline**: 6-8 weeks after v5-lts
+**Expected Timeline:** 6–8 weeks after v5-lts
 
 ---
 
-## Summary: Versions and Milestones
+## Version Summary
 
-| Version   | LTS? | Status | Main Milestone                                     | Timeline       |
-| :-------- | :--- | :----- | :------------------------------------------------- | :------------- |
-| v1.0      | ❌    | ✅      | Functional basic KV                                | Released       |
-| v1.1      | ❌    | ✅      | Workflows and statistics                           | Released       |
-| v1.2      | ❌    | ✅      | SOLID refactoring                                  | Released       |
-| **v1.3**  | **❌** | **✅**  | **SSTable V2 + Config (Current)**                  | **2026-02-03** |
-| v1.4      | ❌    | ⏳      | Reader + Engine Integration                        | 1-2 weeks      |
-| v2.0      | ❌    | ⏳      | Efficient iterators                                | 2-4 weeks      |
-| v3-lts    | ✅    | ⏳      | Compaction + production durability                 | 4-6 weeks      |
-| v4        | ❌    | ⏳      | Secondary indexes + posting lists                  | 6-8 weeks      |
-| v5-lts    | ✅    | ⏳      | Production-ready indexed queries                   | 4-6 weeks      |
-| v6-lts    | ✅    | ⏳      | Multi-instance + per-instance codec                | 6-8 weeks      |
-| v7        | ❌    | ⏳      | Mongo-like layer                                   | TBD            |
-| v8-lts    | ✅    | ⏳      | Complete backup/restore + admin tools              | TBD            |
-
----
-
-## Current Status: v1.3.0 ✅
-
-### What's Complete
-
-- ✅ **SSTable V2 Format**: LSMSST02 with compression and sparse index
-- ✅ **Builder**: Complete implementation with tests
-- ✅ **Configuration System**: 35+ parameters, 5 profiles, comprehensive docs
-- ✅ **Documentation**: CHANGELOG, ROADMAP, Configuration Guide
-- ✅ **Quality**: 0 warnings, 0 clippy violations, all tests passing
-
-### Immediate Next Steps (v1.4)
-
-1. **Task 1.3: SSTable Reader** ⏳ (High Priority)
-   - Implement reader for LSMSST02 format
-   - Binary search over sparse index
-   - Block decompression on-demand
-   - Comprehensive testing
-
-2. **Task 1.4: Engine Integration** ⏳ (After 1.3)
-   - Update flush logic to use Builder
-   - Update read path to use Reader
-   - V1/V2 format coexistence
-   - Performance benchmarking
-
-### Progress Tracking
-
-**v1.3.0 Foundation**: ✅ 60% Complete (Builder + Config done)
-- ✅ Task 1.1: Block Structure
-- ✅ Task 1.2: Builder with Sparse Index (Issue #18 - 100%)
-- ✅ Configuration System (PR #29 - bonus)
-- ⏳ Task 1.3: Reader (next - 0%)
-- ⏳ Task 1.4: Engine Integration (pending - 0%)
-
-**v1.4 Target**: Complete SSTable V2 integration (remaining 40%)
+| Version     | LTS? | Status      | Main Milestone                             | Timeline          |
+| :---------- | :--- | :---------- | :----------------------------------------- | :---------------- |
+| v1.0–v1.3   | ❌    | ✅ Released  | SSTable V2, Config, CLI, API               | Done              |
+| **v2.0–v2.1** | **❌** | **✅ Current** | **Reader, Iterator, Cache, Auth, Docker** | **2026-03-06**    |
+| v2.2        | ❌    | 🔧 Next      | Bug fixes: WAL race, batch atomicity, locks | ~2 weeks         |
+| v2.3        | ❌    | ⏳ Planned   | Range scan API + pagination                | ~2 weeks after    |
+| v2.4        | ❌    | ⏳ Planned   | Benchmark suite                            | ~1 week after     |
+| v3-lts      | ✅    | ⏳ Planned   | Compaction + CRC32 checksums               | 6–10 weeks        |
+| v4          | ❌    | ⏳ Planned   | Secondary indexes + posting lists          | 6–8 weeks         |
+| v5-lts      | ✅    | ⏳ Planned   | Production-ready indexed queries           | 4–6 weeks         |
+| v6-lts      | ✅    | ⏳ Planned   | Multi-instance + per-instance codec        | 6–8 weeks         |
+| v7          | ❌    | ⏳ Planned   | Mongo-like document layer                  | TBD               |
+| v8-lts      | ✅    | ⏳ Planned   | Backup/restore + admin tooling             | TBD               |
 
 ---
 
-**Last Updated:** 2026-02-03  
-**Current Release:** v1.3.0  
-**Authors:** LSM KV Store Team  
+**Last Updated:** 2026-03-31
+**Current Release:** v2.1.1
+**Authors:** ApexStore Team
 **License:** MIT
