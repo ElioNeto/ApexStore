@@ -114,18 +114,18 @@ impl WriteAheadLog {
     /// a reopen where a crash could leave the WAL in an inconsistent state.
     ///
     /// Execution order under the lock:
-    ///   1. `flush()`    — drain the `BufWriter` user-space buffer to the OS
-    ///   2. `sync_all()` — fsync: ensure all bytes are on durable storage
-    ///   3. `set_len(0)` — atomically truncate the file to zero bytes
-    ///   4. `seek(0)`    — reset the write cursor so the next record lands
-    ///                     at offset 0
+    ///
+    /// 1. `flush()`    — drain the `BufWriter` user-space buffer to the OS
+    /// 2. `sync_all()` — fsync: ensure all bytes are on durable storage
+    /// 3. `set_len(0)` — atomically truncate the file to zero bytes
+    /// 4. `seek(0)`    — reset the write cursor to offset 0
     pub fn clear(&self) -> Result<()> {
         let mut guard = self.file.lock();
 
         // 1. Flush the BufWriter's in-process buffer to the OS page cache.
         guard.flush()?;
 
-        // 2–4. Operate on the underlying File directly.
+        // 2-4. Operate on the underlying File directly.
         //      get_mut() gives us &mut File without releasing the BufWriter.
         {
             let file = guard.get_mut();
