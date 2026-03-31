@@ -198,10 +198,7 @@ impl LsmEngine {
             return Ok(0);
         }
 
-        let records: Vec<LogRecord> = keys
-            .into_iter()
-            .map(LogRecord::tombstone)
-            .collect();
+        let records: Vec<LogRecord> = keys.into_iter().map(LogRecord::tombstone).collect();
 
         for record in &records {
             self.wal.write_record(record)?;
@@ -293,9 +290,11 @@ impl LsmEngine {
                 for (key_bytes, record) in sst.scan()? {
                     let key = String::from_utf8(key_bytes)
                         .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
-                    result_map
-                        .entry(key)
-                        .or_insert((record.value, record.timestamp, record.is_deleted));
+                    result_map.entry(key).or_insert((
+                        record.value,
+                        record.timestamp,
+                        record.is_deleted,
+                    ));
                 }
             }
         }
@@ -303,7 +302,11 @@ impl LsmEngine {
         let mut results: Vec<(String, Vec<u8>)> = result_map
             .into_iter()
             .filter_map(|(key, (value, _ts, is_deleted))| {
-                if !is_deleted { Some((key, value)) } else { None }
+                if !is_deleted {
+                    Some((key, value))
+                } else {
+                    None
+                }
             })
             .collect();
 
