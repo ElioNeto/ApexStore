@@ -128,7 +128,7 @@ impl SstableReader {
         let block_data = self.read_block(&block_meta)?;
 
         // Deserialize block (no lock needed)
-        let block = Block::decode(&block_data);
+        let block = Block::decode(&block_data)?;
 
         // Linear scan within the block to find the key (no lock needed)
         Self::search_in_block(&block, key.as_bytes())
@@ -188,7 +188,7 @@ impl SstableReader {
 
         for block_meta in &blocks {
             let block_data = self.read_block(block_meta)?;
-            let block = Block::decode(&block_data);
+            let block = Block::decode(&block_data)?;
 
             // Access block data through pub(crate) fields
             for &offset in &block.offsets {
@@ -860,5 +860,56 @@ mod tests {
         for handle in handles {
             handle.join().unwrap();
         }
+    }
+
+    #[test]
+    fn test_sstable_data_corruption_detected() {
+        use std::fs::File;
+        use std::io::Write;
+        use std::io::Read;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("corruption_test.sst");
+        let config = StorageConfig::default();
+        let cache = create_test_cache(&config);
+
+        // Write a valid SSTable
+        let mut builder = SstableBuilder::new(path.clone(), config.clone(), 12345).unwrap();
+        for i in 0..10 {
+            let key = format!("key_{:03}", i);
+            let value = format!("value_{:03}", i);
+            builder
+                .add(key.as_bytes(), &create_test_record(&key, value.as_bytes()))
+                .unwrap();
+        }
+        builder.finish().unwrap();
+
+        // Read the file, corrupt a byte in the data section, and write it back
+        let mut file = File::open(&path).unwrap();
+        let mut original_data = Vec::new();
+        file.read_to_end(&mut original_data).unwrap();
+
+        // Corrupt a byte in the middle of the file (not in magic number or footer)
+        // The file format is: [magic: 8] + [blocks] + [footer: 8]
+        // We'll corrupt a byte in the blocks section (starting at offset 8)
+        let corrupt_offset = 100;
+        original_data[corrupt_offset] ^= 0xFF;
+
+        // Write the corrupted data back
+        let mut file = File::create(&path).unwrap();
+        file.write_all(&original_data).unwrap();
+        drop(file);
+
+        // Now try to read the corrupted SSTable - should return CorruptedData error
+        let result = SstableReader::open(path, config, cache);
+
+        assert!(result.is_err(), "Should fail to open corrupted SSTable");
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, LsmError::CorruptedData(_)),
+            "Expected CorruptedData error, got: {:?}",
+            err
+        );
+        assert!(err.to_string().contains("CRC32"));
     }
 }

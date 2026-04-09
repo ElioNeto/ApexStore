@@ -1,4 +1,5 @@
-use crate::infra::config::StorageConfig;
+use crate::infra::{config::StorageConfig, error::LsmError};
+use crc32fast::Hasher;
 use std::mem::size_of;
 
 pub const BLOCK_SIZE: usize = 4096;
@@ -76,48 +77,76 @@ impl Block {
         let num_elements = self.offsets.len() as u32;
         encoded.extend_from_slice(&num_elements.to_le_bytes());
 
+        // Calculate and append CRC32 checksum (Little Endian)
+        let mut hasher = Hasher::new();
+        hasher.update(&encoded);
+        let checksum = hasher.finalize();
+        encoded.extend_from_slice(&checksum.to_le_bytes());
+
         encoded
     }
 
-    pub fn decode(data: &[u8]) -> Self {
+    pub fn decode(data: &[u8]) -> Result<Self> {
         if data.len() < U32_SIZE {
-            return Self {
-                data: Vec::new(),
-                offsets: Vec::new(),
-                block_size: BLOCK_SIZE,
-            };
+            return Err(LsmError::CorruptedData(
+                "Data too short to contain checksum".to_string(),
+            ));
         }
 
-        let num_elements_start = data.len() - U32_SIZE;
+        // Read stored checksum (last 4 bytes)
+        let checksum_start = data.len() - U32_SIZE;
+        let stored_checksum = u32::from_le_bytes([
+            data[checksum_start],
+            data[checksum_start + 1],
+            data[checksum_start + 2],
+            data[checksum_start + 3],
+        ]);
+
+        // Extract data without checksum for verification
+        let data_without_checksum = &data[..checksum_start];
+
+        // Calculate actual checksum
+        let mut hasher = Hasher::new();
+        hasher.update(data_without_checksum);
+        let calculated_checksum = hasher.finalize();
+
+        // Verify checksum
+        if stored_checksum != calculated_checksum {
+            return Err(LsmError::CorruptedData(
+                "CRC32 checksum mismatch: data corruption detected".to_string(),
+            ));
+        }
+
+        let num_elements_start = data_without_checksum.len() - U32_SIZE;
         let num_elements = u32::from_le_bytes([
-            data[num_elements_start],
-            data[num_elements_start + 1],
-            data[num_elements_start + 2],
-            data[num_elements_start + 3],
+            data_without_checksum[num_elements_start],
+            data_without_checksum[num_elements_start + 1],
+            data_without_checksum[num_elements_start + 2],
+            data_without_checksum[num_elements_start + 3],
         ]) as usize;
 
-        let offsets_start = data.len() - U32_SIZE - (num_elements * U32_SIZE);
-        let records_data = data[..offsets_start].to_vec();
+        let offsets_start = data_without_checksum.len() - U32_SIZE - (num_elements * U32_SIZE);
+        let records_data = data_without_checksum[..offsets_start].to_vec();
 
         let mut offsets = Vec::with_capacity(num_elements);
         let mut offset_pos = offsets_start;
 
         for _ in 0..num_elements {
             let offset = u32::from_le_bytes([
-                data[offset_pos],
-                data[offset_pos + 1],
-                data[offset_pos + 2],
-                data[offset_pos + 3],
+                data_without_checksum[offset_pos],
+                data_without_checksum[offset_pos + 1],
+                data_without_checksum[offset_pos + 2],
+                data_without_checksum[offset_pos + 3],
             ]);
             offsets.push(offset);
             offset_pos += U32_SIZE;
         }
 
-        Self {
+        Ok(Self {
             data: records_data,
             offsets,
             block_size: BLOCK_SIZE,
-        }
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -221,7 +250,7 @@ mod tests {
 
         // Verify integrity
         let encoded = block.encode();
-        let decoded = Block::decode(&encoded);
+        let decoded = Block::decode(&encoded).unwrap();
 
         assert_eq!(decoded.len(), block.len());
         assert_eq!(decoded.offsets.len(), block.offsets.len());
@@ -245,7 +274,7 @@ mod tests {
     fn test_encode_decode_empty_block() {
         let block = Block::new(BLOCK_SIZE);
         let encoded = block.encode();
-        let decoded = Block::decode(&encoded);
+        let decoded = Block::decode(&encoded).unwrap();
         assert_eq!(decoded.len(), 0);
         assert!(decoded.is_empty());
     }
@@ -255,7 +284,7 @@ mod tests {
         let mut block = Block::new(BLOCK_SIZE);
         block.add(b"key1", b"value1");
         let encoded = block.encode();
-        let decoded = Block::decode(&encoded);
+        let decoded = Block::decode(&encoded).unwrap();
         assert_eq!(decoded.len(), 1);
         assert_eq!(decoded.data_size(), block.data_size());
         assert_eq!(decoded.data, block.data);
@@ -278,9 +307,85 @@ mod tests {
         }
 
         let encoded = block.encode();
-        let decoded = Block::decode(&encoded);
+        let decoded = Block::decode(&encoded).unwrap();
         assert_eq!(decoded.len(), entries.len());
         assert_eq!(decoded.data, block.data);
         assert_eq!(decoded.offsets, block.offsets);
+    }
+
+    #[test]
+    fn test_crc32_corruption_detected() {
+        let mut block = Block::new(BLOCK_SIZE);
+        block.add(b"test_key", b"test_value");
+
+        let encoded = block.encode();
+        let mut corrupted = encoded.clone();
+
+        // Corrupt a byte in the data section (not the checksum)
+        corrupted[10] ^= 0xFF;
+
+        // Verify that decode returns a corruption error
+        let result = Block::decode(&corrupted);
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(matches!(err, LsmError::CorruptedData(_)));
+        assert!(err.to_string().contains("CRC32"));
+    }
+
+    #[test]
+    fn test_crc32_valid_checksum() {
+        let mut block = Block::new(BLOCK_SIZE);
+        block.add(b"key1", b"value1");
+        block.add(b"key2", b"value2");
+
+        let encoded = block.encode();
+        let decoded = Block::decode(&encoded).unwrap();
+
+        assert_eq!(decoded.len(), 2);
+        assert_eq!(decoded.data, block.data);
+        assert_eq!(decoded.offsets, block.offsets);
+    }
+
+    #[test]
+    fn test_crc32_checksum_mismatch_single_bit_flip() {
+        let mut block = Block::new(BLOCK_SIZE);
+        for i in 0..50 {
+            let key = format!("key_{:03}", i);
+            let value = format!("value_{:03}", i);
+            assert!(block.add(key.as_bytes(), value.as_bytes()));
+        }
+
+        let encoded = block.encode();
+        let corrupted = Self::corrupt_byte(&encoded, 100);
+
+        let result = Block::decode(&corrupted);
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(matches!(err, LsmError::CorruptedData(_)));
+        assert!(err.to_string().contains("mismatch"));
+    }
+
+    #[test]
+    fn test_crc32_truncated_file_detected() {
+        let mut block = Block::new(BLOCK_SIZE);
+        block.add(b"short_key", b"short_value");
+
+        let encoded = block.encode();
+        // Truncate by removing the checksum bytes
+        let truncated = &encoded[..encoded.len() - U32_SIZE];
+
+        let result = Block::decode(truncated);
+        assert!(result.is_err());
+    }
+
+    /// Helper to corrupt a specific byte in the data
+    fn corrupt_byte(data: &[u8], pos: usize) -> Vec<u8> {
+        let mut corrupted = data.to_vec();
+        if pos < corrupted.len() {
+            corrupted[pos] ^= 0xFF;
+        }
+        corrupted
     }
 }
