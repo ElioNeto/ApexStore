@@ -865,8 +865,8 @@ mod tests {
     #[test]
     fn test_sstable_data_corruption_detected() {
         use std::fs::File;
-        use std::io::Write;
         use std::io::Read;
+        use std::io::Write;
 
         let dir = tempdir().unwrap();
         let path = dir.path().join("corruption_test.sst");
@@ -914,7 +914,8 @@ mod tests {
         // Corrupt a byte in the last compressed block
         let corrupt_offset = last_block_start + last_block_size / 2;
 
-        if corrupt_offset < original_data.len() - 8 { // Keep footer intact
+        if corrupt_offset < original_data.len() - 8 {
+            // Keep footer intact
             original_data[corrupt_offset] ^= 0xFF;
 
             // Write the corrupted data back
@@ -932,7 +933,11 @@ mod tests {
             let result = reader.get(&String::from_utf8_lossy(&metadata.max_key));
 
             // The corruption should cause CRC32 verification to fail
-            assert!(result.is_err(), "Should fail to read from corrupted SSTable, got: {:?}", result);
+            assert!(
+                result.is_err(),
+                "Should fail to read from corrupted SSTable, got: {:?}",
+                result
+            );
 
             let err = result.unwrap_err();
             assert!(
@@ -940,7 +945,10 @@ mod tests {
                 "Expected CorruptedData error, got: {:?}",
                 err
             );
-            assert!(err.to_string().contains("CRC32"), "Error should mention CRC32");
+            assert!(
+                err.to_string().contains("CRC32"),
+                "Error should mention CRC32"
+            );
         } else {
             // Fallback: if corruption position is invalid, just verify the block tests still work
             // This shouldn't happen in practice
