@@ -86,7 +86,7 @@ impl Block {
         encoded
     }
 
-    pub fn decode(data: &[u8]) -> Result<Self> {
+    pub fn decode(data: &[u8]) -> std::result::Result<Self, LsmError> {
         if data.len() < U32_SIZE {
             return Err(LsmError::CorruptedData(
                 "Data too short to contain checksum".to_string(),
@@ -357,7 +357,7 @@ mod tests {
         }
 
         let encoded = block.encode();
-        let corrupted = Self::corrupt_byte(&encoded, 100);
+        let corrupted = corrupt_byte(&encoded, 100);
 
         let result = Block::decode(&corrupted);
         assert!(result.is_err());
