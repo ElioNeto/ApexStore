@@ -18,8 +18,8 @@
     "@angular/platform-browser": "^17.3.0",
     "@angular/platform-browser-dynamic": "^17.3.0",
     "@angular/router": "^17.3.0",
-    "@hugeicons/angular": "^0.0.6",
-    "@hugeicons/core-free-icons": "^1.0.17",
+    "@hugeicons/angular": "^1.0.7",
+    "@hugeicons/core-free-icons": "^4.1.1",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
     "zone.js": "~0.14.3"

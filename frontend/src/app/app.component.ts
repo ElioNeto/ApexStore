@@ -1,6 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
-import { HugeiconsComponent } from '@hugeicons/angular';
+import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   Home01Icon,
   BarChart01Icon,
@@ -13,13 +13,13 @@ import {
 import { ToastComponent } from './components/toast/toast.component';
 import type { IconSvgElement } from '@hugeicons/angular';
 
-interface NavItem  { path: string; icon: IconSvgElement[]; label: string; }
+interface NavItem { path: string; icon: IconSvgElement[]; label: string; }
 interface NavGroup { label: string; items: NavItem[]; }
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, ToastComponent, HugeiconsComponent],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, ToastComponent, HugeiconsIconComponent],
   template: `
     <div class="app-shell">
       <aside class="sidebar">
@@ -98,22 +98,22 @@ interface NavGroup { label: string; items: NavItem[]; }
   `]
 })
 export class AppComponent {
-  readonly ZapIcon    = ZapIcon;
+  readonly ZapIcon = ZapIcon;
   readonly GithubIcon = Github01Icon;
 
   navGroups = signal<NavGroup[]>([
     {
       label: 'General',
       items: [
-        { path: '/dashboard', icon: Home01Icon,   label: 'Dashboard' },
-        { path: '/stats',     icon: BarChart01Icon, label: 'Statistics' },
+        { path: '/dashboard', icon: Home01Icon, label: 'Dashboard' },
+        { path: '/stats', icon: BarChart01Icon, label: 'Statistics' },
       ]
     },
     {
       label: 'Data',
       items: [
-        { path: '/keys',     icon: Key01Icon,          label: 'Key Explorer' },
-        { path: '/features', icon: Flag01Icon,          label: 'Feature Flags' },
+        { path: '/keys', icon: Key01Icon, label: 'Key Explorer' },
+        { path: '/features', icon: Flag01Icon, label: 'Feature Flags' },
       ]
     },
     {
