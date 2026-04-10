@@ -35,6 +35,8 @@ export class ApexStoreService {
   }
 
   getStats(): Observable<StatsResponse> {
-    return this.http.get<StatsResponse>(`${this.baseUrl}/stats/all`);
+    return this.http.get<ApiResponse<StatsResponse>>(`${this.baseUrl}/stats/all`).pipe(
+      map(response => response.data ?? {})
+    );
   }
 }

@@ -243,19 +243,27 @@ export class DashboardComponent implements OnInit {
   }
 
   private buildStatCards(data: Record<string, unknown>): void {
-    const memory = (data['memory'] as Record<string, unknown>) ?? {};
-    const wal = (data['wal'] as Record<string, unknown>) ?? {};
-    const disk = (data['disk'] as Record<string, unknown>) ?? {};
+    const memKb = typeof data['mem_kb'] === 'number' ? data['mem_kb'] : Number(data['mem_kb'] ?? 0);
+    const memRecords = typeof data['mem_records'] === 'number' ? data['mem_records'] : Number(data['mem_records'] ?? 0);
+    const memtableMaxSize = typeof data['memtable_max_size'] === 'number' ? data['memtable_max_size'] : Number(data['memtable_max_size'] ?? 0);
+    const sstFiles = typeof data['sst_files'] === 'number' ? data['sst_files'] : Number(data['sst_files'] ?? 0);
+    const sstKb = typeof data['sst_kb'] === 'number' ? data['sst_kb'] : Number(data['sst_kb'] ?? 0);
+    const sstRecords = typeof data['sst_records'] === 'number' ? data['sst_records'] : Number(data['sst_records'] ?? 0);
+    const totalRecords = typeof data['total_records'] === 'number' ? data['total_records'] : Number(data['total_records'] ?? 0);
+    const walKb = typeof data['wal_kb'] === 'number' ? data['wal_kb'] : Number(data['wal_kb'] ?? 0);
+
+    // Convert KB to MB for better display
+    const memMemtableMb = (memKb / 1024).toFixed(2);
+    const diskUsageMb = (sstKb / 1024).toFixed(2);
 
     const cards = [
-      { icon: '🧠', label: 'MemTable Size', value: String(memory['memtable_size_bytes'] ?? '—'), sub: 'bytes used' },
-      { icon: '📝', label: 'WAL Entries', value: String(wal['entry_count'] ?? '—'), sub: 'log entries' },
-      { icon: '💽', label: 'Disk Usage', value: String(disk['total_bytes'] ?? '—'), sub: 'bytes on disk' },
-      { icon: '🔢', label: 'Total Keys', value: String(memory['key_count'] ?? '—'), sub: 'in memtable' },
+      { icon: '🧠', label: 'MemTable', value: `${memRecords} records`, sub: `${memMemtableMb} MB` },
+      { icon: '📝', label: 'WAL', value: `${walKb} KB`, sub: 'Write-ahead log' },
+      { icon: '💽', label: 'Disk Usage', value: `${diskUsageMb} MB`, sub: `${sstFiles} SSTables` },
+      { icon: '🔢', label: 'Total Keys', value: `${totalRecords}`, sub: 'All records' },
     ];
 
-    const hasData = Object.keys(data).length > 0 && Object.values(cards).some(c => c.value !== '—');
-    if (hasData) this.statCards.set(cards);
+    this.statCards.set(cards);
   }
 
   executePut(): void {
