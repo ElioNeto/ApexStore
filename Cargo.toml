@@ -1,6 +1,6 @@
 [package]
 name = "apex-store-rs"
-version = "2.1.10"
+version = "2.1.11"
 edition = "2021"
 authors = ["Elio Neto <netoo.elio@hotmail.com>"]
 license = "MIT"
