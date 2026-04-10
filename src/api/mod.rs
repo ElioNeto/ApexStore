@@ -404,7 +404,7 @@ async fn list_tokens(data: web::Data<AppState>) -> impl Responder {
                 .map(|t| TokenResponse {
                     id: t.id,
                     name: t.name,
-                    token: None, // Never expose raw token
+                    token: None,
                     created_at: t.created_at,
                     expires_at: t.expires_at,
                     permissions: t.permissions,
@@ -450,7 +450,6 @@ async fn auth_validator(
     req: ServiceRequest,
     credentials: actix_web_httpauth::extractors::bearer::BearerAuth,
 ) -> Result<ServiceRequest, (Error, ServiceRequest)> {
-    // Extract data before any moves
     let auth_enabled = {
         let data = req.app_data::<web::Data<AppState>>().unwrap();
         data.auth_enabled
@@ -467,6 +466,32 @@ async fn auth_validator(
 
     auth::middleware::bearer_validator(req, token_manager, Some(credentials.token().to_string()))
         .await
+}
+
+fn build_cors() -> Cors {
+    Cors::default()
+        .allow_any_origin()
+        .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"])
+        .allow_any_header()
+        .supports_credentials()
+        .max_age(3600)
+}
+
+fn register_services(app: actix_web::App<impl actix_web::dev::ServiceFactory<actix_web::dev::ServiceRequest, Config = (), Response = actix_web::dev::ServiceResponse, Error = actix_web::Error, InitError = ()>>) -> actix_web::App<impl actix_web::dev::ServiceFactory<actix_web::dev::ServiceRequest, Config = (), Response = actix_web::dev::ServiceResponse, Error = actix_web::Error, InitError = ()>> {
+    // Register static routes BEFORE dynamic ones to avoid /keys/{key} swallowing /keys/search
+    app
+        .service(health)
+        .service(get_stats)
+        .service(get_stats_all)
+        .service(list_keys)       // GET  /keys         (static, must come before /keys/{key})
+        .service(search_keys)     // GET  /keys/search  (static, must come before /keys/{key})
+        .service(set_key)         // POST /keys
+        .service(set_batch)       // POST /keys/batch
+        .service(get_key)         // GET  /keys/{key}   (dynamic, registered last)
+        .service(delete_key)      // DELETE /keys/{key}
+        .service(scan_all)
+        .service(list_features)
+        .service(set_feature)
 }
 
 pub async fn start_server(engine: LsmEngine, server_config: ServerConfig) -> std::io::Result<()> {
@@ -494,12 +519,8 @@ pub async fn start_server(engine: LsmEngine, server_config: ServerConfig) -> std
     let port = server_config.port;
 
     HttpServer::new(move || {
-        let cors = Cors::default()
-            .allow_any_origin()
-            .allow_any_method()
-            .allow_any_header();
+        let cors = build_cors();
 
-        // Wrap auth middleware only when auth is enabled
         #[cfg(feature = "api")]
         let auth_middleware = if auth_enabled {
             Some(actix_web_httpauth::middleware::HttpAuthentication::bearer(auth_validator))
@@ -507,7 +528,7 @@ pub async fn start_server(engine: LsmEngine, server_config: ServerConfig) -> std
             None
         };
 
-        let mut app = App::new()
+        let app = App::new()
             .wrap(cors)
             .app_data(web::Data::new(AppState {
                 engine: Arc::clone(&engine),
@@ -520,73 +541,63 @@ pub async fn start_server(engine: LsmEngine, server_config: ServerConfig) -> std
                 auth_enabled: false,
             }))
             .app_data(web::JsonConfig::default().limit(max_json))
-            .app_data(web::PayloadConfig::default().limit(max_raw))
-            // Public endpoints (no auth)
-            .service(health);
+            .app_data(web::PayloadConfig::default().limit(max_raw));
 
-        // Protected endpoints (with conditional auth)
         #[cfg(feature = "api")]
-        {
+        let app = {
             if let Some(ref middleware) = auth_middleware {
-                app = app
-                    .service(
-                        web::scope("")
-                            .wrap(middleware.clone())
-                            .service(get_stats)
-                            .service(get_stats_all)
-                            .service(get_key)
-                            .service(set_key)
-                            .service(set_batch)
-                            .service(delete_key)
-                            .service(list_keys)
-                            .service(search_keys)
-                            .service(scan_all)
-                            .service(list_features)
-                            .service(set_feature),
-                    );
-            } else {
-                // Auth disabled - endpoints are public
-                app = app
+                let scoped = web::scope("")
+                    .wrap(middleware.clone())
                     .service(get_stats)
                     .service(get_stats_all)
-                    .service(get_key)
-                    .service(set_key)
-                    .service(set_batch)
-                    .service(delete_key)
                     .service(list_keys)
                     .service(search_keys)
+                    .service(set_key)
+                    .service(set_batch)
+                    .service(get_key)
+                    .service(delete_key)
                     .service(scan_all)
                     .service(list_features)
                     .service(set_feature);
-            }
 
-            // Admin endpoints always require auth (only register if auth is enabled)
-            if auth_enabled {
-                app = app.service(
-                    web::scope("/admin")
-                        .wrap(auth_middleware.expect("Auth should be enabled here"))
-                        .service(create_token)
-                        .service(list_tokens)
-                        .service(delete_token),
-                );
+                let admin_scope = web::scope("/admin")
+                    .wrap(auth_middleware.clone().expect("Auth should be enabled here"))
+                    .service(create_token)
+                    .service(list_tokens)
+                    .service(delete_token);
+
+                app.service(health).service(scoped).service(admin_scope)
+            } else {
+                app
+                    .service(health)
+                    .service(get_stats)
+                    .service(get_stats_all)
+                    .service(list_keys)
+                    .service(search_keys)
+                    .service(set_key)
+                    .service(set_batch)
+                    .service(get_key)
+                    .service(delete_key)
+                    .service(scan_all)
+                    .service(list_features)
+                    .service(set_feature)
             }
-        }
+        };
 
         #[cfg(not(feature = "api"))]
-        {
-            app = app
-                .service(get_stats)
-                .service(get_stats_all)
-                .service(get_key)
-                .service(set_key)
-                .service(set_batch)
-                .service(delete_key)
-                .service(list_keys)
-                .service(search_keys)
-                .service(scan_all)
-                .service(list_features)
-                .service(set_feature);
-        }
+        let app = app
+            .service(health)
+            .service(get_stats)
+            .service(get_stats_all)
+            .service(list_keys)
+            .service(search_keys)
+            .service(set_key)
+            .service(set_batch)
+            .service(get_key)
+            .service(delete_key)
+            .service(scan_all)
+            .service(list_features)
+            .service(set_feature);
 
         app
     })
