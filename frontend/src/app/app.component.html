@@ -1,0 +1,33 @@
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <span class="logo-icon">⚡</span>
+      <span class="logo-text">ApexStore</span>
+      <span class="badge badge-warning" style="font-size:0.65rem">v2</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      @for (group of navGroups(); track group.label) {
+        <div class="nav-group-label">{{ group.label }}</div>
+        @for (item of group.items; track item.path) {
+          <a [routerLink]="item.path" routerLinkActive="active" class="nav-item">
+            <span class="nav-icon">{{ item.icon }}</span>
+            <span>{{ item.label }}</span>
+          </a>
+        }
+      }
+    </nav>
+
+    <div class="sidebar-footer">
+      <a href="https://github.com/ElioNeto/ApexStore" target="_blank" class="nav-item">
+        <span class="nav-icon">🔗</span>
+        <span>GitHub</span>
+      </a>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <router-outlet />
+  </main>
+</div>
+<app-toast />
