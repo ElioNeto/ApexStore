@@ -4,3 +4,4 @@ target
 credentials
 *.sh
 .env
+node_modules
