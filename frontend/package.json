@@ -19,7 +19,7 @@
     "@angular/platform-browser-dynamic": "^17.3.0",
     "@angular/router": "^17.3.0",
     "@hugeicons/angular": "^0.0.6",
-    "@hugeicons/core-free-icons": "^0.0.9",
+    "@hugeicons/core-free-icons": "^1.0.17",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
     "zone.js": "~0.14.3"
