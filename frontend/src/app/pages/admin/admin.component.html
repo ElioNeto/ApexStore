@@ -9,8 +9,8 @@
         <span class="spinner"></span>
       } @else {
         <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+        Refresh
       }
-      @if (!loading()) { Refresh }
     </button>
   </div>
 
@@ -36,13 +36,11 @@
           <button class="btn btn-danger" style="align-self:flex-end" (click)="clearSessionToken()">
             <hugeicons-icon [icon]="Delete01Icon" [size]="15" [strokeWidth]="1.5" /> Limpar
           </button>
+          <div class="token-active-badge">
+            <hugeicons-icon [icon]="CheckmarkCircle01Icon" [size]="14" [strokeWidth]="1.5" /> Token ativo na sessão
+          </div>
         }
       </div>
-      @if (hasSessionToken()) {
-        <div class="token-active-badge">
-          <hugeicons-icon [icon]="CheckmarkCircle01Icon" [size]="14" [strokeWidth]="1.5" /> Token ativo na sessão
-        </div>
-      }
     </div>
   </div>
 
@@ -76,8 +74,8 @@
           <span class="spinner"></span>
         } @else {
           <hugeicons-icon [icon]="Add01Icon" [size]="15" [strokeWidth]="1.5" />
+          Create Token
         }
-        @if (!loadingCreate()) { Create Token }
       </button>
 
       @if (createdToken()) {

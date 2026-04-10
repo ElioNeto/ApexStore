@@ -6,3 +6,4 @@ credentials
 .env
 node_modules
 .angular
+dist

@@ -13,8 +13,8 @@
           <span class="spinner"></span>
         } @else {
           <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+          Refresh
         }
-        @if (!loading()) { Refresh }
       </button>
     </div>
   </div>
@@ -41,16 +41,16 @@
               <span class="spinner"></span>
             } @else {
               <hugeicons-icon [icon]="TickDouble01Icon" [size]="15" [strokeWidth]="1.5" />
+              Enable
             }
-            @if (!loadingNew()) { Enable }
           </button>
           <button class="btn btn-danger" [disabled]="!newName.trim() || loadingNew()" (click)="createFlag(false)">
             @if (loadingNew()) {
               <span class="spinner"></span>
             } @else {
               <hugeicons-icon [icon]="Cancel01Icon" [size]="15" [strokeWidth]="1.5" />
+              Disable
             }
-            @if (!loadingNew()) { Disable }
           </button>
         </div>
       </div>
