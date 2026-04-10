@@ -1,0 +1,178 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-primary: #0d0f14;
+  --bg-secondary: #13161e;
+  --bg-card: #1a1e2a;
+  --bg-card-hover: #1f2435;
+  --border: #2a2f3d;
+  --border-light: #3a3f50;
+  --accent: #f97316;
+  --accent-light: #fb923c;
+  --accent-dim: rgba(249, 115, 22, 0.12);
+  --green: #22c55e;
+  --green-dim: rgba(34, 197, 94, 0.12);
+  --red: #ef4444;
+  --red-dim: rgba(239, 68, 68, 0.12);
+  --blue: #3b82f6;
+  --blue-dim: rgba(59, 130, 246, 0.12);
+  --purple: #a855f7;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-secondary); }
+::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  &.btn-primary {
+    background: var(--accent);
+    color: #fff;
+    &:hover:not(:disabled) { background: var(--accent-light); transform: translateY(-1px); }
+  }
+  &.btn-secondary {
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    &:hover:not(:disabled) { background: var(--bg-card-hover); color: var(--text-primary); }
+  }
+  &.btn-danger {
+    background: var(--red-dim);
+    color: var(--red);
+    border: 1px solid rgba(239,68,68,0.3);
+    &:hover:not(:disabled) { background: rgba(239,68,68,0.2); }
+  }
+  &.btn-success {
+    background: var(--green-dim);
+    color: var(--green);
+    border: 1px solid rgba(34,197,94,0.3);
+    &:hover:not(:disabled) { background: rgba(34,197,94,0.2); }
+  }
+  &.btn-sm { padding: 5px 12px; font-size: 0.8rem; }
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  label {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  input, textarea {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    font-family: var(--font-mono);
+    transition: border-color 0.15s;
+    width: 100%;
+    outline: none;
+
+    &:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+    &::placeholder { color: var(--text-muted); font-family: var(--font-sans); }
+  }
+
+  textarea { resize: vertical; min-height: 80px; }
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+
+  &.badge-success { background: var(--green-dim); color: var(--green); }
+  &.badge-danger { background: var(--red-dim); color: var(--red); }
+  &.badge-info { background: var(--blue-dim); color: var(--blue); }
+  &.badge-warning { background: var(--accent-dim); color: var(--accent); }
+  &.badge-purple { background: rgba(168,85,247,0.12); color: var(--purple); }
+}
+
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toast {
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: var(--shadow);
+  animation: slideIn 0.2s ease;
+
+  &.toast-success { background: var(--bg-card); border-left: 3px solid var(--green); color: var(--green); }
+  &.toast-error { background: var(--bg-card); border-left: 3px solid var(--red); color: var(--red); }
+  &.toast-info { background: var(--bg-card); border-left: 3px solid var(--blue); color: var(--blue); }
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
