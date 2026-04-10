@@ -20,10 +20,12 @@ type ViewMode = 'table' | 'scan';
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-secondary" (click)="loadAllKeys()" [disabled]="loadingList()">
-            @if (loadingList()) { <span class="spinner"></span> List All Keys } @else { List All Keys }
+            @if (loadingList()) { <span class="spinner"></span> }
+            List All Keys
           </button>
           <button class="btn btn-secondary" (click)="runScan()" [disabled]="loadingScan()">
-            @if (loadingScan()) { <span class="spinner"></span> Full Scan } @else { Full Scan }
+            @if (loadingScan()) { <span class="spinner"></span> }
+            Full Scan
           </button>
         </div>
       </div>
@@ -40,7 +42,8 @@ type ViewMode = 'table' | 'scan';
                 <input [(ngModel)]="lookupKey" placeholder="user:1" (keydown.enter)="lookup()" />
               </div>
               <button class="btn btn-success" style="align-self:flex-end" [disabled]="!lookupKey.trim() || loadingLookup()" (click)="lookup()">
-                @if (loadingLookup()) { <span class="spinner"></span> } @else { Lookup }
+                @if (loadingLookup()) { <span class="spinner"></span> }
+                Lookup
               </button>
             </div>
           </div>
@@ -60,7 +63,8 @@ type ViewMode = 'table' | 'scan';
                 <input [(ngModel)]="insertValue" placeholder="value" (keydown.enter)="insert()" />
               </div>
               <button class="btn btn-primary" style="align-self:flex-end" [disabled]="!insertKey.trim()||!insertValue.trim()||loadingInsert()" (click)="insert()">
-                @if (loadingInsert()) { <span class="spinner"></span> } @else { Insert }
+                @if (loadingInsert()) { <span class="spinner"></span> }
+                Insert
               </button>
             </div>
           </div>
@@ -80,7 +84,8 @@ type ViewMode = 'table' | 'scan';
                 <span>Prefix</span>
               </label>
               <button class="btn btn-secondary" style="align-self:flex-end" [disabled]="!searchQ.trim()||loadingSearch()" (click)="runSearch()">
-                @if (loadingSearch()) { <span class="spinner"></span> } @else { Search }
+                @if (loadingSearch()) { <span class="spinner"></span> }
+                Search
               </button>
             </div>
           </div>
@@ -95,7 +100,8 @@ type ViewMode = 'table' | 'scan';
               <textarea [(ngModel)]="batchJson" placeholder='[{"key":"k1","value":"v1"},{"key":"k2","value":"v2"}]'></textarea>
             </div>
             <button class="btn btn-primary" style="margin-top:10px;width:100%;justify-content:center" [disabled]="!batchJson.trim()||loadingBatch()" (click)="runBatch()">
-              @if (loadingBatch()) { <span class="spinner"></span> Insert Batch } @else { Insert Batch }
+              @if (loadingBatch()) { <span class="spinner"></span> }
+              Insert Batch
             </button>
           </div>
         </div>
