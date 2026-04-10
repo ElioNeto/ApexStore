@@ -1,7 +1,7 @@
 <div class="page">
   <div class="page-header">
     <div>
-      <h1 class="page-title">🚩 Feature Flags</h1>
+      <h1 class="page-title">Feature Flags</h1>
       <p class="page-subtitle">Ative ou desative features em runtime sem restart</p>
     </div>
     <div style="display:flex;align-items:center;gap:12px">
@@ -9,7 +9,8 @@
         <span class="badge badge-info">version {{ version() }}</span>
       }
       <button class="btn btn-secondary" (click)="load()" [disabled]="loading()">
-        @if (loading()) { <span class="spinner"></span> } @else { 🔄 }
+        @if (loading()) { <span class="spinner"></span> }
+        @else { <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" /> }
         Refresh
       </button>
     </div>
@@ -18,7 +19,7 @@
   <!-- New flag form -->
   <div class="card" style="margin-bottom:24px">
     <div class="card-header">
-      <span class="op-badge post">POST</span>
+      <span class="op-badge">POST</span>
       <span class="card-title">Create / Update Flag</span>
     </div>
     <div class="card-body">
@@ -33,10 +34,12 @@
         </div>
         <div style="display:flex;gap:8px;align-self:flex-end">
           <button class="btn btn-success" [disabled]="!newName.trim()||loadingNew()" (click)="createFlag(true)">
-            @if (loadingNew()) { <span class="spinner"></span> } @else { ✅ }
+            @if (loadingNew()) { <span class="spinner"></span> }
+            @else { <hugeicons-icon [icon]="TickDouble01Icon" [size]="15" [strokeWidth]="1.5" /> }
             Enable
           </button>
           <button class="btn btn-danger" [disabled]="!newName.trim()||loadingNew()" (click)="createFlag(false)">
+            <hugeicons-icon [icon]="Cancel01Icon" [size]="15" [strokeWidth]="1.5" />
             Disable
           </button>
         </div>
@@ -60,7 +63,10 @@
           [class.flag-disabled]="!flag.enabled"
         >
           <div class="flag-header">
-            <span class="flag-name">{{ flag.name }}</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <hugeicons-icon [icon]="Flag01Icon" [size]="16" [strokeWidth]="1.5" />
+              <span class="flag-name">{{ flag.name }}</span>
+            </div>
             <span class="badge" [class.badge-success]="flag.enabled" [class.badge-danger]="!flag.enabled">
               {{ flag.enabled ? 'ENABLED' : 'DISABLED' }}
             </span>
@@ -70,9 +76,13 @@
           }
           <div class="flag-actions">
             @if (!flag.enabled) {
-              <button class="btn btn-success btn-sm" (click)="toggle(flag, true)">✅ Enable</button>
+              <button class="btn btn-success btn-sm" (click)="toggle(flag, true)">
+                <hugeicons-icon [icon]="TickDouble01Icon" [size]="14" [strokeWidth]="1.5" /> Enable
+              </button>
             } @else {
-              <button class="btn btn-danger btn-sm" (click)="toggle(flag, false)">⛔ Disable</button>
+              <button class="btn btn-danger btn-sm" (click)="toggle(flag, false)">
+                <hugeicons-icon [icon]="Cancel01Icon" [size]="14" [strokeWidth]="1.5" /> Disable
+              </button>
             }
           </div>
         </div>

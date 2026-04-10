@@ -14,7 +14,10 @@ import { ToastService } from '../../services/toast.service';
   selector: 'app-features',
   standalone: true,
   imports: [FormsModule, HugeiconsIconComponent],
-  template: `
+  templateUrl: './features.component.html',
+  styleUrl: './features.component.scss'
+})
+export class FeaturesComponent implements OnInit {
     <div class="page">
       <div class="page-header">
         <div>
