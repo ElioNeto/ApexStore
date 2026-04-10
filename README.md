@@ -14,9 +14,9 @@
   <a href="https://elioneto.github.io/ApexStore/"><img src="https://img.shields.io/badge/docs-latest-blue.svg" alt="Documentation"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.70%2B-orange.svg" alt="Rust Version"></a>
-  <a href="https://github.com/ElioNeto/ApexStore/releases"><img src="https://img.shields.io/badge/version-1.6.2-blue.svg" alt="Version"></a>
+  <a href="https://github.com/ElioNeto/ApexStore/releases"><img src="https://img.shields.io/github/v/release/ElioNeto/ApexStore" alt="Release"></a>
   <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker"></a>
-  <a href="https://github.com/ElioNeto/ApexStore/actions"><img src="https://github.com/ElioNeto/ApexStore/actions/workflows/deploy-docs.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/ElioNeto/ApexStore/actions/workflows/pr-validation.yml"><img src="https://github.com/ElioNeto/ApexStore/actions/workflows/pr-validation.yml/badge.svg" alt="CI"></a>
 </p>
 
 ---
@@ -181,24 +181,47 @@ cargo clippy -- -D warnings # Linting
 cargo fmt                  # Formatting
 ```
 
+## 🚀 CI/CD & Development Workflow
+
+ApexStore uses **trunk-based development** with automated releases:
+
+```mermaid
+graph LR
+    A[Feature Branch] -->|Open PR| B[CI Validation]
+    B -->|✅ Pass| C[Merge to main]
+    C --> D[Auto Release]
+    D --> E[v2.1.X]
+```
+
+### Development Flow
+
+1. **Create feature branch** from `main`
+2. **Open PR** → CI runs `cargo fmt`, `clippy`, `test`, `build`
+3. **Merge PR** → Auto-increments version in `Cargo.toml`, creates tag & GitHub release
+
+📖 **Read:** [`MIGRATION_GUIDE.md`](MIGRATION_GUIDE.md) for team workflow  
+📂 **Details:** [`.github/workflows/README.md`](.github/workflows/README.md)
+
 ## 🗺️ Roadmap
 
 - [x] SSTable V2 with compression & Bloom Filters
 - [x] REST API & Feature Flags
 - [x] Global Block Cache
-- [ ] **v1.5**: Storage iterators for range queries
-- [ ] **v1.6**: Concurrent read optimization
-- [ ] **v2.0**: Leveled/Tiered Compaction Strategies
+- [x] Trunk-based CI/CD with auto-release
+- [ ] **v2.2**: Storage iterators for range queries
+- [ ] **v2.3**: Concurrent read optimization
+- [ ] **v3.0**: Leveled/Tiered Compaction Strategies
 
 ## 🤝 Contributing
 
 Contributions are what make the open-source community an amazing place! Please check our [Contributing Guidelines](docs/CONTRIBUTING.md).
 
 1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+2. Create your Feature Branch (`git checkout -b feat/amazing-feature`)
 3. Commit your Changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+4. Push to the Branch (`git push origin feat/amazing-feature`)
+5. Open a Pull Request to `main`
+6. CI will auto-release on merge 🚀
 
 ## 📄 License
 

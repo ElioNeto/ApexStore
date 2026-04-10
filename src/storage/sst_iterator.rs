@@ -92,7 +92,7 @@ impl SstableIterator {
         }
         let block_meta = meta.blocks[block_idx].clone();
         let raw = self.reader.read_block(&block_meta)?;
-        self.current_block = Some(Block::decode(&raw));
+        self.current_block = Some(Block::decode(&raw)?);
         self.block_index = block_idx;
         self.offset_index = 0;
         Ok(())

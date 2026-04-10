@@ -128,7 +128,7 @@ impl SstableReader {
         let block_data = self.read_block(&block_meta)?;
 
         // Deserialize block (no lock needed)
-        let block = Block::decode(&block_data);
+        let block = Block::decode(&block_data)?;
 
         // Linear scan within the block to find the key (no lock needed)
         Self::search_in_block(&block, key.as_bytes())
@@ -188,7 +188,7 @@ impl SstableReader {
 
         for block_meta in &blocks {
             let block_data = self.read_block(block_meta)?;
-            let block = Block::decode(&block_data);
+            let block = Block::decode(&block_data)?;
 
             // Access block data through pub(crate) fields
             for &offset in &block.offsets {
@@ -859,6 +859,100 @@ mod tests {
 
         for handle in handles {
             handle.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_sstable_data_corruption_detected() {
+        use std::fs::File;
+        use std::io::Read;
+        use std::io::Write;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("corruption_test.sst");
+        // Use a small block size to create many blocks in a large file
+        let config = StorageConfig {
+            block_size: 128, // Very small block size
+            ..Default::default()
+        };
+        let _cache = create_test_cache(&config);
+
+        // Write an SSTable with enough data to create many blocks
+        let mut builder = SstableBuilder::new(path.clone(), config.clone(), 12345).unwrap();
+        for i in 0..100 {
+            let key = format!("key_{:03}", i);
+            let value = format!("value_{:03}", i);
+            builder
+                .add(key.as_bytes(), &create_test_record(&key, value.as_bytes()))
+                .unwrap();
+        }
+        builder.finish().unwrap();
+
+        // Open the SSTable to get block metadata
+        let reader = SstableReader::open(path.clone(), config.clone(), _cache);
+        let reader = match reader {
+            Ok(r) => r,
+            Err(e) => {
+                // If we can't even open the original SSTable, something is wrong
+                panic!("Failed to open original SSTable: {:?}", e);
+            }
+        };
+
+        let metadata = reader.metadata();
+
+        // Corrupt the last block's data
+        // Get the last block's offset and size from metadata
+        let last_block = metadata.blocks.last().unwrap();
+        let last_block_start = last_block.offset as usize;
+        let last_block_size = last_block.size as usize;
+
+        // Read the file
+        let mut file = File::open(&path).unwrap();
+        let mut original_data = Vec::new();
+        file.read_to_end(&mut original_data).unwrap();
+
+        // Corrupt a byte in the last compressed block
+        let corrupt_offset = last_block_start + last_block_size / 2;
+
+        if corrupt_offset < original_data.len() - 8 {
+            // Keep footer intact
+            original_data[corrupt_offset] ^= 0xFF;
+
+            // Write the corrupted data back
+            let mut file = File::create(&path).unwrap();
+            file.write_all(&original_data).unwrap();
+            drop(file);
+
+            // Re-open reader with a fresh cache
+            let fresh_cache = create_test_cache(&config);
+            let reader = SstableReader::open(path, config, fresh_cache).unwrap();
+
+            // Try to read the last block which should trigger the CRC32 check
+            // Use the key from the last block (we'll use a key we know exists)
+            // For simplicity, get the last key by reading metadata.max_key
+            let result = reader.get(&String::from_utf8_lossy(&metadata.max_key));
+
+            // The corruption should cause CRC32 verification to fail
+            assert!(
+                result.is_err(),
+                "Should fail to read from corrupted SSTable, got: {:?}",
+                result
+            );
+
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, LsmError::CorruptedData(_)),
+                "Expected CorruptedData error, got: {:?}",
+                err
+            );
+            assert!(
+                err.to_string().contains("CRC32"),
+                "Error should mention CRC32"
+            );
+        } else {
+            // Fallback: if corruption position is invalid, just verify the block tests still work
+            // This shouldn't happen in practice
+            panic!("Corruption position calculation failed");
         }
     }
 }

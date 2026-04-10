@@ -5,530 +5,217 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+---
 
-### ✨ Added
+## [Unreleased] — v2.2 (Hardening)
 
-#### Docker Support & Deployment (2026-03-06)
+### 🔧 Fixes Planned
 
-**docker-compose.yml** (Commit `fe15ca8`):
-- Created `docker-compose.yml` for simplified deployment
-- Single-command deployment: `docker-compose up -d`
-- Automatic environment variable mapping from `.env` file
-- Configured persistent volume (`apexstore-data`) for data durability
-- Built-in health checks with configurable intervals
-- Resource limits (CPU, memory) for production deployments
-- Restart policy: `unless-stopped` for high availability
-
-**README Docker Section** (Commit `edf2ee4`):
-- Added comprehensive "🐳 Docker Deployment" section
-- Quick Start with Docker Compose (recommended method)
-- Standalone Docker commands for custom setups
-- Configuration via environment variables guide
-- Health check instructions and verification
-- Data persistence documentation (backup/restore)
-- Added Docker badge to README header
-
-### 🔄 Changed
-
-#### Branding Updates (2026-03-06)
-
-**Dockerfile Rebrand** (Commit `a96144d`):
-- Renamed binary from `lsm-server` → `apexstore-server`
-- Updated comments and metadata with ApexStore identity
-- Added maintainer label: `Elio Neto <netoo.elio@hotmail.com>`
-- Added description label: "ApexStore - High-performance LSM-Tree key-value store built with Rust"
-- Added version label: `1.4.0`
-- Added automated health check using curl
-- Maintained multi-stage build optimization with cargo-chef
-
-**Project Structure**:
-- Updated README.md project structure to include Docker files
-- Added `docker-compose.yml` to documentation
-- Added `Dockerfile` documentation reference
-
-### 📚 Documentation
-
-**Deployment Options**:
-- Docker Compose (recommended): Single command deployment
-- Standalone Docker: Custom configuration flexibility
-- Native Cargo: Development and testing
-
-**Docker Features Documented**:
-- Environment variable configuration (35+ parameters)
-- Volume mounting for data persistence
-- Health checks and monitoring
-- Resource management (CPU/memory limits)
-- Backup and restore procedures
-- Port mapping and networking
-
-### 🎯 Benefits
-
-**Operational**:
-- ✅ One-command deployment (`docker-compose up -d`)
-- ✅ Zero-config local development
-- ✅ Production-ready container with health checks
-- ✅ Easy horizontal scaling preparation
-
-**Development**:
-- ✅ Consistent environment across team
-- ✅ No Rust toolchain required for deployment
-- ✅ Fast iteration with volume mounting
-
-**Production**:
-- ✅ Resource limits prevent runaway processes
-- ✅ Automatic restarts on failure
-- ✅ Health checks for load balancer integration
-- ✅ Data persistence with backup/restore support
-
-### Planned
-- Task 1.3: SSTable Reader with Sparse Index
-- Task 1.4: Engine Integration with new SSTable format
-- Multi-instance support
-- Kubernetes deployment manifests
+- **#89** — WAL `clear()` race condition: replace two-handle truncate pattern with `set_len(0)` + `seek(Start(0))` on the existing fd to eliminate crash-recovery data loss window
+- **#90** — `set_batch()` / `delete_batch()` non-atomic: rewrite to use single WAL pass + single memtable lock acquisition per batch
+- **#91** — Migrate `std::sync::Mutex` → `parking_lot::Mutex`/`RwLock` in `engine.rs` and `wal.rs`; upgrade `sstables` to `RwLock` for concurrent read access
+- **#92** — Remove duplicate `LsmError` variants (`KeyNotFound` ≡ `NotFound`, `SerializationFailed` / `DeserializationFailed` overlap with `Serialization`)
+- **#93** — Encapsulate `LsmEngine` fields (remove `pub(crate)` on all struct fields; add private fields + accessor methods)
+- **#37** — Replace linear in-block scan with `binary_search_by()` in `search_in_block()` (sparse index binary search already done)
 
 ---
 
-## [1.3.0] - 2026-02-03
+## [2.1.1] — 2026-03-06
 
 ### ✨ Added
 
-#### SSTable Builder with Sparse Index (Task 1.2 - Issue #18) ✅
+#### Docker Support & Deployment
 
-**New File Format (V2 - LSMSST02)**:
-- Implemented `src/storage/builder.rs` with complete SSTable V2 builder
-- **Magic Header**: `LSMSST02` for format identification and versioning
-- **Block-based Storage**: Automatic block management with configurable size
-- **Sparse Index**: `BlockMeta` tracking (first_key, offset, size, uncompressed_size)
-- **LZ4 Compression**: Fast compression for all blocks using `lz4_flex`
-- **MetaBlock**: Comprehensive metadata structure
-- **Fixed Footer**: 8-byte footer with meta block offset for O(1) metadata access
+- `docker-compose.yml` for single-command deployment (`docker-compose up -d`)
+- Automatic environment variable mapping from `.env` file
+- Persistent volume (`apexstore-data`) for data durability
+- Built-in health checks with configurable intervals
+- Resource limits (CPU, memory) for production deployments
+- Restart policy: `unless-stopped`
 
-**Key Structures**:
-```rust
-pub struct BlockMeta {
-    pub first_key: Vec<u8>,
-    pub offset: u64,
-    pub size: u32,
-    pub uncompressed_size: u32,
-}
+#### README Improvements
 
-pub struct MetaBlock {
-    pub blocks: Vec<BlockMeta>,
-    pub bloom_filter_data: Vec<u8>,
-    pub min_key: Vec<u8>,
-    pub max_key: Vec<u8>,
-    pub record_count: u64,
-    pub timestamp: u128,
-}
-```
+- Comprehensive "🐳 Docker Deployment" section
+- Quick Start with Docker Compose
+- Standalone Docker commands for custom setups
+- Health check instructions and data persistence documentation
 
-**File Layout**:
-```
-[MAGIC: LSMSST02 (8 bytes)]
-[Compressed Block 1]
-[Compressed Block 2]
-...
-[Compressed Block N]
-[Compressed MetaBlock]
-[Footer: meta_offset (u64, 8 bytes)]
-```
+### 🔄 Changed
 
-**Builder API**:
-```rust
-let mut builder = SstableBuilder::new(path, config, timestamp)?;
-builder.add(key, &record)?;  // Automatic flushing when block full
-let sstable_path = builder.finish()?;  // Writes MetaBlock + Footer
-```
+#### Branding Updates
 
-**Performance Characteristics**:
-- **Compression Ratio**: 2-4x space savings with LZ4
-- **Read Performance**: O(log N) block lookups via binary search
-- **Memory Efficiency**: Only sparse index loaded, blocks read on-demand
-- **Write Performance**: Buffered writes with automatic block flushing
-
-**Issue #18 Checklist** ✅:
-- ✅ Created module `src/storage/builder.rs`
-- ✅ Defined `SstableBuilder` struct
-- ✅ Implemented buffering logic: `add(key, value)` with automatic flushing
-- ✅ Maintained `BlockMeta { first_key, offset, size, uncompressed_size }` list
-- ✅ Implemented `finish()`:
-  - ✅ Write last pending block
-  - ✅ Serialize and write meta-block
-  - ✅ Write fixed 8-byte footer
-- ✅ Integrated Bloom Filter generation from all keys
-- ✅ **Bonus**: Added LZ4 compression
-- ✅ **Bonus**: Added comprehensive metadata (min/max keys, record count, timestamp)
-
-#### Comprehensive Configuration System (PR #29)
-
-**Environment-Based Configuration**:
-- Added `dotenvy` dependency for `.env` file support
-- Created `.env.example` with 35+ configurable parameters
-- New `src/api/config.rs` with `ServerConfig` struct
-- **Zero recompilation** needed for configuration changes
-
-**Configuration Categories**:
-
-1. **Server HTTP** (12 parameters):
-   - Network: `HOST`, `PORT`
-   - Payloads: `MAX_JSON_PAYLOAD_SIZE` (default 50MB), `MAX_RAW_PAYLOAD_SIZE`
-   - Threading: `SERVER_WORKERS`, `SERVER_KEEP_ALIVE`
-   - Limits: `SERVER_MAX_CONNECTIONS`, `SERVER_BACKLOG`
-   - Timeouts: `SERVER_CLIENT_TIMEOUT`, `SERVER_SHUTDOWN_TIMEOUT`
-
-2. **LSM Engine** (8 parameters):
-   - Storage: `DATA_DIR`, `MEMTABLE_MAX_SIZE`
-   - SSTables: `BLOCK_SIZE`, `BLOCK_CACHE_SIZE_MB`, `SPARSE_INDEX_INTERVAL`
-   - Bloom Filters: `BLOOM_FALSE_POSITIVE_RATE`
-   - WAL: `MAX_WAL_RECORD_SIZE`, `WAL_BUFFER_SIZE`, `WAL_SYNC_MODE`
-
-3. **Compaction** (5 parameters) - Ready for future use:
-   - `COMPACTION_STRATEGY` (leveled/tiered/lazy_leveling)
-   - `SIZE_RATIO`, `LEVEL0_COMPACTION_THRESHOLD`
-   - `MAX_LEVEL_COUNT`, `COMPACTION_THREADS`
-
-4. **Advanced Tuning** (6 parameters):
-   - `IO_THREAD_POOL_SIZE`, `READ_AHEAD_SIZE`
-   - `WRITE_BUFFER_POOL_SIZE`
-   - `ENABLE_SSTABLE_MMAP`, `ENABLE_DIRECT_IO`, `ENABLE_METRICS`
-
-5. **Monitoring** (4 parameters):
-   - `RUST_LOG`, `ENABLE_METRICS`, `METRICS_INTERVAL`, `FEATURE_CACHE_TTL`
-
-**Performance Profiles** (Ready-to-use):
-- 🧪 **Stress Testing**: 100MB payloads, 16MB memtable, 256MB cache
-- 📝 **High Write Throughput**: 8MB memtable, tiered compaction, async sync
-- 📖 **High Read Throughput**: 512MB cache, 0.1% bloom FP, dense index
-- 💾 **Memory Constrained**: 2MB memtable, 32MB cache, sparse index
-- ⚖️ **Balanced Production**: 4MB memtable, 128MB cache, safe sync
-
-**Configuration Display on Startup**:
-```
-📋 LSM Engine Configuration:
-   Data Directory: /path/to/.lsm_data
-   MemTable Max Size: 4 MB
-   Block Size: 4096 bytes
-   Block Cache: 64 MB
-   Sparse Index Interval: 16
-   Bloom Filter FP Rate: 0.01
-   Compaction Strategy: lazy_leveling
-   WAL Sync Mode: always
-
-📋 Server Configuration:
-   Host: 0.0.0.0
-   Port: 8080
-   Workers: 4
-   JSON Payload Limit: 50 MB
-   Max Connections: 25000
-```
+- Renamed binary `lsm-server` → `apexstore-server` in Dockerfile
+- Added maintainer, description, version labels to Dockerfile
+- Added automated health check via curl
+- Updated README project structure to include Docker files
 
 ### 📚 Documentation
 
-- **`docs/CONFIGURATION.md`** (500+ lines):
-  - Complete configuration guide with all 35+ parameters
-  - Trade-offs explained (Memory vs Performance, Latency vs Throughput)
-  - 5 ready-to-use performance profiles
-  - Troubleshooting guide for common issues
-  - Best practices for production tuning
-  - Environment-specific configurations (dev/staging/prod)
+- Docker deployment options documented (Compose, standalone, native)
+- Environment variable configuration guide (35+ parameters)
+- Backup and restore procedures
+- Port mapping and networking guide
 
-- **Updated `README.md`**:
-  - Quick start with configuration
-  - Environment variables reference
-  - Performance tuning examples
-  - SSTable V2 format documentation
+### ⚠️ Known Issues (to be fixed in v2.2)
+
+- WAL `clear()` has a race condition between truncate and reopen file handles (#89)
+- `set_batch()` / `delete_batch()` are not atomic — partial failure leaves inconsistent state (#90)
+- `std::sync::Mutex` used in `engine.rs` and `wal.rs` despite `parking_lot` being a declared dependency (#91)
+- `LsmError` enum has duplicate variants: `KeyNotFound` ≡ `NotFound`; `SerializationFailed` overlaps `Serialization` (#92)
+- `LsmEngine` fields are `pub(crate)`, bypassing encapsulation invariants (#93)
+- `search_in_block()` uses linear scan — binary search already done for sparse index but not inside blocks (#37)
+
+---
+
+## [2.0.0] — 2026-02-XX
+
+### ✨ Added
+
+#### SSTable V2 Reader (`src/storage/reader.rs`)
+
+- Full `SstableReader` implementation for LSMSST02 format
+- Binary search on sparse index via `partition_point()` — O(log N) block lookup
+- Bloom filter integration for fast negative lookups (lock-free, immutable)
+- Shared `Arc<GlobalBlockCache>` with LRU eviction across all readers
+- `parking_lot::Mutex<File>` for thread-safe concurrent file access
+- Thread-safety verified: 10-thread concurrent read tests passing
+- Magic number validation (`LSMSST03`) on open
+- Decompressed size validation after LZ4 block decompression
+
+#### Iterator Infrastructure
+
+- `StorageIterator` trait (`src/storage/iterator.rs`)
+- `MemTableIterator` with `new()` (from start) and `new_from(key)` (seekable)
+- `SstableIterator` (`src/storage/sst_iterator.rs`) — block-aware, cache-integrated
+- Full seek support: position iterator at arbitrary key
+
+#### Engine Integration
+
+- `scan()` — full database scan combining MemTable + all SSTables, newest-first, tombstone-aware
+- `search(pattern)` — substring match over all keys
+- `search_prefix(prefix)` — prefix match over all keys
+- `keys()` — all live keys
+- `count()` — total live record count
+- `stats_all()` — structured `LsmStats` with per-component sizes
+- `set_batch()` / `delete_batch()` — multi-record operations
+
+#### REST API Enhancements
+
+- `GET /scan` — full database scan (JSON)
+- `GET /keys/search?q=...&prefix=true` — prefix/substring search
+- `GET /stats/all` — structured JSON statistics
+- JWT/Bearer token authentication system (`src/api/auth/`)
+- Admin endpoints: `POST/GET/DELETE /admin/tokens`
+- CORS support via `actix-cors`
+
+#### TUI Interface
+
+- Interactive terminal UI (`src/bin/tui.rs`) using `ratatui` + `crossterm`
+- Real-time engine statistics display
+
+#### Documentation
+
+- `CHANGELOG.md` — full history
+- `MIGRATION_GUIDE.md` — V1 → V2 migration steps
+- `QUICKSTART.md` — 5-minute getting started guide
+- `book.toml` + `book/` — mdBook documentation structure
+
+### 🔄 Changed
+
+- Cargo package renamed: `lsm-kv-store` → `apex-store-rs`
+- Magic number updated: `LSMSST02` → `LSMSST03` (format revision)
+- `LsmEngine::new()` now recovers all SSTables from disk on startup
+- SSTables sorted by timestamp descending (newest-first) on load
+- WAL recovery integrated into engine initialization
+
+### 📦 Dependencies Added
+
+- `ratatui = "0.29"` — TUI framework
+- `crossterm = "0.28"` — cross-platform terminal
+- `tui-input = "0.10"` — TUI input handling
+- `actix-web-httpauth = "0.8"` — Bearer auth middleware
+- `chrono = "0.4"` — timestamp formatting
+- `uuid = "1.22"` — token IDs
+- `sha2 = "0.10"` + `base64 = "0.22"` — token hashing
+
+---
+
+## [1.3.0] — 2026-02-03
+
+### ✨ Added
+
+#### SSTable Builder with Sparse Index (Task 1.2)
+
+- `src/storage/builder.rs` — complete SSTable V2 builder
+- Magic header `LSMSST02` for format versioning
+- Block-based storage with automatic overflow handling
+- Sparse index: `BlockMeta { first_key, offset, size, uncompressed_size }`
+- LZ4 compression via `lz4_flex` (2–4x space savings)
+- `MetaBlock` with min/max keys, record count, timestamp, Bloom filter data
+- Fixed 8-byte footer with meta block offset for O(1) metadata access
+- 4 comprehensive builder tests passing
+
+#### Configuration System (PR #29)
+
+- `dotenvy` for `.env` file support
+- `.env.example` with 35+ configurable parameters
+- `src/api/config.rs` with `ServerConfig` struct
+- 5 performance profiles (stress, high-write, high-read, memory-constrained, balanced)
+- Configuration display on server startup
+- `docs/CONFIGURATION.md` (500+ lines)
 
 ### 🔧 Fixed
 
-#### Payload Limit Issue (PR #29)
-- **Fixed**: "JSON payload (10411319 bytes) is larger than allowed (limit: 2097152 bytes)" during stress testing
-- **Solution**: Increased default limit from 2MB to 50MB (configurable)
-- **Impact**: Now supports stress tests with 250k-500k records
-- **Configurable**: Easily adjust via `MAX_JSON_PAYLOAD_SIZE` environment variable
-
-#### Code Quality
-- **Fixed**: All compilation warnings and errors
-- **Fixed**: All Clippy violations:
-  - Changed `map_or` to `is_some_and` in `engine.rs`
-  - Replaced manual `impl Default` with `#[derive(Default)]`
-  - Removed unused imports and dead code
-  - Fixed visibility modifiers
-
-### 🔄 Changed
-
-#### Dependencies
-- **Added**: `lz4_flex = "0.11"` for SSTable compression
-- **Added**: `dotenvy = "0.15"` (optional, feature="api") for `.env` support
-
-#### Module Structure
-- **Added**: `src/storage/builder.rs` (200+ lines) - SSTable V2 builder
-- **Added**: `src/api/config.rs` (100+ lines) - Server configuration
-- **Added**: `.env.example` (350+ lines) - Configuration template
-- **Added**: `docs/CONFIGURATION.md` (500+ lines) - Configuration guide
-- **Modified**: `src/storage/mod.rs` - Export builder module
-- **Modified**: `src/bin/server.rs` - Load env configuration
-- **Modified**: `src/api/mod.rs` - Accept `ServerConfig`
-
-### ⚡ Performance
-
-#### SSTable V2 Advantages
-- **Space**: 2-4x compression ratio with LZ4
-- **Read Speed**: O(log N) binary search over blocks (vs O(N) linear scan)
-- **Memory Usage**: Only metadata loaded (~KB), not entire file (~MB/GB)
-- **Write Speed**: Buffered writes with automatic flushing
-- **Flexibility**: Configurable block size for workload optimization
-
-#### Configuration Flexibility
-- **Tunable Performance**: Adjust for workload without recompiling
-- **Resource Management**: Control memory, threads, and I/O
-- **Production-Ready**: Environment-specific configurations
-- **Quick Profiles**: 5 pre-configured profiles for common use cases
-
-### 🧪 Testing
-
-#### Builder Tests (4 comprehensive tests)
-- ✅ `test_builder_basic` - Basic 3-key insertion and finish
-- ✅ `test_builder_multiple_blocks` - 50 keys spanning multiple blocks
-- ✅ `test_builder_empty_fails` - Empty builder error handling
-- ✅ `test_builder_large_entry` - Large value handling (1KB)
-
-#### Build Quality
-```
-✅ Compilation: Success (0 errors)
-✅ Tests: 4/4 passing
-✅ Warnings: 0
-✅ Clippy: 0 violations
-```
-
-### 📊 Statistics
-
-- **Lines of Code Added**: ~1,500+
-- **Configuration Parameters**: 35+
-- **Documentation**: 1,200+ lines
-- **Test Coverage**: 4 comprehensive test cases
-- **Commits**: 8 (5 in builder branch, 3 in config branch)
-- **Pull Requests**: 2 (Builder + Configuration)
-
-### 🎯 Impact Summary
-
-#### Breaking Changes
-- ⚠️ **New SSTable Format**: V2 format (LSMSST02) is incompatible with V1
-  - **Migration**: V1 SSTables still readable (backward compatibility in progress)
-  - **Recommendation**: Use V2 for new databases
-  - **Status**: V1 and V2 will coexist during transition period
-
-#### Non-Breaking Changes
-- ✅ **Configuration**: All via environment variables, no code changes
-- ✅ **API Compatibility**: REST API endpoints unchanged
-- ✅ **Data Safety**: New format includes integrity checks (compression CRC)
-- ✅ **Development Experience**: Improved with comprehensive documentation
-
-### 🔗 Related Issues & Pull Requests
-
-- **Issue #18**: Task 1.2: Builder and Writer ✅ **COMPLETE**
-- **PR #29**: Comprehensive Configuration System ✅ **MERGED**
-- **Branch**: `feature/sstable-builder-sparse-index` ✅ **READY**
-- **Branch**: `fix/increase-payload-limit` ✅ **READY**
+- Increased default JSON payload from 2MB to 50MB (configurable via `MAX_JSON_PAYLOAD_SIZE`)
+- All Clippy violations resolved
+- All compilation warnings removed
 
 ---
 
-## [1.2.0-beta] - 2026-01-31
+## [1.2.0-beta] — 2026-01-31
 
 ### ♻️ Refactored
 
-#### Configuration Architecture (v1.4 work)
-- **Centralized Configuration System**: Introduced unified `LsmConfig` structure
-- **Builder Pattern**: `LsmConfig::builder()` for flexible configuration
-- **Type Safety**: Strong typing for all configuration parameters
-- **Better Defaults**: Sensible defaults reduce boilerplate
-
-#### Code Modernization
-- **Removed duplicate configs** from core modules
-- **Removed Portuguese comments** for international consistency
-- **Translated user-facing messages** to English
-- **SOLID architecture** implementation
-
-### 🔧 Fixed
-- Fixed `SStable::create()` to include `StorageConfig` parameter
-- Updated config field access patterns
-- Updated all tests and examples to use builder pattern
+- Centralized `LsmConfig` with builder pattern
+- SOLID architecture throughout
+- Removed Portuguese comments; translated all messages to English
+- Fixed `SstableConfig` parameter passing
 
 ---
 
-## [1.2.0-alpha] - 2026-01-26
+## [1.1.0-alpha] — 2026-01-25
 
-### Added
-- Statistics endpoints enhancement
-- Better LSM engine statistics
+### ✨ Added
 
----
-
-## [1.1.0-alpha] - 2026-01-25
-
-### Added
-- Workflows for develop-to-release
-- Feature flag management endpoints
+- GitHub Actions workflows (develop → release)
+- Feature flag management API endpoints
 - Docker multi-stage build support
 - Enhanced stats retrieval
 
 ---
 
-## [1.0.0-alpha] - 2026-01-24
+## [1.0.0-alpha] — 2026-01-24
 
-### Storage Engine ✅
+### ✨ Added
+
 - MemTable (BTreeMap) with configurable size limit
 - WAL (Write-Ahead Log) for durability
-- Automatic flush to SSTables
-- SSTables V1 with Bloom Filters
-- Recovery from WAL
+- Automatic flush to SSTables on MemTable full
+- SSTable V1 with Bloom Filters
+- WAL recovery on startup
 - Delete via tombstone
-- Statistics (`stats()` and `stats_all()`)
-
-### Access ✅
-- CLI (REPL) with interactive commands
+- CLI REPL with interactive commands
 - REST API with full CRUD operations
 - Batch operations
-- Search capabilities (prefix and substring)
+- Basic search (prefix and substring)
 
-### Architecture ✅
-- Single-instance design
-- Basic codec (String → bytes)
-- SOLID principles
+### ⚠️ Known Limitations at v1.0
 
-### Known Limitations
-- ❌ No compaction (SSTables grow indefinitely)
-- ❌ No efficient iterators (full scan for searches)
-- ❌ No secondary indexes
-- ❌ No multi-instance support
-- ❌ No per-instance codec
-- ❌ No integrity validation
-
----
-
-## Migration Guide
-
-### Migrating to Latest (Unreleased)
-
-#### Using Docker (Recommended)
-
-**Quick Start**:
-```bash
-# Clone repository
-git clone https://github.com/ElioNeto/ApexStore.git
-cd ApexStore
-
-# Copy environment file
-cp .env.example .env
-
-# Start with Docker Compose
-docker-compose up -d
-
-# Verify health
-curl http://localhost:8080/health
-```
-
-**Custom Configuration**:
-```bash
-# Edit .env file
-nano .env
-
-# Restart to apply changes
-docker-compose restart
-```
-
-**Production Deployment**:
-```bash
-# Set resource limits in docker-compose.yml
-docker-compose up -d
-
-# Monitor logs
-docker-compose logs -f apexstore
-
-# Scale (future support)
-docker-compose up -d --scale apexstore=3
-```
-
-### Migrating to v1.3.0
-
-#### 1. Using New Configuration System
-
-**Quick Start**:
-```bash
-# Copy environment template
-cp .env.example .env
-
-# Customize settings (optional)
-nano .env
-
-# Run without recompiling
-cargo run --release --features api --bin apexstore-server
-```
-
-**Example Configuration**:
-```bash
-# .env file
-MAX_JSON_PAYLOAD_SIZE=104857600  # 100MB for stress testing
-MEMTABLE_MAX_SIZE=8388608        # 8MB
-BLOCK_CACHE_SIZE_MB=256
-```
-
-#### 2. Using SSTable Builder (for developers)
-
-**Basic Usage**:
-```rust
-use apexstore::storage::builder::SstableBuilder;
-use apexstore::infra::config::StorageConfig;
-use apexstore::core::log_record::LogRecord;
-
-// Create builder
-let config = StorageConfig::default();
-let timestamp = current_timestamp();
-let mut builder = SstableBuilder::new(path, config, timestamp)?;
-
-// Add records (automatic block flushing)
-for (key, value) in records {
-    let record = LogRecord::new(key, value);
-    builder.add(key.as_bytes(), &record)?;
-}
-
-// Finish and get SSTable path
-let sstable_path = builder.finish()?;
-```
-
-**Advanced Configuration**:
-```rust
-let mut config = StorageConfig::default();
-config.block_size = 8192;  // 8KB blocks
-config.bloom_false_positive_rate = 0.001;  // 0.1% FP
-```
-
-#### 3. No Data Migration Needed
-
-- **V1 SSTables**: Remain readable (backward compatibility)
-- **WAL Format**: Unchanged, no migration required
-- **New Writes**: Will use V2 format when integrated (Task 1.4)
-- **Coexistence**: V1 and V2 formats work side-by-side
-
----
-
-## Next Steps (Roadmap)
-
-### v1.4.x (Next Release)
-- 🚧 Docker production deployment
-- 🚧 Kubernetes manifests
-- ⏳ Task 1.3: SSTable Reader
-- ⏳ Task 1.4: Engine Integration
-
-### v2.0 (Future)
-- Efficient iterators (`iter_prefix`, `iter_range`)
-- Merge-iterator implementation
-- No more full scans for prefix queries
-
-### v3.0-lts (Future)
-- Compaction implementation
-- Stable SSTable count
-- Production-ready durability
+- No compaction (SSTables grow indefinitely)
+- No efficient iterators (full scan for all searches)
+- No secondary indexes
+- No multi-instance support
+- No data integrity checksums
 
 ---
 
