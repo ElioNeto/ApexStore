@@ -1,0 +1,158 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Key Explorer</h1>
+      <p class="page-subtitle">Lookup, search, insert, delete and full scan</p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-secondary" (click)="loadAllKeys()" [disabled]="loadingList()">
+        @if (loadingList()) { <span class="spinner"></span> }
+        List All Keys
+      </button>
+      <button class="btn btn-secondary" (click)="runScan()" [disabled]="loadingScan()">
+        @if (loadingScan()) { <span class="spinner"></span> }
+        Full Scan
+      </button>
+    </div>
+  </div>
+
+  <!-- Actions row -->
+  <div class="actions-grid">
+    <!-- Lookup -->
+    <div class="card">
+      <div class="card-header">
+        <span class="op-badge get">GET</span>
+        <span class="card-title">Lookup Key</span>
+      </div>
+      <div class="card-body">
+        <div class="row-inline">
+          <div class="input-group" style="flex:1">
+            <label>Key</label>
+            <input [(ngModel)]="lookupKey" placeholder="user:1" (keydown.enter)="lookup()" />
+          </div>
+          <button class="btn btn-success" style="align-self:flex-end" [disabled]="!lookupKey.trim() || loadingLookup()" (click)="lookup()">
+            @if (loadingLookup()) { <span class="spinner"></span> }
+            Lookup
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Insert -->
+    <div class="card">
+      <div class="card-header">
+        <span class="op-badge put">POST</span>
+        <span class="card-title">Insert Key</span>
+      </div>
+      <div class="card-body">
+        <div class="row-inline">
+          <div class="input-group">
+            <label>Key</label>
+            <input [(ngModel)]="insertKey" placeholder="key" />
+          </div>
+          <div class="input-group" style="flex:2">
+            <label>Value</label>
+            <input [(ngModel)]="insertValue" placeholder="value" (keydown.enter)="insert()" />
+          </div>
+          <button class="btn btn-primary" style="align-self:flex-end" [disabled]="!insertKey.trim()||!insertValue.trim()||loadingInsert()" (click)="insert()">
+            @if (loadingInsert()) { <span class="spinner"></span> }
+            Insert
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search -->
+    <div class="card">
+      <div class="card-header">
+        <span class="op-badge get">GET</span>
+        <span class="card-title">Search</span>
+      </div>
+      <div class="card-body">
+        <div class="row-inline">
+          <div class="input-group" style="flex:1">
+            <label>Query</label>
+            <input [(ngModel)]="searchQ" placeholder="user:" (keydown.enter)="runSearch()" />
+          </div>
+          <label class="toggle-label">
+            <input type="checkbox" [(ngModel)]="searchPrefix" />
+            <span>Prefix</span>
+          </label>
+          <button class="btn btn-secondary" style="align-self:flex-end" [disabled]="!searchQ.trim()||loadingSearch()" (click)="runSearch()">
+            @if (loadingSearch()) { <span class="spinner"></span> }
+            Search
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Batch -->
+    <div class="card">
+      <div class="card-header">
+        <span class="op-badge put">POST</span>
+        <span class="card-title">Batch Insert</span>
+      </div>
+      <div class="card-body">
+        <div class="input-group">
+          <label>JSON array — [{"key":"k","value":"v"}, ...]</label>
+          <textarea [(ngModel)]="batchJson" placeholder='[{"key":"k1","value":"v1"},{"key":"k2","value":"v2"}]'></textarea>
+        </div>
+        <button class="btn btn-primary" style="margin-top:10px;width:100%;justify-content:center" [disabled]="!batchJson.trim()||loadingBatch()" (click)="runBatch()">
+          @if (loadingBatch()) { <span class="spinner"></span> }
+          Insert Batch
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results table -->
+  <div class="card" style="margin-top:24px">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="card-title">{{ viewMode() === 'scan' ? 'Scan Results' : 'Entries' }}</span>
+        <span class="badge badge-info">{{ entries().length }}</span>
+        @if (filteredEntries().length !== entries().length) {
+          <span class="badge badge-warning">{{ filteredEntries().length }} filtered</span>
+        }
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div class="input-group" style="flex-direction:row;align-items:center;gap:8px;margin:0">
+          <input [(ngModel)]="filterText" placeholder="Filter..." style="width:160px;padding:6px 10px" />
+        </div>
+        @if (entries().length > 0) {
+          <button class="btn btn-secondary btn-sm" (click)="clearEntries()">Clear</button>
+        }
+      </div>
+    </div>
+
+    @if (entries().length === 0) {
+      <div class="empty-state">Use Lookup, Search or Full Scan to load data.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="kv-table">
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Value</th>
+              <th>Time</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (e of filteredEntries(); track e.key) {
+              <tr>
+                <td class="mono key-cell">{{ e.key }}</td>
+                <td class="mono val-cell">{{ e.value }}</td>
+                <td class="time-cell">{{ e.fetchedAt | date:'HH:mm:ss' }}</td>
+                <td class="actions-cell">
+                  <button class="btn btn-secondary btn-sm" (click)="refetch(e.key)" title="Refetch">Refetch</button>
+                  <button class="btn btn-danger btn-sm" (click)="deleteKey(e.key)" title="Delete from store">Delete</button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>

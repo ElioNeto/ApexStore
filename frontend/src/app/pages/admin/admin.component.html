@@ -1,0 +1,165 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">🔐 Token Admin</h1>
+      <p class="page-subtitle">
+        Gerenciamento de Bearer Tokens
+        — requer
+        <code>API_AUTH_ENABLED=true</code>
+      </p>
+    </div>
+    <button class="btn btn-secondary" (click)="load()" [disabled]="loading()">
+      🔄 Refresh
+    </button>
+  </div>
+
+  <!-- Bearer token config -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      🔑
+      <span class="card-title">Bearer Token da Sessão</span>
+    </div>
+    <div class="card-body">
+      <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:12px">
+        Informe o token para autenticar todas as requisições desta sessão.
+      </p>
+      <div class="row-inline">
+        <div class="input-group" style="flex:1">
+          <label>Token</label>
+          <input type="password" [(ngModel)]="sessionToken" placeholder="apx_..." />
+        </div>
+        <button class="btn btn-primary" style="align-self:flex-end" (click)="saveSessionToken()">
+          Salvar
+        </button>
+        @if (hasSessionToken()) {
+          <button class="btn btn-danger" style="align-self:flex-end" (click)="clearSessionToken()">
+            Limpar
+          </button>
+        }
+      </div>
+      @if (hasSessionToken()) {
+        <div class="token-active-badge">✅ Token ativo na sessão</div>
+      }
+    </div>
+  </div>
+
+  <!-- Create token -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <span class="op-badge">POST</span>
+      <span class="card-title">Criar Token</span>
+    </div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="input-group">
+          <label>Nome</label>
+          <input [(ngModel)]="newName" placeholder="ex: ci-pipeline" />
+        </div>
+        <div class="input-group">
+          <label>Expira em (dias) — vazio = nunca</label>
+          <input type="number" [(ngModel)]="newExpiry" placeholder="30" min="1" />
+        </div>
+        <div class="input-group" style="grid-column:1/-1">
+          <label>Permissions</label>
+          <div class="perms-row">
+            @for (p of allPermissions; track p) {
+              <label class="perm-toggle" [class.selected]="newPerms().includes(p)">
+                <input type="checkbox" [checked]="newPerms().includes(p)" (change)="togglePerm(p)" />
+                {{ p }}
+              </label>
+            }
+          </div>
+        </div>
+      </div>
+      <button
+        class="btn btn-primary" style="margin-top:14px"
+        [disabled]="!newName.trim() || newPerms().length === 0 || loadingCreate()"
+        (click)="createToken()"
+      >
+        @if (loadingCreate()) { <span class="spinner"></span> } @else { ➕ }
+        Create Token
+      </button>
+
+      @if (createdToken()) {
+        <div class="created-token-box">
+          <div class="created-token-label">
+            ⚠️ Copie agora — este token não será exibido novamente
+          </div>
+          <div class="created-token-value">{{ createdToken() }}</div>
+          <button class="btn btn-secondary btn-sm" (click)="copyToken()">
+            📋 Copy
+          </button>
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- Tokens list -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="card-title">Tokens Ativos</span>
+        <span class="badge badge-info">{{ tokens().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && tokens().length === 0) {
+      <div class="loading-state">
+        <span class="spinner" style="width:28px;height:28px;border-width:3px"></span>
+      </div>
+    } @else if (authError()) {
+      <div class="auth-error">
+        <span>🔒</span>
+        <div>
+          <strong>Auth required</strong>
+          <p>Configure o Bearer Token da sessão acima e tente novamente.</p>
+        </div>
+      </div>
+    } @else if (tokens().length === 0) {
+      <div class="empty-state">Nenhum token criado ainda.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="tokens-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>ID</th>
+              <th>Permissions</th>
+              <th>Created</th>
+              <th>Expires</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (t of tokens(); track t.id) {
+              <tr [class.expired]="isExpired(t)">
+                <td class="name-cell">{{ t.name }}</td>
+                <td class="mono id-cell">{{ t.id.substring(0, 8) }}...</td>
+                <td>
+                  <div class="perms-chips">
+                    @for (p of t.permissions; track p) {
+                      <span class="perm-chip" [class]="'perm-' + p.toLowerCase()">{{ p }}</span>
+                    }
+                  </div>
+                </td>
+                <td class="time-cell">{{ nsToDate(t.created_at) | date:'dd/MM/yy HH:mm' }}</td>
+                <td class="time-cell">
+                  @if (t.expires_at) {
+                    {{ nsToDate(t.expires_at) | date:'dd/MM/yy' }}
+                  } @else {
+                    <span style="color:var(--text-muted)">Never</span>
+                  }
+                </td>
+                <td>
+                  <button class="btn btn-danger btn-sm" (click)="revokeToken(t.id)">
+                    🗑️ Revoke
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>

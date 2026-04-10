@@ -1,0 +1,133 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Dashboard</h1>
+      <p class="page-subtitle">Monitoramento em tempo real da storage engine</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button class="btn btn-secondary" (click)="loadStats()" [disabled]="loadingStats()">
+        @if (loadingStats()) { <span class="spinner"></span> } @else { 🔄 }
+        Refresh Stats
+      </button>
+    </div>
+  </div>
+
+  <!-- Stats cards row -->
+  <div class="cards-row">
+    @for (card of statCards(); track $index) {
+      <app-stat-card
+        [icon]="card.icon"
+        [label]="card.label"
+        [value]="card.value"
+        [sub]="card.sub" />
+    }
+  </div>
+
+  <!-- Operations panel -->
+  <div class="operations-grid">
+    <div class="card">
+      <div class="card-header">
+        <span class="op-badge put">PUT</span>
+        <span class="card-title">Write</span>
+      </div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="input-group" style="flex:1">
+            <label>Key</label>
+            <input [(ngModel)]="putKey" placeholder="user:1" [disabled]="loadingPut()" />
+          </div>
+          <div class="input-group" style="flex:2">
+            <label>Value</label>
+            <input [(ngModel)]="putValue" placeholder="John Doe" [disabled]="loadingPut()" />
+          </div>
+          <button class="btn btn-primary" [disabled]="!putKey.trim() || !putValue.trim() || loadingPut()" (click)="executePut()">
+            @if (loadingPut()) { <span class="spinner"></span> } @else { ➜ }
+            Write
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="op-badge get">GET</span>
+        <span class="card-title">Read</span>
+      </div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="input-group" style="flex:1">
+            <label>Key</label>
+            <input [(ngModel)]="getKey" placeholder="user:1" [disabled]="loadingGet()" />
+          </div>
+          <button class="btn btn-success" [disabled]="!getKey.trim() || loadingGet()" (click)="executeGet()">
+            @if (loadingGet()) { <span class="spinner"></span> } @else { → }
+            Read
+          </button>
+        </div>
+        @if (getResult()) {
+          <div class="result-box" [class.error-result]="getError()">
+            <span class="result-label">Result:</span>
+            <span class="result-value">{{ getResult() }}</span>
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- History panel -->
+  <div class="card history-card">
+    <div class="card-header" style="justify-content:space-between;align-items:center">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="card-title">Operation History</span>
+        <span class="badge badge-info">{{ history().length }}</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" (click)="clearHistory()" [disabled]="history().length === 0">
+        Clear History
+      </button>
+    </div>
+
+    <!-- History filter -->
+    <div class="history-toolbar">
+      <div class="input-group" style="flex-direction:row;gap:8px;align-items:center;max-width:300px">
+        <input [(ngModel)]="historyFilter" placeholder="Filter by key or result..." />
+      </div>
+    </div>
+
+    @if (filteredHistory().length === 0) {
+      <div class="empty-state">No operations yet. Try writing or reading some keys.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th>Op</th>
+              <th>Key</th>
+              <th>Value</th>
+              <th>Result</th>
+              <th>Status</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (entry of filteredHistory(); track $index) {
+              <tr [class.row-success]="entry.status === 'success'" [class.row-error]="entry.status === 'error'">
+                <td class="op-cell">{{ entry.op }}</td>
+                <td class="mono key-cell">{{ entry.key }}</td>
+                <td class="mono val-cell">{{ entry.value ?? '—' }}</td>
+                <td class="mono result-cell">{{ entry.result ?? '—' }}</td>
+                <td>
+                  @if (entry.status === 'success') {
+                    <span class="status-badge success">✓</span>
+                  } @else {
+                    <span class="status-badge error">✕</span>
+                  }
+                </td>
+                <td class="time-cell">{{ entry.time | date:'HH:mm:ss' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>
