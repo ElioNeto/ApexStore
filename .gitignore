@@ -5,3 +5,4 @@ credentials
 *.sh
 .env
 node_modules
+.angular

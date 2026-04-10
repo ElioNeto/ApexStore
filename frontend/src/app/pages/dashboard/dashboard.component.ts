@@ -1,5 +1,6 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { DatePipe } from '@angular/common';
 import { ApexStoreService } from '../../services/apex-store.service';
 import { ToastService } from '../../services/toast.service';
 import { StatCardComponent } from '../../components/stat-card/stat-card.component';
@@ -16,7 +17,7 @@ interface HistoryEntry {
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [FormsModule, StatCardComponent],
+  imports: [FormsModule, DatePipe, StatCardComponent],
   template: `
     <div class="page">
       <div class="page-header">
@@ -222,13 +223,7 @@ export class DashboardComponent implements OnInit {
   getResult = signal<string | null>(null);
   getError = signal(false);
   history = signal<HistoryEntry[]>([]);
-
-  statCards = signal([
-    { icon: '💾', label: 'Engine', value: 'LSM-Tree', sub: 'Log-Structured Merge' },
-    { icon: '⚡', label: 'Peak Writes', value: '~1M ops/s', sub: 'Batch mode' },
-    { icon: '🔍', label: 'MemTable Reads', value: '~1.2M ops/s', sub: 'In-memory hits' },
-    { icon: '📦', label: 'Compression', value: 'LZ4', sub: 'SSTable V2' },
-  ]);
+  statCards = signal<Array<{ icon: string; label: string; value: string; sub: string }>>([]);
 
   ngOnInit(): void {
     this.loadStats();
