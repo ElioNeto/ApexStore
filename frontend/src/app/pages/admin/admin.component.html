@@ -1,22 +1,18 @@
 <div class="page">
   <div class="page-header">
     <div>
-      <h1 class="page-title">🔐 Token Admin</h1>
-      <p class="page-subtitle">
-        Gerenciamento de Bearer Tokens
-        — requer
-        <code>API_AUTH_ENABLED=true</code>
-      </p>
+      <h1 class="page-title">Token Admin</h1>
+      <p class="page-subtitle">Gerenciamento de Bearer Tokens - requer <code>API_AUTH_ENABLED=true</code></p>
     </div>
     <button class="btn btn-secondary" (click)="load()" [disabled]="loading()">
-      🔄 Refresh
+      <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" /> Refresh
     </button>
   </div>
 
-  <!-- Bearer token config -->
+  <!-- Session token -->
   <div class="card" style="margin-bottom:24px">
     <div class="card-header">
-      🔑
+      <hugeicons-icon [icon]="LockPasswordIcon" [size]="17" [strokeWidth]="1.5" />
       <span class="card-title">Bearer Token da Sessão</span>
     </div>
     <div class="card-body">
@@ -29,26 +25,25 @@
           <input type="password" [(ngModel)]="sessionToken" placeholder="apx_..." />
         </div>
         <button class="btn btn-primary" style="align-self:flex-end" (click)="saveSessionToken()">
-          Salvar
+          <hugeicons-icon [icon]="CheckmarkCircle01Icon" [size]="15" [strokeWidth]="1.5" /> Salvar
         </button>
         @if (hasSessionToken()) {
           <button class="btn btn-danger" style="align-self:flex-end" (click)="clearSessionToken()">
-            Limpar
+            <hugeicons-icon [icon]="Delete01Icon" [size]="15" [strokeWidth]="1.5" /> Limpar
           </button>
         }
       </div>
       @if (hasSessionToken()) {
-        <div class="token-active-badge">✅ Token ativo na sessão</div>
+        <div class="token-active-badge">
+          <hugeicons-icon [icon]="CheckmarkCircle01Icon" [size]="14" [strokeWidth]="1.5" /> Token ativo na sessão
+        </div>
       }
     </div>
   </div>
 
   <!-- Create token -->
   <div class="card" style="margin-bottom:24px">
-    <div class="card-header">
-      <span class="op-badge">POST</span>
-      <span class="card-title">Criar Token</span>
-    </div>
+    <div class="card-header"><span class="op-badge">POST</span><span class="card-title">Criar Token</span></div>
     <div class="card-body">
       <div class="form-grid">
         <div class="input-group">
@@ -56,7 +51,7 @@
           <input [(ngModel)]="newName" placeholder="ex: ci-pipeline" />
         </div>
         <div class="input-group">
-          <label>Expira em (dias) — vazio = nunca</label>
+          <label>Expira em (dias) - vazio = nunca</label>
           <input type="number" [(ngModel)]="newExpiry" placeholder="30" min="1" />
         </div>
         <div class="input-group" style="grid-column:1/-1">
@@ -71,23 +66,21 @@
           </div>
         </div>
       </div>
-      <button
-        class="btn btn-primary" style="margin-top:14px"
-        [disabled]="!newName.trim() || newPerms().length === 0 || loadingCreate()"
-        (click)="createToken()"
-      >
-        @if (loadingCreate()) { <span class="spinner"></span> } @else { ➕ }
+      <button class="btn btn-primary" style="margin-top:14px" [disabled]="!newName.trim()||newPerms().length===0||loadingCreate()" (click)="createToken()">
+        @if (loadingCreate()) { <span class="spinner"></span> }
+        @else { <hugeicons-icon [icon]="Add01Icon" [size]="15" [strokeWidth]="1.5" /> }
         Create Token
       </button>
 
       @if (createdToken()) {
         <div class="created-token-box">
           <div class="created-token-label">
-            ⚠️ Copie agora — este token não será exibido novamente
+            <hugeicons-icon [icon]="LockIcon" [size]="14" [strokeWidth]="1.5" />
+            Copie agora - este token não será exibido novamente
           </div>
           <div class="created-token-value">{{ createdToken() }}</div>
           <button class="btn btn-secondary btn-sm" (click)="copyToken()">
-            📋 Copy
+            <hugeicons-icon [icon]="Copy01Icon" [size]="14" [strokeWidth]="1.5" /> Copy
           </button>
         </div>
       }
@@ -104,12 +97,10 @@
     </div>
 
     @if (loading() && tokens().length === 0) {
-      <div class="loading-state">
-        <span class="spinner" style="width:28px;height:28px;border-width:3px"></span>
-      </div>
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
     } @else if (authError()) {
       <div class="auth-error">
-        <span>🔒</span>
+        <hugeicons-icon [icon]="LockIcon" [size]="24" [strokeWidth]="1.5" />
         <div>
           <strong>Auth required</strong>
           <p>Configure o Bearer Token da sessão acima e tente novamente.</p>
@@ -121,14 +112,7 @@
       <div class="table-wrapper">
         <table class="tokens-table">
           <thead>
-            <tr>
-              <th>Name</th>
-              <th>ID</th>
-              <th>Permissions</th>
-              <th>Created</th>
-              <th>Expires</th>
-              <th>Actions</th>
-            </tr>
+            <tr><th>Name</th><th>ID</th><th>Permissions</th><th>Created</th><th>Expires</th><th>Actions</th></tr>
           </thead>
           <tbody>
             @for (t of tokens(); track t.id) {
@@ -144,15 +128,12 @@
                 </td>
                 <td class="time-cell">{{ nsToDate(t.created_at) | date:'dd/MM/yy HH:mm' }}</td>
                 <td class="time-cell">
-                  @if (t.expires_at) {
-                    {{ nsToDate(t.expires_at) | date:'dd/MM/yy' }}
-                  } @else {
-                    <span style="color:var(--text-muted)">Never</span>
-                  }
+                  @if (t.expires_at) { {{ nsToDate(t.expires_at) | date:'dd/MM/yy' }} }
+                  @else { <span style="color:var(--text-muted)">Never</span> }
                 </td>
                 <td>
-                  <button class="btn btn-danger btn-sm" (click)="revokeToken(t.id)">
-                    🗑️ Revoke
+                  <button class="btn btn-danger btn-sm" (click)="revokeToken(t.id)" style="display:flex;align-items:center;gap:6px">
+                    <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Revoke
                   </button>
                 </td>
               </tr>

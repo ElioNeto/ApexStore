@@ -18,7 +18,10 @@ import { ToastService } from '../../services/toast.service';
   selector: 'app-admin',
   standalone: true,
   imports: [FormsModule, DatePipe, HugeiconsIconComponent],
-  template: `
+  templateUrl: './admin.component.html',
+  styleUrl: './admin.component.scss'
+})
+export class AdminComponent implements OnInit {
     <div class="page">
       <div class="page-header">
         <div>
