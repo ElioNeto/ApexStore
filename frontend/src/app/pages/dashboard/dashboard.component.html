@@ -6,7 +6,11 @@
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
       <button class="btn btn-secondary" (click)="loadStats()" [disabled]="loadingStats()">
-        @if (loadingStats()) { <span class="spinner"></span> } @else { 🔄 }
+        @if (loadingStats()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+        }
         Refresh Stats
       </button>
     </div>
@@ -15,7 +19,7 @@
   <!-- Stats cards row -->
   <div class="cards-row">
     @for (card of statCards(); track $index) {
-    <app-stat-card [icon]="card.icon" [label]="card.label" [value]="card.value" [sub]="card.sub" />
+      <app-stat-card [icon]="card.icon" [label]="card.label" [value]="card.value" [sub]="card.sub" />
     }
   </div>
 
@@ -34,11 +38,14 @@
           </div>
           <div class="input-group" style="flex:2">
             <label>Value</label>
-            <input [(ngModel)]="putValue" placeholder="John Doe" [disabled]="loadingPut()" />
+            <input [(ngModel)]="putValue" placeholder="John Doe" [disabled]="loadingPut()" (keydown.enter)="executePut()" />
           </div>
-          <button class="btn btn-primary" [disabled]="!putKey.trim() || !putValue.trim() || loadingPut()"
-            (click)="executePut()">
-            @if (loadingPut()) { <span class="spinner"></span> } @else { ➜ }
+          <button class="btn btn-primary" [disabled]="!putKey.trim() || !putValue.trim() || loadingPut()" (click)="executePut()">
+            @if (loadingPut()) {
+              <span class="spinner"></span>
+            } @else {
+              <hugeicons-icon [icon]="ArrowRight01Icon" [size]="16" [strokeWidth]="1.5" />
+            }
             Write
           </button>
         </div>
@@ -54,18 +61,22 @@
         <div class="form-row">
           <div class="input-group" style="flex:1">
             <label>Key</label>
-            <input [(ngModel)]="getKey" placeholder="user:1" [disabled]="loadingGet()" />
+            <input [(ngModel)]="getKey" placeholder="user:1" [disabled]="loadingGet()" (keydown.enter)="executeGet()" />
           </div>
           <button class="btn btn-success" [disabled]="!getKey.trim() || loadingGet()" (click)="executeGet()">
-            @if (loadingGet()) { <span class="spinner"></span> } @else { → }
+            @if (loadingGet()) {
+              <span class="spinner"></span>
+            } @else {
+              <hugeicons-icon [icon]="ArrowRight01Icon" [size]="16" [strokeWidth]="1.5" />
+            }
             Read
           </button>
         </div>
         @if (getResult()) {
-        <div class="result-box" [class.error-result]="getError()">
-          <span class="result-label">Result:</span>
-          <span class="result-value">{{ getResult() }}</span>
-        </div>
+          <div class="result-box" [class.error-result]="getError()">
+            <span class="result-label">Result:</span>
+            <span class="result-value">{{ getResult() }}</span>
+          </div>
         }
       </div>
     </div>
@@ -78,12 +89,9 @@
         <span class="card-title">Operation History</span>
         <span class="badge badge-info">{{ history().length }}</span>
       </div>
-      <button class="btn btn-secondary btn-sm" (click)="clearHistory()" [disabled]="history().length === 0">
-        Clear History
-      </button>
+      <button class="btn btn-secondary btn-sm" (click)="clearHistory()" [disabled]="history().length === 0">Clear History</button>
     </div>
 
-    <!-- History filter -->
     <div class="history-toolbar">
       <div class="input-group" style="flex-direction:row;gap:8px;align-items:center;max-width:300px">
         <input [(ngModel)]="historyFilter" placeholder="Filter by key or result..." />
@@ -91,40 +99,39 @@
     </div>
 
     @if (filteredHistory().length === 0) {
-    <div class="empty-state">No operations yet. Try writing or reading some keys.</div>
+      <div class="empty-state">No operations yet. Try writing or reading some keys.</div>
     } @else {
-    <div class="table-wrapper">
-      <table class="history-table">
-        <thead>
-          <tr>
-            <th>Op</th>
-            <th>Key</th>
-            <th>Value</th>
-            <th>Result</th>
-            <th>Status</th>
-            <th>Time</th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (entry of filteredHistory(); track $index) {
-          <tr [class.row-success]="entry.status === 'success'" [class.row-error]="entry.status === 'error'">
-            <td class="op-cell">{{ entry.op }}</td>
-            <td class="mono key-cell">{{ entry.key }}</td>
-            <td class="mono val-cell">{{ entry.value ?? '—' }}</td>
-            <td class="mono result-cell">{{ entry.result ?? '—' }}</td>
-            <td>
-              @if (entry.status === 'success') {
-              <span class="status-badge success">✓</span>
-              } @else {
-              <span class="status-badge error">✕</span>
-              }
-            </td>
-            <td class="time-cell">{{ entry.time | date:'HH:mm:ss' }}</td>
-          </tr>
-          }
-        </tbody>
-      </table>
-    </div>
+      <div class="table-wrapper">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th>Op</th><th>Key</th><th>Value</th><th>Result</th><th>Status</th><th>Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (entry of filteredHistory(); track $index) {
+              <tr [class.row-success]="entry.status === 'success'" [class.row-error]="entry.status === 'error'">
+                <td class="op-cell">{{ entry.op }}</td>
+                <td class="mono key-cell">{{ entry.key }}</td>
+                <td class="mono val-cell">{{ entry.value ?? '—' }}</td>
+                <td class="mono result-cell">{{ entry.result ?? '—' }}</td>
+                <td>
+                  @if (entry.status === 'success') {
+                    <span class="status-icon success">
+                      <hugeicons-icon [icon]="CheckmarkCircle01Icon" [size]="16" [strokeWidth]="1.5" />
+                    </span>
+                  } @else {
+                    <span class="status-icon error">
+                      <hugeicons-icon [icon]="CancelCircleIcon" [size]="16" [strokeWidth]="1.5" />
+                    </span>
+                  }
+                </td>
+                <td class="time-cell">{{ entry.time | date:'HH:mm:ss' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
     }
   </div>
 </div>

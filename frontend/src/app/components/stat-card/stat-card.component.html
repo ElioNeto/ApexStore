@@ -1,5 +1,7 @@
 <div class="stat-card">
-  <div class="stat-icon">{{ icon() }}</div>
+  <div class="stat-icon">
+    <hugeicons-icon [icon]="icon()" [size]="22" [strokeWidth]="1.5" color="currentColor" />
+  </div>
   <div class="stat-body">
     <div class="stat-label">{{ label() }}</div>
     <div class="stat-value">{{ value() }}</div>
