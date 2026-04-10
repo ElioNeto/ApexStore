@@ -1,11 +1,9 @@
 <div class="app-shell">
   <aside class="sidebar">
     <div class="sidebar-logo">
-      @if (true) {
-        <hugeicons-icon [icon]="ZapIcon" [size]="22" [strokeWidth]="1.5" color="var(--accent)" />
-        <span class="logo-text">ApexStore</span>
-        <span class="badge badge-warning" style="font-size:0.65rem">v2</span>
-      }
+      <hugeicons-icon [icon]="ZapIcon" [size]="22" [strokeWidth]="1.5" color="var(--accent)" />
+      <span class="logo-text">ApexStore</span>
+      <span class="badge badge-warning" style="font-size:0.65rem">v{{ VERSION }}</span>
     </div>
 
     <nav class="sidebar-nav">
@@ -23,6 +21,12 @@
     </nav>
 
     <div class="sidebar-footer">
+      <a [href]="DOCUMENTATION_URL" target="_blank" class="nav-item">
+        <span class="nav-icon">
+          <hugeicons-icon [icon]="BookOpenIcon" [size]="17" [strokeWidth]="1.5" />
+        </span>
+        <span>Documentation</span>
+      </a>
       <a href="https://github.com/ElioNeto/ApexStore" target="_blank" class="nav-item">
         <span class="nav-icon">
           <hugeicons-icon [icon]="GithubIcon" [size]="17" [strokeWidth]="1.5" />

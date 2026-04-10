@@ -9,6 +9,7 @@ import {
   LockPasswordIcon,
   Github01Icon,
   ZapIcon,
+  BookOpenIcon,
 } from '@hugeicons/core-free-icons';
 import { ToastComponent } from './components/toast/toast.component';
 import type { IconSvgObject } from '@hugeicons/angular';
@@ -24,8 +25,11 @@ interface NavGroup { label: string; items: NavItem[]; }
   styleUrl: './app.component.scss'
 })
 export class AppComponent {
+  readonly VERSION = '2.1.24';
+  readonly DOCUMENTATION_URL = 'https://elioneto.github.io/ApexStore/';
   readonly ZapIcon = ZapIcon;
   readonly GithubIcon = Github01Icon;
+  readonly BookOpenIcon = BookOpenIcon;
 
   navGroups = signal<NavGroup[]>([
     {
