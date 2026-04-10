@@ -41,6 +41,10 @@ export class KeyExplorerComponent {
     return this.entries().filter(e => e.key.toLowerCase().includes(q) || e.value.toLowerCase().includes(q));
   });
 
+  scanModeLabel = computed(() => {
+    return this.viewMode() === 'scan' ? 'Scan Results' : 'Entries';
+  });
+
   lookup(): void {
     const key = this.lookupKey.trim();
     if (!key) return;
