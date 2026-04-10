@@ -15,17 +15,15 @@ type ViewMode = 'table' | 'scan';
     <div class="page">
       <div class="page-header">
         <div>
-          <h1 class="page-title">🔑 Key Explorer</h1>
-          <p class="page-subtitle">Lookup, search, insert, delete e scan completo</p>
+          <h1 class="page-title">Key Explorer</h1>
+          <p class="page-subtitle">Lookup, search, insert, delete and full scan</p>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-secondary" (click)="loadAllKeys()" [disabled]="loadingList()">
-            @if (loadingList()) { <span class="spinner"></span> } @else { 📋 }
-            List All Keys
+            @if (loadingList()) { <span class="spinner"></span> List All Keys } @else { List All Keys }
           </button>
           <button class="btn btn-secondary" (click)="runScan()" [disabled]="loadingScan()">
-            @if (loadingScan()) { <span class="spinner"></span> } @else { 🔍 }
-            Full Scan
+            @if (loadingScan()) { <span class="spinner"></span> Full Scan } @else { Full Scan }
           </button>
         </div>
       </div>
@@ -42,7 +40,7 @@ type ViewMode = 'table' | 'scan';
                 <input [(ngModel)]="lookupKey" placeholder="user:1" (keydown.enter)="lookup()" />
               </div>
               <button class="btn btn-success" style="align-self:flex-end" [disabled]="!lookupKey.trim() || loadingLookup()" (click)="lookup()">
-                @if (loadingLookup()) { <span class="spinner"></span> } @else { 🔍 }
+                @if (loadingLookup()) { <span class="spinner"></span> } @else { Lookup }
               </button>
             </div>
           </div>
@@ -62,7 +60,7 @@ type ViewMode = 'table' | 'scan';
                 <input [(ngModel)]="insertValue" placeholder="value" (keydown.enter)="insert()" />
               </div>
               <button class="btn btn-primary" style="align-self:flex-end" [disabled]="!insertKey.trim()||!insertValue.trim()||loadingInsert()" (click)="insert()">
-                @if (loadingInsert()) { <span class="spinner"></span> } @else { ✏️ }
+                @if (loadingInsert()) { <span class="spinner"></span> } @else { Insert }
               </button>
             </div>
           </div>
@@ -82,7 +80,7 @@ type ViewMode = 'table' | 'scan';
                 <span>Prefix</span>
               </label>
               <button class="btn btn-secondary" style="align-self:flex-end" [disabled]="!searchQ.trim()||loadingSearch()" (click)="runSearch()">
-                @if (loadingSearch()) { <span class="spinner"></span> } @else { 🔎 }
+                @if (loadingSearch()) { <span class="spinner"></span> } @else { Search }
               </button>
             </div>
           </div>
@@ -97,8 +95,7 @@ type ViewMode = 'table' | 'scan';
               <textarea [(ngModel)]="batchJson" placeholder='[{"key":"k1","value":"v1"},{"key":"k2","value":"v2"}]'></textarea>
             </div>
             <button class="btn btn-primary" style="margin-top:10px;width:100%;justify-content:center" [disabled]="!batchJson.trim()||loadingBatch()" (click)="runBatch()">
-              @if (loadingBatch()) { <span class="spinner"></span> } @else { 📦 }
-              Insert Batch
+              @if (loadingBatch()) { <span class="spinner"></span> Insert Batch } @else { Insert Batch }
             </button>
           </div>
         </div>
@@ -108,7 +105,7 @@ type ViewMode = 'table' | 'scan';
       <div class="card" style="margin-top:24px">
         <div class="card-header" style="justify-content:space-between">
           <div style="display:flex;align-items:center;gap:10px">
-            <span class="card-title">{{ viewMode() === 'scan' ? '🔍 Scan Results' : '📋 Entries' }}</span>
+            <span class="card-title">{{ viewMode() === 'scan' ? 'Scan Results' : 'Entries' }}</span>
             <span class="badge badge-info">{{ entries().length }}</span>
             @if (filteredEntries().length !== entries().length) {
               <span class="badge badge-warning">{{ filteredEntries().length }} filtered</span>
@@ -125,7 +122,7 @@ type ViewMode = 'table' | 'scan';
         </div>
 
         @if (entries().length === 0) {
-          <div class="empty-state">Use Lookup, Search ou Full Scan para carregar dados.</div>
+          <div class="empty-state">Use Lookup, Search or Full Scan to load data.</div>
         } @else {
           <div class="table-wrapper">
             <table class="kv-table">
@@ -144,8 +141,8 @@ type ViewMode = 'table' | 'scan';
                     <td class="mono val-cell">{{ e.value }}</td>
                     <td class="time-cell">{{ e.fetchedAt | date:'HH:mm:ss' }}</td>
                     <td class="actions-cell">
-                      <button class="btn btn-secondary btn-sm" (click)="refetch(e.key)" title="Refetch">🔄</button>
-                      <button class="btn btn-danger btn-sm" (click)="deleteKey(e.key)" title="Delete from store">🗑️</button>
+                      <button class="btn btn-secondary btn-sm" (click)="refetch(e.key)" title="Refetch">Refetch</button>
+                      <button class="btn btn-danger btn-sm" (click)="deleteKey(e.key)" title="Delete from store">Delete</button>
                     </td>
                   </tr>
                 }
