@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 
 export interface KeyValue {
@@ -10,6 +11,12 @@ export interface KeyValue {
 
 export interface StatsResponse {
   [key: string]: unknown;
+}
+
+interface ApiResponse<T> {
+  success: boolean;
+  message: string;
+  data: T | null;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -22,8 +29,15 @@ export class ApexStoreService {
   }
 
   get(key: string): Observable<{ value: string }> {
-    return this.http.get<{ value: string }>(`${this.baseUrl}/keys/${key}`);
+    return this.http.get<ApiResponse<{ key: string; value: string }>>(`${this.baseUrl}/keys/${key}`).pipe(
+      map(response => ({ value: response.data?.value ?? '' }))
+    );
   }
+
+  getStats(): Observable<StatsResponse> {
+    return this.http.get<StatsResponse>(`${this.baseUrl}/stats/all`);
+  }
+}
 
   getStats(): Observable<StatsResponse> {
     return this.http.get<StatsResponse>(`${this.baseUrl}/stats/all`);
