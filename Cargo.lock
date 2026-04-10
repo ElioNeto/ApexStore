@@ -291,6 +291,7 @@ dependencies = [
  "bincode",
  "bloomfilter",
  "chrono",
+ "crc32fast",
  "criterion",
  "crossterm",
  "dotenvy",
