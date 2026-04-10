@@ -1,7 +1,6 @@
 import { Component, inject, signal, computed } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
-import { HugeiconsComponent } from '@hugeicons/angular';
 import {
   ListViewIcon,
   Search01Icon,
@@ -21,7 +20,7 @@ type ViewMode = 'table' | 'scan';
 @Component({
   selector: 'app-key-explorer',
   standalone: true,
-  imports: [FormsModule, DatePipe, HugeiconsComponent],
+  imports: [FormsModule, DatePipe],
   template: `
     <div class="page">
       <div class="page-header">

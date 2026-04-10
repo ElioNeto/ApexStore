@@ -1,7 +1,7 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
-import { HugeiconsComponent } from '@hugeicons/angular';
+import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   RefreshIcon,
   LockPasswordIcon,
@@ -17,13 +17,13 @@ import { ToastService } from '../../services/toast.service';
 @Component({
   selector: 'app-admin',
   standalone: true,
-  imports: [FormsModule, DatePipe, HugeiconsComponent],
+  imports: [FormsModule, DatePipe, HugeiconsIconComponent],
   template: `
     <div class="page">
       <div class="page-header">
         <div>
           <h1 class="page-title">Token Admin</h1>
-          <p class="page-subtitle">Gerenciamento de Bearer Tokens — requer <code>API_AUTH_ENABLED=true</code></p>
+          <p class="page-subtitle">Gerenciamento de Bearer Tokens - requer <code>API_AUTH_ENABLED=true</code></p>
         </div>
         <button class="btn btn-secondary" (click)="load()" [disabled]="loading()">
           <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" /> Refresh
@@ -72,7 +72,7 @@ import { ToastService } from '../../services/toast.service';
               <input [(ngModel)]="newName" placeholder="ex: ci-pipeline" />
             </div>
             <div class="input-group">
-              <label>Expira em (dias) — vazio = nunca</label>
+              <label>Expira em (dias) - vazio = nunca</label>
               <input type="number" [(ngModel)]="newExpiry" placeholder="30" min="1" />
             </div>
             <div class="input-group" style="grid-column:1/-1">
@@ -97,7 +97,7 @@ import { ToastService } from '../../services/toast.service';
             <div class="created-token-box">
               <div class="created-token-label">
                 <hugeicons-icon [icon]="LockIcon" [size]="14" [strokeWidth]="1.5" />
-                Copie agora — este token não será exibido novamente
+                Copie agora - este token não será exibido novamente
               </div>
               <div class="created-token-value">{{ createdToken() }}</div>
               <button class="btn btn-secondary btn-sm" (click)="copyToken()">

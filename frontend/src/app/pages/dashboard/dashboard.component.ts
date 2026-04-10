@@ -1,13 +1,13 @@
 import { Component, inject, signal, OnInit, computed } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
-import { HugeiconsComponent } from '@hugeicons/angular';
+import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   RefreshIcon,
   ArrowRight01Icon,
   DatabaseIcon,
   FileEditIcon,
-  HardDrive02Icon,
+  HardDriveIcon,
   KeyIcon,
   CheckmarkCircle01Icon,
   CancelCircleIcon,
@@ -15,7 +15,7 @@ import {
 import { ApexStoreService } from '../../services/apex-store.service';
 import { ToastService } from '../../services/toast.service';
 import { StatCardComponent } from '../../components/stat-card/stat-card.component';
-import type { IconSvgElement } from '@hugeicons/angular';
+import type { IconSvgObject } from '@hugeicons/angular';
 
 interface HistoryEntry {
   op: 'GET' | 'PUT';
@@ -29,7 +29,7 @@ interface HistoryEntry {
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [FormsModule, DatePipe, StatCardComponent, HugeiconsComponent],
+  imports: [FormsModule, DatePipe, StatCardComponent, HugeiconsIconComponent],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss'
 })
@@ -53,7 +53,7 @@ export class DashboardComponent implements OnInit {
   getResult    = signal<string | null>(null);
   getError     = signal(false);
   history      = signal<HistoryEntry[]>([]);
-  statCards    = signal<Array<{ icon: IconSvgElement[]; label: string; value: string; sub: string }>>([]);
+  statCards    = signal<Array<{ icon: IconSvgObject; label: string; value: string; sub: string }>>([]);
 
   filteredHistory = computed(() =>
     this.history().filter(h =>
@@ -82,7 +82,7 @@ export class DashboardComponent implements OnInit {
     this.statCards.set([
       { icon: DatabaseIcon,    label: 'MemTable',    value: `${n('mem_records')} records`, sub: `${memMemtableMb} MB` },
       { icon: FileEditIcon,    label: 'WAL',         value: `${n('wal_kb')} KB`,           sub: 'Write-ahead log' },
-      { icon: HardDrive02Icon, label: 'Disk Usage',  value: `${diskUsageMb} MB`,           sub: `${n('sst_files')} SSTables` },
+      { icon: HardDriveIcon,   label: 'Disk Usage',  value: `${diskUsageMb} MB`,           sub: `${n('sst_files')} SSTables` },
       { icon: KeyIcon,         label: 'Total Keys',  value: `${n('total_records')}`,        sub: 'All records' },
     ]);
   }

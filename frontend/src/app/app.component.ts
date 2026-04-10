@@ -3,7 +3,7 @@ import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   Home01Icon,
-  BarChart01Icon,
+  BarChartIcon,
   Key01Icon,
   Flag01Icon,
   LockPasswordIcon,
@@ -11,9 +11,9 @@ import {
   ZapIcon,
 } from '@hugeicons/core-free-icons';
 import { ToastComponent } from './components/toast/toast.component';
-import type { IconSvgElement } from '@hugeicons/angular';
+import type { IconSvgObject } from '@hugeicons/angular';
 
-interface NavItem { path: string; icon: IconSvgElement[]; label: string; }
+interface NavItem { path: string; icon: IconSvgObject; label: string; }
 interface NavGroup { label: string; items: NavItem[]; }
 
 @Component({
@@ -106,7 +106,7 @@ export class AppComponent {
       label: 'General',
       items: [
         { path: '/dashboard', icon: Home01Icon, label: 'Dashboard' },
-        { path: '/stats', icon: BarChart01Icon, label: 'Statistics' },
+        { path: '/stats', icon: BarChartIcon, label: 'Statistics' },
       ]
     },
     {

@@ -1,6 +1,6 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { HugeiconsComponent } from '@hugeicons/angular';
+import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   RefreshIcon,
   TickDouble01Icon,
@@ -13,7 +13,7 @@ import { ToastService } from '../../services/toast.service';
 @Component({
   selector: 'app-features',
   standalone: true,
-  imports: [FormsModule, HugeiconsComponent],
+  imports: [FormsModule, HugeiconsIconComponent],
   template: `
     <div class="page">
       <div class="page-header">
