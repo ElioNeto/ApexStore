@@ -2,7 +2,7 @@
   <div class="page-header">
     <div>
       <h1 class="page-title">Dashboard</h1>
-      <p class="page-subtitle">Monitoramento em tempo real da storage engine</p>
+      <p class="page-subtitle">Real-time storage engine monitoring</p>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
       <button class="btn btn-secondary" (click)="loadStats()" [disabled]="loadingStats()">
@@ -15,11 +15,7 @@
   <!-- Stats cards row -->
   <div class="cards-row">
     @for (card of statCards(); track $index) {
-      <app-stat-card
-        [icon]="card.icon"
-        [label]="card.label"
-        [value]="card.value"
-        [sub]="card.sub" />
+    <app-stat-card [icon]="card.icon" [label]="card.label" [value]="card.value" [sub]="card.sub" />
     }
   </div>
 
@@ -40,7 +36,8 @@
             <label>Value</label>
             <input [(ngModel)]="putValue" placeholder="John Doe" [disabled]="loadingPut()" />
           </div>
-          <button class="btn btn-primary" [disabled]="!putKey.trim() || !putValue.trim() || loadingPut()" (click)="executePut()">
+          <button class="btn btn-primary" [disabled]="!putKey.trim() || !putValue.trim() || loadingPut()"
+            (click)="executePut()">
             @if (loadingPut()) { <span class="spinner"></span> } @else { ➜ }
             Write
           </button>
@@ -65,10 +62,10 @@
           </button>
         </div>
         @if (getResult()) {
-          <div class="result-box" [class.error-result]="getError()">
-            <span class="result-label">Result:</span>
-            <span class="result-value">{{ getResult() }}</span>
-          </div>
+        <div class="result-box" [class.error-result]="getError()">
+          <span class="result-label">Result:</span>
+          <span class="result-value">{{ getResult() }}</span>
+        </div>
         }
       </div>
     </div>
@@ -94,40 +91,40 @@
     </div>
 
     @if (filteredHistory().length === 0) {
-      <div class="empty-state">No operations yet. Try writing or reading some keys.</div>
+    <div class="empty-state">No operations yet. Try writing or reading some keys.</div>
     } @else {
-      <div class="table-wrapper">
-        <table class="history-table">
-          <thead>
-            <tr>
-              <th>Op</th>
-              <th>Key</th>
-              <th>Value</th>
-              <th>Result</th>
-              <th>Status</th>
-              <th>Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (entry of filteredHistory(); track $index) {
-              <tr [class.row-success]="entry.status === 'success'" [class.row-error]="entry.status === 'error'">
-                <td class="op-cell">{{ entry.op }}</td>
-                <td class="mono key-cell">{{ entry.key }}</td>
-                <td class="mono val-cell">{{ entry.value ?? '—' }}</td>
-                <td class="mono result-cell">{{ entry.result ?? '—' }}</td>
-                <td>
-                  @if (entry.status === 'success') {
-                    <span class="status-badge success">✓</span>
-                  } @else {
-                    <span class="status-badge error">✕</span>
-                  }
-                </td>
-                <td class="time-cell">{{ entry.time | date:'HH:mm:ss' }}</td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </div>
+    <div class="table-wrapper">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Op</th>
+            <th>Key</th>
+            <th>Value</th>
+            <th>Result</th>
+            <th>Status</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (entry of filteredHistory(); track $index) {
+          <tr [class.row-success]="entry.status === 'success'" [class.row-error]="entry.status === 'error'">
+            <td class="op-cell">{{ entry.op }}</td>
+            <td class="mono key-cell">{{ entry.key }}</td>
+            <td class="mono val-cell">{{ entry.value ?? '—' }}</td>
+            <td class="mono result-cell">{{ entry.result ?? '—' }}</td>
+            <td>
+              @if (entry.status === 'success') {
+              <span class="status-badge success">✓</span>
+              } @else {
+              <span class="status-badge error">✕</span>
+              }
+            </td>
+            <td class="time-cell">{{ entry.time | date:'HH:mm:ss' }}</td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
     }
   </div>
 </div>
