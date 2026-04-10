@@ -38,7 +38,7 @@ impl Block {
     }
 
     fn current_size(&self) -> usize {
-        self.data.len() + Self::metadata_size(self.offsets.len())
+        self.data.len() + Self::metadata_size(self.offsets.len()) + U32_SIZE
     }
 
     pub fn add(&mut self, key: &[u8], value: &[u8]) -> bool {
@@ -87,7 +87,7 @@ impl Block {
     }
 
     pub fn decode(data: &[u8]) -> std::result::Result<Self, LsmError> {
-        if data.len() < U32_SIZE {
+        if data.len() < 2 * U32_SIZE {
             return Err(LsmError::CorruptedData(
                 "Data too short to contain checksum".to_string(),
             ));
@@ -368,6 +368,35 @@ mod tests {
     }
 
     #[test]
+    fn test_block_size_accurate_with_crc32() {
+        // Test that current_size includes CRC32 overhead
+        let mut block = Block::new(128); // Small block size for precise testing
+
+        // Add entries until we're close to the limit
+        for i in 0..20 {
+            let key = format!("k{}", i);
+            let value = format!("v{}", i);
+            let entry_size = Block::entry_size(key.as_bytes(), value.as_bytes());
+            let needed = block.current_size() + entry_size + U32_SIZE; // +U32_SIZE for new offset
+
+            if needed > block.block_size {
+                break;
+            }
+
+            assert!(block.add(key.as_bytes(), value.as_bytes()));
+        }
+
+        // Verify encoded size does not exceed block_size (CRC32 is included)
+        let encoded = block.encode();
+        assert!(
+            encoded.len() <= block.block_size,
+            "Encoded block size {} exceeds block_size {} after CRC32 fix",
+            encoded.len(),
+            block.block_size
+        );
+    }
+
+    #[test]
     fn test_crc32_truncated_file_detected() {
         let mut block = Block::new(BLOCK_SIZE);
         block.add(b"short_key", b"short_value");
@@ -377,6 +406,23 @@ mod tests {
         let truncated = &encoded[..encoded.len() - U32_SIZE];
 
         let result = Block::decode(truncated);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decode_very_short_input_no_panic() {
+        // Test for Devin bug fix: decode must not panic on 4-byte input
+        // CRC32 of empty data is 0, so [0,0,0,0] would pass checksum if not for length check
+        let very_short = &[0u8; 4];
+        let result = Block::decode(very_short);
+        assert!(result.is_err());
+
+        let short_5 = &[0u8; 5];
+        let result = Block::decode(short_5);
+        assert!(result.is_err());
+
+        let short_7 = &[0u8; 7];
+        let result = Block::decode(short_7);
         assert!(result.is_err());
     }
 
