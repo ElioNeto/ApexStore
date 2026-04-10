@@ -499,9 +499,13 @@ pub async fn start_server(engine: LsmEngine, server_config: ServerConfig) -> std
             .allow_any_method()
             .allow_any_header();
 
+        // Wrap auth middleware only when auth is enabled
         #[cfg(feature = "api")]
-        let auth_middleware =
-            actix_web_httpauth::middleware::HttpAuthentication::bearer(auth_validator);
+        let auth_middleware = if auth_enabled {
+            Some(actix_web_httpauth::middleware::HttpAuthentication::bearer(auth_validator))
+        } else {
+            None
+        };
 
         let mut app = App::new()
             .wrap(cors)
@@ -523,29 +527,49 @@ pub async fn start_server(engine: LsmEngine, server_config: ServerConfig) -> std
         // Protected endpoints (with conditional auth)
         #[cfg(feature = "api")]
         {
-            app = app
-                .service(
-                    web::scope("")
-                        .wrap(auth_middleware.clone())
-                        .service(get_stats)
-                        .service(get_stats_all)
-                        .service(get_key)
-                        .service(set_key)
-                        .service(set_batch)
-                        .service(delete_key)
-                        .service(list_keys)
-                        .service(search_keys)
-                        .service(scan_all)
-                        .service(list_features)
-                        .service(set_feature),
-                )
-                .service(
+            if let Some(ref middleware) = auth_middleware {
+                app = app
+                    .service(
+                        web::scope("")
+                            .wrap(middleware.clone())
+                            .service(get_stats)
+                            .service(get_stats_all)
+                            .service(get_key)
+                            .service(set_key)
+                            .service(set_batch)
+                            .service(delete_key)
+                            .service(list_keys)
+                            .service(search_keys)
+                            .service(scan_all)
+                            .service(list_features)
+                            .service(set_feature),
+                    );
+            } else {
+                // Auth disabled - endpoints are public
+                app = app
+                    .service(get_stats)
+                    .service(get_stats_all)
+                    .service(get_key)
+                    .service(set_key)
+                    .service(set_batch)
+                    .service(delete_key)
+                    .service(list_keys)
+                    .service(search_keys)
+                    .service(scan_all)
+                    .service(list_features)
+                    .service(set_feature);
+            }
+
+            // Admin endpoints always require auth (only register if auth is enabled)
+            if auth_enabled {
+                app = app.service(
                     web::scope("/admin")
-                        .wrap(auth_middleware)
+                        .wrap(auth_middleware.expect("Auth should be enabled here"))
                         .service(create_token)
                         .service(list_tokens)
                         .service(delete_token),
                 );
+            }
         }
 
         #[cfg(not(feature = "api"))]
