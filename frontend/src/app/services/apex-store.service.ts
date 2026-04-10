@@ -38,8 +38,3 @@ export class ApexStoreService {
     return this.http.get<StatsResponse>(`${this.baseUrl}/stats/all`);
   }
 }
-
-  getStats(): Observable<StatsResponse> {
-    return this.http.get<StatsResponse>(`${this.baseUrl}/stats/all`);
-  }
-}
