@@ -9,9 +9,12 @@
         <span class="badge badge-info">version {{ version() }}</span>
       }
       <button class="btn btn-secondary" (click)="load()" [disabled]="loading()">
-        @if (loading()) { <span class="spinner"></span> }
-        @else { <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" /> }
-        Refresh
+        @if (loading()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+        }
+        @if (!loading()) { Refresh }
       </button>
     </div>
   </div>
@@ -33,14 +36,21 @@
           <input [(ngModel)]="newDesc" placeholder="optional description" />
         </div>
         <div style="display:flex;gap:8px;align-self:flex-end">
-          <button class="btn btn-success" [disabled]="!newName.trim()||loadingNew()" (click)="createFlag(true)">
-            @if (loadingNew()) { <span class="spinner"></span> }
-            @else { <hugeicons-icon [icon]="TickDouble01Icon" [size]="15" [strokeWidth]="1.5" /> }
-            Enable
+          <button class="btn btn-success" [disabled]="!newName.trim() || loadingNew()" (click)="createFlag(true)">
+            @if (loadingNew()) {
+              <span class="spinner"></span>
+            } @else {
+              <hugeicons-icon [icon]="TickDouble01Icon" [size]="15" [strokeWidth]="1.5" />
+            }
+            @if (!loadingNew()) { Enable }
           </button>
-          <button class="btn btn-danger" [disabled]="!newName.trim()||loadingNew()" (click)="createFlag(false)">
-            <hugeicons-icon [icon]="Cancel01Icon" [size]="15" [strokeWidth]="1.5" />
-            Disable
+          <button class="btn btn-danger" [disabled]="!newName.trim() || loadingNew()" (click)="createFlag(false)">
+            @if (loadingNew()) {
+              <span class="spinner"></span>
+            } @else {
+              <hugeicons-icon [icon]="Cancel01Icon" [size]="15" [strokeWidth]="1.5" />
+            }
+            @if (!loadingNew()) { Disable }
           </button>
         </div>
       </div>

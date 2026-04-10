@@ -6,14 +6,20 @@
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-secondary" (click)="loadAllKeys()" [disabled]="loadingList()">
-        @if (loadingList()) { <span class="spinner"></span> }
-        @else { <hugeicons-icon [icon]="ListViewIcon" [size]="16" [strokeWidth]="1.5" /> }
-        List All Keys
+        @if (loadingList()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="ListViewIcon" [size]="16" [strokeWidth]="1.5" />
+        }
+        @if (!loadingList()) { List All Keys }
       </button>
       <button class="btn btn-secondary" (click)="runScan()" [disabled]="loadingScan()">
-        @if (loadingScan()) { <span class="spinner"></span> }
-        @else { <hugeicons-icon [icon]="SearchIcon" [size]="16" [strokeWidth]="1.5" /> }
-        Full Scan
+        @if (loadingScan()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="SearchIcon" [size]="16" [strokeWidth]="1.5" />
+        }
+        @if (!loadingScan()) { Full Scan }
       </button>
     </div>
   </div>
@@ -28,9 +34,13 @@
             <label>Key</label>
             <input [(ngModel)]="lookupKey" placeholder="user:1" (keydown.enter)="lookup()" />
           </div>
-          <button class="btn btn-success" style="align-self:flex-end" [disabled]="!lookupKey.trim()||loadingLookup()" (click)="lookup()">
-            @if (loadingLookup()) { <span class="spinner"></span> }
-            @else { <hugeicons-icon [icon]="Search01Icon" [size]="16" [strokeWidth]="1.5" /> }
+          <button class="btn btn-success" style="align-self:flex-end" [disabled]="!lookupKey.trim() || loadingLookup()" (click)="lookup()">
+            @if (loadingLookup()) {
+              <span class="spinner"></span>
+            } @else {
+              <hugeicons-icon [icon]="Search01Icon" [size]="16" [strokeWidth]="1.5" />
+            }
+            @if (!loadingLookup()) { Lookup }
           </button>
         </div>
       </div>
@@ -49,9 +59,13 @@
             <label>Value</label>
             <input [(ngModel)]="insertValue" placeholder="value" (keydown.enter)="insert()" />
           </div>
-          <button class="btn btn-primary" style="align-self:flex-end" [disabled]="!insertKey.trim()||!insertValue.trim()||loadingInsert()" (click)="insert()">
-            @if (loadingInsert()) { <span class="spinner"></span> }
-            @else { <hugeicons-icon [icon]="PencilEdit01Icon" [size]="16" [strokeWidth]="1.5" /> }
+          <button class="btn btn-primary" style="align-self:flex-end" [disabled]="!insertKey.trim() || !insertValue.trim() || loadingInsert()" (click)="insert()">
+            @if (loadingInsert()) {
+              <span class="spinner"></span>
+            } @else {
+              <hugeicons-icon [icon]="PencilEdit01Icon" [size]="16" [strokeWidth]="1.5" />
+            }
+            @if (!loadingInsert()) { Insert }
           </button>
         </div>
       </div>
@@ -70,9 +84,13 @@
             <input type="checkbox" [(ngModel)]="searchPrefix" />
             <span>Prefix</span>
           </label>
-          <button class="btn btn-secondary" style="align-self:flex-end" [disabled]="!searchQ.trim()||loadingSearch()" (click)="runSearch()">
-            @if (loadingSearch()) { <span class="spinner"></span> }
-            @else { <hugeicons-icon [icon]="SearchIcon" [size]="16" [strokeWidth]="1.5" /> }
+          <button class="btn btn-secondary" style="align-self:flex-end" [disabled]="!searchQ.trim() || loadingSearch()" (click)="runSearch()">
+            @if (loadingSearch()) {
+              <span class="spinner"></span>
+            } @else {
+              <hugeicons-icon [icon]="SearchIcon" [size]="16" [strokeWidth]="1.5" />
+            }
+            @if (!loadingSearch()) { Search }
           </button>
         </div>
       </div>
@@ -83,13 +101,16 @@
       <div class="card-header"><span class="op-badge put">POST</span><span class="card-title">Batch Insert</span></div>
       <div class="card-body">
         <div class="input-group">
-          <label>JSON array - [{"key":"k","value":"v"}, ...]</label>
+          <label>JSON array (e.g., [{"key":"k","value":"v"}, ...])</label>
           <textarea [(ngModel)]="batchJson" placeholder='[{"key":"k1","value":"v1"},{"key":"k2","value":"v2"}]'></textarea>
         </div>
-        <button class="btn btn-primary" style="margin-top:10px;width:100%;justify-content:center" [disabled]="!batchJson.trim()||loadingBatch()" (click)="runBatch()">
-          @if (loadingBatch()) { <span class="spinner"></span> }
-          @else { <hugeicons-icon [icon]="PackageIcon" [size]="16" [strokeWidth]="1.5" /> }
-          Insert Batch
+        <button class="btn btn-primary" style="margin-top:10px;width:100%;justify-content:center" [disabled]="!batchJson.trim() || loadingBatch()" (click)="runBatch()">
+          @if (loadingBatch()) {
+            <span class="spinner"></span>
+          } @else {
+            <hugeicons-icon [icon]="PackageIcon" [size]="16" [strokeWidth]="1.5" />
+          }
+          @if (!loadingBatch()) { Insert Batch }
         </button>
       </div>
     </div>
