@@ -86,9 +86,16 @@ export class KeyExplorerComponent {
   }
 
   runBatch(): void {
-    let records: { key: string; value: string }[];
-    try { records = JSON.parse(this.batchJson); } catch { this.toast.error('Invalid JSON'); return; }
-    if (!Array.isArray(records) || records.length === 0) { this.toast.error('Expected a non-empty JSON array'); return; }
+    let parsed: { key: string; value: unknown }[];
+    try { parsed = JSON.parse(this.batchJson); } catch { this.toast.error('Invalid JSON'); return; }
+    if (!Array.isArray(parsed) || parsed.length === 0) { this.toast.error('Expected a non-empty JSON array'); return; }
+
+    // Normalize value: if it's not already a string, serialize it to JSON string
+    const records = parsed.map(item => ({
+      key: item.key,
+      value: typeof item.value === 'string' ? item.value : JSON.stringify(item.value)
+    }));
+
     this.loadingBatch.set(true);
     this.store.setBatch(records).subscribe({
       next: (r) => { records.forEach(rec => this.upsert(rec.key, rec.value)); this.toast.success(r.message); this.batchJson = ''; this.loadingBatch.set(false); },
