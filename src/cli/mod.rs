@@ -121,7 +121,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let prefix_mode = parts.len() > 2 && parts[2] == "--prefix";
 
                 let results = if prefix_mode {
-                    engine.search_prefix(query)
+                    engine.search_prefix_legacy(query)
                 } else {
                     engine.search(query)
                 };
@@ -633,7 +633,7 @@ fn run_demo(engine: &LsmEngine) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("   - SEARCH user: --prefix");
-    match engine.search_prefix("user:") {
+    match engine.search_prefix_legacy("user:") {
         Ok(results) => println!("     Found {} records", results.len()),
         Err(e) => println!("     Error: {}", e),
     }
