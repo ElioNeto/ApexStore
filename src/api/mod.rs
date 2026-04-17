@@ -3,12 +3,12 @@ mod config;
 #[cfg(feature = "api")]
 pub mod auth;
 
+use crate::core::engine::{DEFAULT_SCAN_LIMIT, MAX_SCAN_LIMIT};
 use actix_cors::Cors;
 use actix_web::{
     delete, dev::ServiceRequest, get, post, web, App, Error, HttpResponse, HttpServer, Responder,
 };
 use serde::{Deserialize, Serialize};
-use crate::core::engine::{MAX_SCAN_LIMIT, DEFAULT_SCAN_LIMIT};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -56,7 +56,9 @@ pub struct SearchQuery {
     pub cursor: Option<String>,
 }
 
-fn default_limit() -> usize { DEFAULT_SCAN_LIMIT }
+fn default_limit() -> usize {
+    DEFAULT_SCAN_LIMIT
+}
 
 #[derive(Deserialize)]
 pub struct ScanQuery {
@@ -68,7 +70,9 @@ pub struct ScanQuery {
     pub limit: usize,
 }
 
-fn default_scan_limit() -> usize { DEFAULT_SCAN_LIMIT }
+fn default_scan_limit() -> usize {
+    DEFAULT_SCAN_LIMIT
+}
 
 /// Response format for paginated queries
 #[derive(Serialize)]
@@ -286,12 +290,18 @@ async fn search_keys(query: web::Query<SearchQuery>, data: web::Data<AppState>) 
     if query.limit > MAX_SCAN_LIMIT {
         return HttpResponse::TooManyRequests().json(ApiResponse {
             success: false,
-            message: format!("limit {} exceeds maximum allowed limit {}", query.limit, MAX_SCAN_LIMIT),
+            message: format!(
+                "limit {} exceeds maximum allowed limit {}",
+                query.limit, MAX_SCAN_LIMIT
+            ),
             data: None,
         });
     }
 
-    match data.engine.search_prefix(&query.q, query.cursor.as_deref(), query.limit) {
+    match data
+        .engine
+        .search_prefix(&query.q, query.cursor.as_deref(), query.limit)
+    {
         Ok((records, next_cursor)) => {
             let records_json: PaginatedResponse = PaginatedResponse {
                 data: records
@@ -306,7 +316,11 @@ async fn search_keys(query: web::Query<SearchQuery>, data: web::Data<AppState>) 
 
             HttpResponse::Ok().json(ApiResponse {
                 success: true,
-                message: format!("{} keys found matching '{}'", records_json.data.len(), query.q),
+                message: format!(
+                    "{} keys found matching '{}'",
+                    records_json.data.len(),
+                    query.q
+                ),
                 data: Some(serde_json::to_value(records_json).unwrap_or_default()),
             })
         }
@@ -338,7 +352,10 @@ async fn scan_all(query: web::Query<ScanQuery>, data: web::Data<AppState>) -> im
     if query.limit > MAX_SCAN_LIMIT {
         return HttpResponse::TooManyRequests().json(ApiResponse {
             success: false,
-            message: format!("limit {} exceeds maximum allowed limit {}", query.limit, MAX_SCAN_LIMIT),
+            message: format!(
+                "limit {} exceeds maximum allowed limit {}",
+                query.limit, MAX_SCAN_LIMIT
+            ),
             data: None,
         });
     }
@@ -563,24 +580,44 @@ async fn auth_validator(
 fn build_cors() -> Cors {
     Cors::default()
         .allow_any_origin()
-        .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"])
+        .allowed_methods(vec![
+            "GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH",
+        ])
         .allow_any_header()
         .supports_credentials()
         .max_age(3600)
 }
 
-fn register_services(app: actix_web::App<impl actix_web::dev::ServiceFactory<actix_web::dev::ServiceRequest, Config = (), Response = actix_web::dev::ServiceResponse, Error = actix_web::Error, InitError = ()>>) -> actix_web::App<impl actix_web::dev::ServiceFactory<actix_web::dev::ServiceRequest, Config = (), Response = actix_web::dev::ServiceResponse, Error = actix_web::Error, InitError = ()>> {
+#[expect(dead_code)] // used in conditional compilation
+fn register_services(
+    app: actix_web::App<
+        impl actix_web::dev::ServiceFactory<
+            actix_web::dev::ServiceRequest,
+            Config = (),
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+            InitError = (),
+        >,
+    >,
+) -> actix_web::App<
+    impl actix_web::dev::ServiceFactory<
+        actix_web::dev::ServiceRequest,
+        Config = (),
+        Response = actix_web::dev::ServiceResponse,
+        Error = actix_web::Error,
+        InitError = (),
+    >,
+> {
     // Register static routes BEFORE dynamic ones to avoid /keys/{key} swallowing /keys/search
-    app
-        .service(health)
+    app.service(health)
         .service(get_stats)
         .service(get_stats_all)
-        .service(list_keys)       // GET  /keys         (static, must come before /keys/{key})
-        .service(search_keys)     // GET  /keys/search  (static, must come before /keys/{key})
-        .service(set_key)         // POST /keys
-        .service(set_batch)       // POST /keys/batch
-        .service(get_key)         // GET  /keys/{key}   (dynamic, registered last)
-        .service(delete_key)      // DELETE /keys/{key}
+        .service(list_keys) // GET  /keys         (static, must come before /keys/{key})
+        .service(search_keys) // GET  /keys/search  (static, must come before /keys/{key})
+        .service(set_key) // POST /keys
+        .service(set_batch) // POST /keys/batch
+        .service(get_key) // GET  /keys/{key}   (dynamic, registered last)
+        .service(delete_key) // DELETE /keys/{key}
         .service(scan_all)
         .service(list_features)
         .service(set_feature)
@@ -615,7 +652,9 @@ pub async fn start_server(engine: LsmEngine, server_config: ServerConfig) -> std
 
         #[cfg(feature = "api")]
         let auth_middleware = if auth_enabled {
-            Some(actix_web_httpauth::middleware::HttpAuthentication::bearer(auth_validator))
+            Some(actix_web_httpauth::middleware::HttpAuthentication::bearer(
+                auth_validator,
+            ))
         } else {
             None
         };
@@ -653,15 +692,18 @@ pub async fn start_server(engine: LsmEngine, server_config: ServerConfig) -> std
                     .service(set_feature);
 
                 let admin_scope = web::scope("/admin")
-                    .wrap(auth_middleware.clone().expect("Auth should be enabled here"))
+                    .wrap(
+                        auth_middleware
+                            .clone()
+                            .expect("Auth should be enabled here"),
+                    )
                     .service(create_token)
                     .service(list_tokens)
                     .service(delete_token);
 
                 app.service(health).service(scoped).service(admin_scope)
             } else {
-                app
-                    .service(health)
+                app.service(health)
                     .service(get_stats)
                     .service(get_stats_all)
                     .service(list_keys)

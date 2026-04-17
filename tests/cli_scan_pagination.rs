@@ -4,7 +4,9 @@ use apexstore::LsmEngine;
 use tempfile::tempdir;
 
 /// Helper to create an isolated engine instance
-fn create_test_engine(base_path: &std::path::Path) -> Result<apexstore::LsmConfig, apexstore::infra::error::LsmError> {
+fn create_test_engine(
+    base_path: &std::path::Path,
+) -> Result<apexstore::LsmConfig, apexstore::infra::error::LsmError> {
     apexstore::LsmConfig::builder()
         .dir_path(base_path.to_path_buf())
         .memtable_max_size(4 * 1024) // 4KB
@@ -97,7 +99,7 @@ fn test_scan_range_boundary() -> Result<(), Box<dyn std::error::Error>> {
     let (page, _cursor) = engine.scan_range(Some("a:0"), Some("a:5"), 100)?;
     let keys: Vec<&str> = page.iter().map(|(k, _)| k.as_str()).collect();
 
-    assert!(keys.iter().all(|k| k >= "a:0" && k < "a:5"));
+    assert!(keys.iter().all(|k| *k >= "a:0" && *k < "a:5"));
     assert_eq!(keys.len(), 4); // a:1, a:2, a:3, a:4
 
     Ok(())

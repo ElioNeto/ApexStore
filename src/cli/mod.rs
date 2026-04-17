@@ -1,5 +1,5 @@
+use crate::core::engine::{DEFAULT_SCAN_LIMIT, MAX_SCAN_LIMIT};
 use crate::{LsmConfig, LsmEngine};
-use crate::core::engine::{MAX_SCAN_LIMIT, DEFAULT_SCAN_LIMIT};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
@@ -119,6 +119,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let prefix_mode = parts.len() > 2 && parts[2] == "--prefix";
 
                 let results = if prefix_mode {
+                    #[allow(deprecated)]
                     engine.search_prefix_legacy(query)
                 } else {
                     engine.search(query)
@@ -267,7 +268,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Validate limit
                 if limit > MAX_SCAN_LIMIT {
-                    println!("❌ Limit {} exceeds maximum allowed limit {}", limit, MAX_SCAN_LIMIT);
+                    println!(
+                        "❌ Limit {} exceeds maximum allowed limit {}",
+                        limit, MAX_SCAN_LIMIT
+                    );
                     continue;
                 }
 
@@ -279,13 +283,17 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
 
-                println!("Scanning range [{:?}, {:?}) with limit {}...", start_key, end_key, limit);
+                println!(
+                    "Scanning range [{:?}, {:?}) with limit {}...",
+                    start_key, end_key, limit
+                );
 
                 // Fetch pages with pagination
                 let mut fetched = 0;
                 let mut current_start: Option<String> = start_key;
 
                 loop {
+                    #[allow(clippy::option_as_ref_deref)]
                     match engine.scan_range(
                         current_start.as_deref(),
                         end_key.as_ref().map(|s| s.as_str()),
@@ -398,7 +406,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 if limit > MAX_SCAN_LIMIT {
-                    println!("❌ Limit {} exceeds maximum allowed limit {}", limit, MAX_SCAN_LIMIT);
+                    println!(
+                        "❌ Limit {} exceeds maximum allowed limit {}",
+                        limit, MAX_SCAN_LIMIT
+                    );
                     continue;
                 }
 
@@ -443,7 +454,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // List all keys with pagination
                     let mut fetched = 0;
-                    let mut cursor: Option<String> = None;
+                    let mut _cursor: Option<String> = None;
 
                     loop {
                         match engine.scan_range(None, None, limit) {
@@ -460,7 +471,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 if next_cursor.is_none() || records.len() < limit {
                                     break;
                                 }
-                                cursor = next_cursor;
+                                _cursor = next_cursor;
                             }
                             Err(e) => {
                                 println!("❌ Error: {}", e);
@@ -475,7 +486,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("✓ {} total key(s) found", fetched);
                     }
                 }
-            },
+            }
 
             "COUNT" => match engine.count() {
                 Ok(count) => println!("✓ Total active records: {}", count),
@@ -509,11 +520,17 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 if limit > MAX_SCAN_LIMIT {
-                    println!("❌ Limit {} exceeds maximum allowed limit {}", limit, MAX_SCAN_LIMIT);
+                    println!(
+                        "❌ Limit {} exceeds maximum allowed limit {}",
+                        limit, MAX_SCAN_LIMIT
+                    );
                     continue;
                 }
 
-                println!("Searching keys with prefix '{}' (limit {})...", prefix, limit);
+                println!(
+                    "Searching keys with prefix '{}' (limit {})...",
+                    prefix, limit
+                );
 
                 // Use search_prefix with pagination
                 let mut fetched = 0;
@@ -549,7 +566,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     println!("✓ {} total key(s) found", fetched);
                 }
-            },
+            }
 
             _ => {
                 println!("❌ Unknown command: '{}'", command);
@@ -633,6 +650,7 @@ fn run_demo(engine: &LsmEngine) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("   - SEARCH user: --prefix");
+    #[allow(deprecated)]
     match engine.search_prefix_legacy("user:") {
         Ok(results) => println!("     Found {} records", results.len()),
         Err(e) => println!("     Error: {}", e),
