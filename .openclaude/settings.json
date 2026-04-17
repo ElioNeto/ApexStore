@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/pre-tool-bash.sh"
+            "command": "bash .openclaude/hooks/pre-tool-bash.sh"
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/pre-tool-file.sh"
+            "command": "bash .openclaude/hooks/pre-tool-file.sh"
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/post-tool-lint.sh"
+            "command": "bash .openclaude/hooks/post-tool-lint.sh"
           }
         ]
       }
@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/stop-dod.sh"
+            "command": "bash .openclaude/hooks/stop-dod.sh"
           }
         ]
       }

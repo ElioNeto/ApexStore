@@ -1,91 +1,90 @@
-# OPENCLAUDE.md — Diferenças OpenClaude vs Claude Code
+# OPENCLAUDE.md - Diferencas OpenClaude vs Claude Code
 
-Este arquivo documenta as diferenças de configuração entre `.claude/` (Claude Code)
-e `.openclaude/` (OpenClaude), e como a governança se comporta em cada runtime.
+Este arquivo documenta as diferencas de configuracao entre `.claude/` (Claude Code)
+e `.openclaude/` (OpenClaude), e como a governanca se comporta em cada runtime.
 
 ---
 
-## Arquitetura da governança
+## Arquitetura da governanca
 
 ```
 .claude/
-  settings.json          ← lido pelo Claude Code
-  hooks/                 ← scripts compartilhados por ambos os runtimes
-    pre-tool-file.sh
-    pre-tool-bash.sh
-    post-tool-lint.sh
-    stop-dod.sh
+  settings.json             <- lido pelo Claude Code
+  hooks/
+    pre-tool-file.sh        <- guarda de arquivos (Claude Code)
+    pre-tool-bash.sh        <- guarda de comandos (Claude Code)
+    post-tool-lint.sh       <- lint pos-edicao (Claude Code)
+    stop-dod.sh             <- Definition of Done (Claude Code)
 
 .openclaude/
-  settings.json          ← lido pelo OpenClaude (aponta para os mesmos scripts)
-  CLAUDE.md              ← contexto de projeto para o OpenClaude
-  commands/              ← comandos slash customizados
-  skills/                ← habilidades reutilizáveis
-  memory.md              ← memória persistente de sessão
-  decisions.md           ← registro de decisões arquiteturais
-  error-catalog.md       ← catálogo de erros conhecidos
-  pr-checklist.md        ← checklist de PR
+  settings.json             <- lido pelo OpenClaude
+  hooks/
+    pre-tool-file.sh        <- guarda de arquivos (OpenClaude)
+    pre-tool-bash.sh        <- guarda de comandos (OpenClaude)
+    post-tool-lint.sh       <- lint pos-edicao (OpenClaude)
+    stop-dod.sh             <- Definition of Done (OpenClaude)
+  CLAUDE.md
+  commands/
+  skills/
+  memory.md
+  decisions.md
+  error-catalog.md
+  pr-checklist.md
 ```
 
-**Decisão de design:** os scripts de hook ficam **apenas em `.claude/hooks/`**
-e são referenciados pelo `.openclaude/settings.json` via caminho relativo.
-Isso evita duplicação e garante que uma correção num script beneficia ambos os runtimes.
+**Decisao de design:** cada runtime tem seus proprios scripts em seu proprio diretorio.
+Isso evita acoplamento entre as duas ferramentas e garante que cada uma possa
+evoluir de forma independente se os formatos ou comportamentos divergirem.
 
 ---
 
-## Diferenças de comportamento
+## Diferencas de comportamento
 
 | Aspecto | Claude Code | OpenClaude |
 |---|---|---|
 | Config lida | `.claude/settings.json` | `.openclaude/settings.json` |
-| Scripts de hook | `.claude/hooks/*.sh` | `.claude/hooks/*.sh` (mesmos) |
+| Scripts de hook | `.claude/hooks/*.sh` | `.openclaude/hooks/*.sh` |
 | Matcher de ferramenta | `Edit`, `Write`, `MultiEdit`, `Bash` | `file_edit`, `file_write`, `bash` |
 | Contexto de projeto | `CLAUDE.md` na raiz | `.openclaude/CLAUDE.md` |
-| Memória de sessão | Nativa do Claude Code | `.openclaude/memory.md` |
+| Memoria de sessao | Nativa do Claude Code | `.openclaude/memory.md` |
 | Comandos slash | `.claude/commands/` | `.openclaude/commands/` |
 
-### Matchers
+### Por que matchers diferentes?
 
 O Claude Code usa nomes PascalCase para ferramentas (`Edit`, `Write`, `Bash`).
 O OpenClaude usa snake_case (`file_edit`, `file_write`, `bash`).
-Os dois `settings.json` já estão configurados com os nomes corretos para cada runtime.
+Cada `settings.json` ja esta configurado com os nomes corretos para seu runtime.
 
 ---
 
-## Compatibilidade dos hooks
+## Sincronizando mudancas entre os dois diretorios
 
-Todos os scripts foram escritos em `bash` puro com:
-- `jq` como parser JSON principal
-- `python3` como fallback se `jq` não estiver disponível
-- Degradação silenciosa se nenhum dos dois estiver disponível
+Como os scripts sao copias independentes, uma mudanca de logica deve ser aplicada
+em ambos. Para simplificar:
 
-Isso garante funcionamento em ambientes mínimos (containers, CI, máquinas novas).
-
----
-
-## Quando só um runtime está em uso
-
-Se você usa **apenas Claude Code**: o `.openclaude/` é ignorado — nenhum impacto.
-Se você usa **apenas OpenClaude**: o `.claude/settings.json` é ignorado,
-mas os scripts em `.claude/hooks/` ainda são usados via referência no `.openclaude/settings.json`.
-
-Não há necessidade de duplicar scripts. A estrutura atual é coerente para ambos.
+```bash
+cp .claude/hooks/pre-tool-file.sh   .openclaude/hooks/pre-tool-file.sh
+cp .claude/hooks/pre-tool-bash.sh   .openclaude/hooks/pre-tool-bash.sh
+cp .claude/hooks/post-tool-lint.sh  .openclaude/hooks/post-tool-lint.sh
+cp .claude/hooks/stop-dod.sh        .openclaude/hooks/stop-dod.sh
+```
 
 ---
 
 ## Adicionando um novo hook
 
 1. Crie o script em `.claude/hooks/meu-hook.sh`
-2. Adicione a entrada em `.claude/settings.json` (Claude Code)
-3. Adicione a entrada em `.openclaude/settings.json` (OpenClaude) com matcher no formato correto
-4. Documente em `CLAUDE.md` e aqui
+2. Copie para `.openclaude/hooks/meu-hook.sh`
+3. Adicione a entrada em `.claude/settings.json` (matcher PascalCase)
+4. Adicione a entrada em `.openclaude/settings.json` (matcher snake_case)
+5. Documente em `CLAUDE.md` e aqui
 
 ---
 
-## Referência rápida de eventos
+## Referencia rapida de eventos
 
 | Evento | Quando dispara | Pode bloquear? |
 |---|---|---|
 | `PreToolUse` | Antes de executar qualquer ferramenta | Sim (exit 2) |
-| `PostToolUse` | Após ferramenta executar com sucesso | Não bloqueia a ferramenta já executada |
+| `PostToolUse` | Apos ferramenta executar com sucesso | Nao bloqueia a ferramenta ja executada |
 | `Stop` | Antes do agente encerrar a resposta | Sim (exit 2) |
