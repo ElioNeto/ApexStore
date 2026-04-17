@@ -599,27 +599,37 @@ impl LsmEngine {
     ///
     /// Uses size-tiered compaction: when the number of SSTables exceeds
     /// `max_sstables`, merge the oldest `level_size` SSTables into one.
+    ///
+    /// This method will continue compacting until the SSTable count is
+    /// safely below the threshold to prevent unbounded growth.
     fn maybe_compact(&self) -> Result<()> {
-        let sstables_count = {
-            let sstables = self.sstables.read();
-            sstables.len()
-        };
+        loop {
+            let sstables_count = {
+                let sstables = self.sstables.read();
+                sstables.len()
+            };
 
-        let should_compact = sstables_count >= self.config.compaction.max_sstables
-            && sstables_count >= self.config.compaction.min_compaction_threshold;
+            // Stop if we're below the minimum threshold
+            if sstables_count < self.config.compaction.min_compaction_threshold {
+                return Ok(());
+            }
 
-        if !should_compact {
-            return Ok(());
+            // Stop if we're below the max threshold (safe zone)
+            if sstables_count < self.config.compaction.max_sstables {
+                return Ok(());
+            }
+
+            info!(
+                "Triggering compaction: {} SSTables (threshold: {}, min: {})",
+                sstables_count,
+                self.config.compaction.max_sstables,
+                self.config.compaction.min_compaction_threshold
+            );
+
+            self.compact()?;
+
+            // Continue looping to compact more if still above threshold
         }
-
-        info!(
-            "Triggering compaction: {} SSTables (threshold: {})",
-            sstables_count, self.config.compaction.max_sstables
-        );
-
-        self.compact()?;
-
-        Ok(())
     }
 
     /// Perform size-tiered compaction.
@@ -708,9 +718,10 @@ impl LsmEngine {
         sstables.insert(0, new_reader);
 
         info!(
-            "Compaction complete: merged {} SSTables into 1, total SSTables: {}",
+            "Compaction complete: merged {} SSTables into 1, total SSTables: {} (max: {})",
             old_count,
-            sstables.len()
+            sstables.len(),
+            max_sstables
         );
 
         Ok(())
@@ -1272,6 +1283,35 @@ mod tests {
         };
 
         assert!(final_count < initial_count, "All-tombstone SSTables should be removed");
+        Ok(())
+    }
+
+    #[test]
+    fn test_compaction_bounds_sstable_count() -> Result<()> {
+        let engine = create_test_engine()?;
+
+        // Insert enough data to create many SSTables
+        for i in 0..200 {
+            let key = format!("key:{}", i);
+            let value = vec![b'x'; 100];
+            engine.set(key, value)?;
+        }
+
+        // Force flush to create SSTables
+        engine.flush()?;
+
+        // Check that sstable count is bounded
+        let final_count = {
+            let sstables = engine.sstables.read();
+            sstables.len()
+        };
+
+        // Should be below max_sstables threshold (5)
+        assert!(
+            final_count < 5,
+            "SSTable count should be bounded, got {}",
+            final_count
+        );
         Ok(())
     }
 }
