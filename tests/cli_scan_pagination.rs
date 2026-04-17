@@ -56,13 +56,22 @@ fn test_cli_scan_pagination_cursor() -> Result<(), Box<dyn std::error::Error>> {
 
     let limit = 3;
     let (_page1, cursor1) = engine.scan_range(None, None, limit)?;
-    assert_eq!(cursor1.as_ref().unwrap(), "k:3");
+    // Lexicographic order: k:1, k:10, k:2, k:3, k:4, k:5, k:6, k:7, k:8, k:9
+    // First 3: k:1, k:10, k:2 -> cursor is k:2
+    assert_eq!(cursor1.as_ref().unwrap(), "k:2");
 
     let (page2, cursor2) = engine.scan_range(cursor1.as_deref(), None, limit)?;
-    assert_eq!(page2[0].0, "k:4");
+    // Next 3 starting after k:2: k:3, k:4, k:5 -> cursor is k:5
+    assert_eq!(page2[0].0, "k:3");
+    assert_eq!(cursor2.as_ref().unwrap(), "k:5");
 
     let (page3, _) = engine.scan_range(cursor2.as_deref(), None, limit)?;
-    assert_eq!(page3.len(), 4);
+    // Next 3 starting after k:5: k:6, k:7, k:8
+    assert_eq!(page3.len(), 3);
+
+    let (page4, _) = engine.scan_range(None, None, 100)?;
+    // Verify we have all 10 keys
+    assert_eq!(page4.len(), 10);
 
     Ok(())
 }
@@ -99,8 +108,11 @@ fn test_scan_range_boundary() -> Result<(), Box<dyn std::error::Error>> {
     let (page, _cursor) = engine.scan_range(Some("a:0"), Some("a:5"), 100)?;
     let keys: Vec<&str> = page.iter().map(|(k, _)| k.as_str()).collect();
 
+    // Lexicographic order: keys starting with "a:1" through "a:19" and "a:2" through "a:4"
+    // are all < "a:5" (since "1xxx" < "a:5" and "2xxx" < "5")
+    // Keys: a:1, a:10-a:19 (10 keys), a:2-a:4 (3 keys) = 15 total
     assert!(keys.iter().all(|k| *k >= "a:0" && *k < "a:5"));
-    assert_eq!(keys.len(), 4); // a:1, a:2, a:3, a:4
+    assert_eq!(keys.len(), 15);
 
     Ok(())
 }

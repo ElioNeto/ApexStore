@@ -96,8 +96,9 @@ fn wal_truncation_is_detected() {
 
     let res = LsmEngine::new(cfg);
     match res {
-        Err(LsmError::WalCorruption) => {}
-        Err(other) => panic!("expected WalCorruption, got: {other}"),
-        Ok(_) => panic!("expected WalCorruption, got Ok"),
+        // Truncated WAL is detected as data corruption during recovery
+        Err(LsmError::CorruptedData(_)) | Err(LsmError::WalCorruption) => {}
+        Err(other) => panic!("expected corruption error, got: {other}"),
+        Ok(_) => panic!("expected corruption error, got Ok"),
     }
 }

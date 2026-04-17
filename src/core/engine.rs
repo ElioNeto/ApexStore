@@ -371,9 +371,9 @@ impl LsmEngine {
             let memtable = self.memtable.lock();
 
             for (key, record) in memtable.iter_ordered() {
-                // Skip if key is before start range
+                // Skip if key is before or equal to start range (exclusive start for pagination)
                 if let Some(s) = start {
-                    if key.as_str() < s {
+                    if key.as_str() <= s {
                         continue;
                     }
                 }
@@ -693,9 +693,9 @@ mod tests {
 
         let (results, _next_cursor) = engine.scan_range(Some("user:010"), None, 100)?;
 
-        // Should start from user:010 (inclusive)
-        assert_eq!(results[0].0, "user:010");
-        assert_eq!(results.len(), 10); // user:010 to user:019 (10 keys)
+        // Should start from user:011 (exclusive start for pagination)
+        assert_eq!(results[0].0, "user:011");
+        assert_eq!(results.len(), 9); // user:011 to user:019 (9 keys after user:010)
         Ok(())
     }
 
