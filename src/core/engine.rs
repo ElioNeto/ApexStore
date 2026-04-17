@@ -336,6 +336,7 @@ impl LsmEngine {
     /// If `start` is None, start from first key.
     /// If `end` is None, continue until limit is reached.
     /// Returns (items, next_cursor) where next_cursor is the last returned key (if any).
+    #[allow(clippy::type_complexity)]
     pub fn scan_range(
         &self,
         start: Option<&str>,
@@ -421,10 +422,7 @@ impl LsmEngine {
         }
 
         // Convert to Vec with limit applied
-        let results: Vec<(String, Vec<u8>)> = seen_keys
-            .into_iter()
-            .take(limit)
-            .collect();
+        let results: Vec<(String, Vec<u8>)> = seen_keys.into_iter().take(limit).collect();
 
         // Determine next cursor for pagination
         let next_cursor = if results.len() == limit && !results.is_empty() {
@@ -438,6 +436,7 @@ impl LsmEngine {
     }
 
     /// Returns up to `limit` keys with the given prefix, starting after `cursor`.
+    #[allow(clippy::type_complexity)]
     pub fn search_prefix(
         &self,
         prefix: &str,
@@ -492,10 +491,7 @@ impl LsmEngine {
         let prefix_end = format!("{}{}", prefix, '{');
 
         for sst in sstables.iter() {
-            let sst_scan = sst.scan_range(
-                cursor.as_deref(),
-                Some(&prefix_end),
-            )?;
+            let sst_scan = sst.scan_range(cursor, Some(&prefix_end))?;
             for (key_bytes, record) in sst_scan {
                 let key = String::from_utf8(key_bytes)
                     .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
@@ -519,10 +515,7 @@ impl LsmEngine {
         }
 
         // Convert to Vec with limit
-        let results: Vec<(String, Vec<u8>)> = seen_keys
-            .into_iter()
-            .take(limit)
-            .collect();
+        let results: Vec<(String, Vec<u8>)> = seen_keys.into_iter().take(limit).collect();
 
         // Determine next cursor for pagination
         let next_cursor = if results.len() == limit {
@@ -647,7 +640,7 @@ mod tests {
             .dir_path(dir.path().to_path_buf())
             .memtable_max_size(4 * 1024) // 4KB for tests
             .build()?;
-        Ok(LsmEngine::new(config)?)
+        LsmEngine::new(config)
     }
 
     fn setup_test_data(engine: &LsmEngine) {
@@ -658,8 +651,12 @@ mod tests {
             engine.set(key, value).unwrap();
         }
         // Insert some with different prefixes
-        engine.set("product:001".to_string(), b"product1".to_vec()).unwrap();
-        engine.set("product:002".to_string(), b"product2".to_vec()).unwrap();
+        engine
+            .set("product:001".to_string(), b"product1".to_vec())
+            .unwrap();
+        engine
+            .set("product:002".to_string(), b"product2".to_vec())
+            .unwrap();
     }
 
     #[test]
@@ -694,8 +691,7 @@ mod tests {
         let engine = create_test_engine()?;
         setup_test_data(&engine);
 
-        let (results, _next_cursor) =
-            engine.scan_range(Some("user:010"), None, 100)?;
+        let (results, _next_cursor) = engine.scan_range(Some("user:010"), None, 100)?;
 
         // Should start from user:010 (inclusive)
         assert_eq!(results[0].0, "user:010");
@@ -708,8 +704,7 @@ mod tests {
         let engine = create_test_engine()?;
         setup_test_data(&engine);
 
-        let (results, _next_cursor) =
-            engine.scan_range(None, Some("user:010"), 100)?;
+        let (results, _next_cursor) = engine.scan_range(None, Some("user:010"), 100)?;
 
         // Should end before user:010 (exclusive)
         assert!(results.iter().all(|(k, _)| k.as_str() < "user:010"));
@@ -744,7 +739,7 @@ mod tests {
         assert_eq!(page2.len(), 5);
 
         // Verify no overlap
-        let mut keys1: Vec<_> = page1.iter().map(|(k, _)| k).collect();
+        let keys1: Vec<_> = page1.iter().map(|(k, _)| k).collect();
         let keys2: Vec<_> = page2.iter().map(|(k, _)| k).collect();
 
         // First page ends before second page starts
@@ -849,8 +844,7 @@ mod tests {
         assert_eq!(page1.len(), 5);
 
         // Second page using cursor
-        let (page2, _next_cursor) =
-            engine.search_prefix("user:", cursor.as_deref(), 5)?;
+        let (page2, _next_cursor) = engine.search_prefix("user:", cursor.as_deref(), 5)?;
         assert_eq!(page2.len(), 5);
 
         // Keys in second page should all be after cursor
@@ -886,8 +880,7 @@ mod tests {
         engine.delete("user:002".to_string())?;
         engine.set("user:003".to_string(), b"final".to_vec())?;
 
-        let (results, _next_cursor) =
-            engine.search_prefix("user:", None, 100)?;
+        let (results, _next_cursor) = engine.search_prefix("user:", None, 100)?;
 
         // Should have user:001 and user:003, but not user:002 (tombstone)
         assert_eq!(results.len(), 2);
@@ -919,7 +912,11 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert_eq!(results.len(), 10);
-        assert!(elapsed.as_millis() < 50, "Scan should return quickly, took {:?}", elapsed);
+        assert!(
+            elapsed.as_millis() < 50,
+            "Scan should return quickly, took {:?}",
+            elapsed
+        );
 
         Ok(())
     }
