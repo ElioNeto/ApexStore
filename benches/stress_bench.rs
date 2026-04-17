@@ -84,7 +84,7 @@ fn bench_concurrent_access(c: &mut Criterion) {
     let thread_count = [1, 2, 4];
 
     for &threads in &thread_count {
-        let mut group = c.benchmark_group(&format!("concurrent_{}_threads", threads));
+        let mut group = c.benchmark_group(format!("concurrent_{}_threads", threads));
 
         group.bench_with_input(BenchmarkId::from_parameter(threads), &threads, |b, &_t| {
             let (temp_dir, data_dir) = setup_temp_dir("concurrent");
@@ -193,7 +193,7 @@ fn bench_many_sstables(c: &mut Criterion) {
     let sstable_counts = [10, 50, 100];
 
     for &sstable_count in &sstable_counts {
-        let mut group = c.benchmark_group(&format!("many_sstables_{}", sstable_count));
+        let mut group = c.benchmark_group(format!("many_sstables_{}", sstable_count));
 
         group.bench_with_input(
             BenchmarkId::from_parameter(sstable_count),

@@ -97,5 +97,9 @@ harness = false
 name = "scan_bench"
 harness = false
 
+[[bench]]
+name = "stress_bench"
+harness = false
+
 [profile.bench]
 inherits = "release"
