@@ -288,6 +288,43 @@ mod tests {
     }
 
     #[test]
+    fn test_wal_payload_truncation_detection() {
+        let (temp_dir, wal) = create_test_wal();
+
+        // Write a record first
+        let record = LogRecord::new("test_key".to_string(), b"this_is_a_larger_value".to_vec());
+        wal.write_record(&record).unwrap();
+
+        // Truncate part of the payload (remove bytes from the middle, before checksum)
+        let wal_path = temp_dir.path().join("wal.log");
+        let mut original = fs::read(&wal_path).unwrap();
+
+        // Original structure: [len:4][payload:N][crc32:4]
+        // We want to truncate the payload, keeping len and part of payload, but removing checksum
+        // Calculate where payload starts (after len prefix at offset 4)
+        // and where checksum is at the end
+        if original.len() > 8 {
+            // Keep length prefix (4 bytes) + part of payload (reduce by 8 bytes)
+            // but remove checksum (4 bytes)
+            let keep_length = 4 + (original.len() - 8) - 4;
+            if keep_length > 4 {
+                original.truncate(keep_length);
+                fs::write(&wal_path, original).unwrap();
+            }
+        }
+
+        // Recovery should fail with truncated payload
+        let result = wal.recover();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            LsmError::CorruptedData(msg) => {
+                assert!(msg.contains("payload") || msg.contains("truncated"));
+            }
+            _ => panic!("Expected CorruptedData error"),
+        }
+    }
+
+    #[test]
     fn test_wal_multiple_records() {
         let (_temp_dir, wal) = create_test_wal();
 
