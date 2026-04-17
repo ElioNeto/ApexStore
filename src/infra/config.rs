@@ -358,7 +358,9 @@ impl LsmConfigBuilder {
             },
             compaction: CompactionConfig {
                 level_size: self.level_size.unwrap_or(defaults.compaction.level_size),
-                max_sstables: self.max_sstables.unwrap_or(defaults.compaction.max_sstables),
+                max_sstables: self
+                    .max_sstables
+                    .unwrap_or(defaults.compaction.max_sstables),
                 min_compaction_threshold: self
                     .min_compaction_threshold
                     .unwrap_or(defaults.compaction.min_compaction_threshold),
@@ -577,6 +579,9 @@ mod tests {
         assert_eq!(config.compaction.level_size, 8);
         assert_eq!(config.compaction.max_sstables, 32);
         assert_eq!(config.compaction.min_compaction_threshold, 8);
-        assert!(matches!(config.compaction.strategy, CompactionStrategy::Leveled));
+        assert!(matches!(
+            config.compaction.strategy,
+            CompactionStrategy::Leveled
+        ));
     }
 }
