@@ -1,4 +1,5 @@
 use crate::{LsmConfig, LsmEngine};
+use crate::core::engine::{MAX_SCAN_LIMIT, DEFAULT_SCAN_LIMIT};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
@@ -118,7 +119,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let prefix_mode = parts.len() > 2 && parts[2] == "--prefix";
 
                 let results = if prefix_mode {
-                    engine.search_prefix(query)
+                    engine.search_prefix_legacy(query)
                 } else {
                     engine.search(query)
                 };
@@ -234,26 +235,107 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             "SCAN" => {
-                if parts.len() < 2 {
-                    println!("❌ Usage: SCAN <prefix>");
-                    continue;
-                }
-                let prefix = parts[1];
+                // SCAN [start_key] [end_key] [limit]
+                let start_key = if parts.len() > 1 && !parts[1].is_empty() {
+                    Some(parts[1].to_string())
+                } else {
+                    None
+                };
 
-                // Use the search_prefix method now available
-                match engine.search_prefix(prefix) {
-                    Ok(records) => {
-                        if records.is_empty() {
-                            println!("⚠ No records found with prefix '{}'", prefix);
-                        } else {
-                            println!("✓ {} record(s) with prefix '{}':\n", records.len(), prefix);
-                            for (key, value) in records {
-                                let value_str = String::from_utf8_lossy(&value);
-                                println!("  {} = {}", key, value_str);
-                            }
+                let end_key = if parts.len() > 2 && !parts[2].is_empty() {
+                    Some(parts[2].to_string())
+                } else {
+                    None
+                };
+
+                let limit: usize = if parts.len() > 3 && !parts[3].is_empty() {
+                    match parts[3].parse() {
+                        Ok(n) if n > 0 => n,
+                        Ok(_) => {
+                            println!("❌ Usage: SCAN [start_key] [end_key] [limit]");
+                            println!("   limit must be greater than 0");
+                            continue;
+                        }
+                        Err(_) => {
+                            println!("❌ Usage: SCAN [start_key] [end_key] [limit]");
+                            continue;
                         }
                     }
-                    Err(e) => println!("❌ Error: {}", e),
+                } else {
+                    DEFAULT_SCAN_LIMIT
+                };
+
+                // Validate limit
+                if limit > MAX_SCAN_LIMIT {
+                    println!("❌ Limit {} exceeds maximum allowed limit {}", limit, MAX_SCAN_LIMIT);
+                    continue;
+                }
+
+                // Validate start < end
+                if let (Some(ref s), Some(ref e)) = (&start_key, &end_key) {
+                    if s >= e {
+                        println!("❌ start_key '{}' must be less than end_key '{}'", s, e);
+                        continue;
+                    }
+                }
+
+                println!("Scanning range [{:?}, {:?}) with limit {}...", start_key, end_key, limit);
+
+                // Fetch pages with pagination
+                let mut fetched = 0;
+                let mut current_start: Option<String> = start_key;
+
+                loop {
+                    match engine.scan_range(
+                        current_start.as_deref(),
+                        end_key.as_ref().map(|s| s.as_str()),
+                        limit,
+                    ) {
+                        Ok((records, next_cursor)) => {
+                            if records.is_empty() {
+                                if fetched == 0 {
+                                    println!("⚠ No records found in range");
+                                }
+                                break;
+                            }
+
+                            for (key, value) in &records {
+                                let value_str = String::from_utf8_lossy(value);
+                                println!("  {} = {}", key, value_str);
+                                fetched += 1;
+                            }
+
+                            // If we got fewer than limit records, we're done
+                            if records.len() < limit {
+                                break;
+                            }
+
+                            // If no more cursor, we're done
+                            if next_cursor.is_none() {
+                                break;
+                            }
+
+                            // Move to next page: start from cursor
+                            // The cursor is the last key of this page, so we include it
+                            current_start = next_cursor;
+                        }
+                        Err(e) => {
+                            println!("❌ Error: {}", e);
+                            break;
+                        }
+                    }
+
+                    // Safety: prevent infinite loop
+                    if fetched > 1_000_000 {
+                        println!("⚠ Stopping after 1M records to prevent infinite loop");
+                        break;
+                    }
+                }
+
+                if fetched == 0 {
+                    println!("⚠ No records found");
+                } else {
+                    println!("✓ {} total record(s) found", fetched);
                 }
             }
 
@@ -290,23 +372,183 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            "KEYS" => match engine.keys() {
-                Ok(keys) => {
-                    if keys.is_empty() {
-                        println!("⚠ No keys found");
-                    } else {
-                        println!("Total keys: {}\n", keys.len());
-                        for (i, key) in keys.iter().enumerate() {
-                            println!("  {}. {}", i + 1, key);
+            "KEYS" => {
+                // KEYS [prefix] [limit]
+                let prefix = if parts.len() > 1 && !parts[1].is_empty() {
+                    Some(parts[1].to_string())
+                } else {
+                    None
+                };
+
+                let limit: usize = if parts.len() > 2 && !parts[2].is_empty() {
+                    match parts[2].parse() {
+                        Ok(n) if n > 0 => n,
+                        Ok(_) => {
+                            println!("❌ Usage: KEYS [prefix] [limit]");
+                            println!("   limit must be greater than 0");
+                            continue;
+                        }
+                        Err(_) => {
+                            println!("❌ Usage: KEYS [prefix] [limit]");
+                            continue;
                         }
                     }
+                } else {
+                    DEFAULT_SCAN_LIMIT
+                };
+
+                if limit > MAX_SCAN_LIMIT {
+                    println!("❌ Limit {} exceeds maximum allowed limit {}", limit, MAX_SCAN_LIMIT);
+                    continue;
                 }
-                Err(e) => println!("❌ Error: {}", e),
+
+                if let Some(ref p) = prefix {
+                    println!("Searching keys with prefix '{}' (limit {})...", p, limit);
+
+                    // Use search_prefix with pagination
+                    let mut fetched = 0;
+                    let mut cursor: Option<String> = None;
+
+                    loop {
+                        match engine.search_prefix(p.as_str(), cursor.as_deref(), limit) {
+                            Ok((records, next_cursor)) => {
+                                if records.is_empty() {
+                                    break;
+                                }
+
+                                for (key, _value) in &records {
+                                    println!("  {}", key);
+                                    fetched += 1;
+                                }
+
+                                if next_cursor.is_none() || records.len() < limit {
+                                    break;
+                                }
+                                cursor = next_cursor;
+                            }
+                            Err(e) => {
+                                println!("❌ Error: {}", e);
+                                break;
+                            }
+                        }
+                    }
+
+                    if fetched == 0 {
+                        println!("⚠ No keys found");
+                    } else {
+                        println!("✓ {} total key(s) found", fetched);
+                    }
+                } else {
+                    println!("Listing all keys (limit {})...", limit);
+
+                    // List all keys with pagination
+                    let mut fetched = 0;
+                    let mut cursor: Option<String> = None;
+
+                    loop {
+                        match engine.scan_range(None, None, limit) {
+                            Ok((records, next_cursor)) => {
+                                if records.is_empty() {
+                                    break;
+                                }
+
+                                for (key, _value) in &records {
+                                    println!("  {}", key);
+                                    fetched += 1;
+                                }
+
+                                if next_cursor.is_none() || records.len() < limit {
+                                    break;
+                                }
+                                cursor = next_cursor;
+                            }
+                            Err(e) => {
+                                println!("❌ Error: {}", e);
+                                break;
+                            }
+                        }
+                    }
+
+                    if fetched == 0 {
+                        println!("⚠ No keys found");
+                    } else {
+                        println!("✓ {} total key(s) found", fetched);
+                    }
+                }
             },
 
             "COUNT" => match engine.count() {
                 Ok(count) => println!("✓ Total active records: {}", count),
                 Err(e) => println!("❌ Error: {}", e),
+            },
+
+            "PREFIX" => {
+                // PREFIX <prefix> [limit]
+                if parts.len() < 2 {
+                    println!("❌ Usage: PREFIX <prefix> [limit]");
+                    continue;
+                }
+
+                let prefix = parts[1].to_string();
+
+                let limit: usize = if parts.len() > 2 && !parts[2].is_empty() {
+                    match parts[2].parse() {
+                        Ok(n) if n > 0 => n,
+                        Ok(_) => {
+                            println!("❌ Usage: PREFIX <prefix> [limit]");
+                            println!("   limit must be greater than 0");
+                            continue;
+                        }
+                        Err(_) => {
+                            println!("❌ Usage: PREFIX <prefix> [limit]");
+                            continue;
+                        }
+                    }
+                } else {
+                    DEFAULT_SCAN_LIMIT
+                };
+
+                if limit > MAX_SCAN_LIMIT {
+                    println!("❌ Limit {} exceeds maximum allowed limit {}", limit, MAX_SCAN_LIMIT);
+                    continue;
+                }
+
+                println!("Searching keys with prefix '{}' (limit {})...", prefix, limit);
+
+                // Use search_prefix with pagination
+                let mut fetched = 0;
+                let mut cursor: Option<String> = None;
+
+                loop {
+                    match engine.search_prefix(prefix.as_str(), cursor.as_deref(), limit) {
+                        Ok((records, next_cursor)) => {
+                            if records.is_empty() {
+                                break;
+                            }
+
+                            for (key, value) in &records {
+                                let value_str = String::from_utf8_lossy(value);
+                                println!("  {} = {}", key, value_str);
+                                fetched += 1;
+                            }
+
+                            if next_cursor.is_none() || records.len() < limit {
+                                break;
+                            }
+                            cursor = next_cursor;
+                        }
+                        Err(e) => {
+                            println!("❌ Error: {}", e);
+                            break;
+                        }
+                    }
+                }
+
+                if fetched == 0 {
+                    println!("⚠ No keys found");
+                } else {
+                    println!("✓ {} total key(s) found", fetched);
+                }
             },
 
             _ => {
@@ -325,9 +567,10 @@ fn print_help() {
     println!("  GET <key>                 - Retrieve the value of a key");
     println!("  DELETE <key>              - Remove a key (creates tombstone)");
     println!("  SEARCH <query> [--prefix] - Search records (optionally by prefix)");
-    println!("  SCAN <prefix>             - List records with specific prefix");
+    println!("  SCAN [start] [end] [limit]- Scan range of keys (lexicographic)");
+    println!("  KEYS [prefix] [limit]     - List keys (optionally filtered by prefix)");
+    println!("  PREFIX <prefix> [limit]   - Shortcut: list keys with prefix");
     println!("  ALL                       - List all database records");
-    println!("  KEYS                      - List only the keys");
     println!("  COUNT                     - Count active records");
     println!("  STATS [ALL]               - Display statistics (basic or detailed)");
     println!("  BATCH <count>             - Insert N test records");
@@ -390,7 +633,7 @@ fn run_demo(engine: &LsmEngine) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("   - SEARCH user: --prefix");
-    match engine.search_prefix("user:") {
+    match engine.search_prefix_legacy("user:") {
         Ok(results) => println!("     Found {} records", results.len()),
         Err(e) => println!("     Error: {}", e),
     }

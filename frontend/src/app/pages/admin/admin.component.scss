@@ -1,0 +1,260 @@
+.page {
+  padding: 32px;
+  max-width: 1100px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 28px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.page-subtitle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-top: 4px;
+
+  code {
+    font-family: var(--font-mono);
+    background: var(--bg-secondary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+  }
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.card-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.card-body {
+  padding: 20px;
+}
+
+.row-inline {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.op-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.perms-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.perm-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+
+  input {
+    display: none;
+  }
+
+  &.selected {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+    color: var(--accent);
+  }
+}
+
+.token-active-badge {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: var(--green);
+}
+
+.created-token-box {
+  margin-top: 16px;
+  background: var(--bg-primary);
+  border: 1px solid rgba(249, 115, 22, 0.4);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.created-token-label {
+  font-size: 0.82rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.created-token-value {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.loading-state {
+  display: flex;
+  justify-content: center;
+  padding: 60px;
+}
+
+.empty-state {
+  padding: 48px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.auth-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 24px;
+  background: var(--red-dim);
+
+  strong {
+    display: block;
+    color: var(--red);
+    margin-bottom: 4px;
+  }
+
+  p {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+.tokens-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  th {
+    padding: 10px 16px;
+    text-align: left;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.875rem;
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  tr.expired td {
+    opacity: 0.5;
+  }
+}
+
+.name-cell {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.id-cell {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.time-cell {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.perms-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.perm-chip {
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.perm-read {
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+
+.perm-write {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.perm-delete {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.perm-admin {
+  background: rgba(168, 85, 247, 0.12);
+  color: var(--purple);
+}

@@ -1,0 +1,64 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Statistics</h1>
+      <p class="page-subtitle">Real-time telemetry from the storage engine</p>
+    </div>
+    <button class="btn btn-primary" (click)="loadStats()" [disabled]="loading()">
+      @if (loading()) {
+      <span class="spinner"></span>
+      } @else {
+      <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      Refresh
+      }
+    </button>
+  </div>
+
+  @if (loading() && sections().length === 0) {
+  <div class="loading-state">
+    <span class="spinner" style="width:32px;height:32px;border-width:3px"></span>
+    <p>Loading statistics...</p>
+  </div>
+  }
+
+  @if (error()) {
+  <div class="error-banner">
+    <hugeicons-icon [icon]="LeftTriangleIcon" [size]="20" [strokeWidth]="1.5" />
+    <div>
+      <strong>Could not connect to ApexStore API</strong>
+      <p>Make sure the backend is running on
+        <code>{{ apiUrl }}</code>
+      </p>
+    </div>
+    <button class="btn btn-secondary btn-sm" (click)="loadStats()">Retry</button>
+  </div>
+  }
+
+  @if (sections().length > 0) {
+  <div class="sections-grid">
+    @for (section of sections(); track section.label) {
+    <div class="section-card" [style.--accent-color]="section.color">
+      <div class="section-header">
+        <hugeicons-icon [icon]="section.icon" [size]="20" [strokeWidth]="1.5" class="section-icon" />
+        <span class="section-label">{{ section.label }}</span>
+      </div>
+      <div class="section-body">
+        @for (item of section.data | keyvalue; track item.key) {
+        <div class="stat-row">
+          <span class="stat-key">{{ item.key }}</span>
+          <span class="stat-val">{{ formatValue(item.value) }}</span>
+        </div>
+        }
+      </div>
+    </div>
+    }
+  </div>
+
+  <div class="card raw-card">
+    <div class="card-header">
+      <span class="card-title">Raw JSON Response</span>
+    </div>
+    <pre class="raw-json">{{ rawData() | json }}</pre>
+  </div>
+  }
+</div>

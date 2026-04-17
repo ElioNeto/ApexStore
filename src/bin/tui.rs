@@ -212,7 +212,7 @@ impl App {
                 let query = parts[1];
                 let prefix_mode = parts.len() > 2 && parts[2] == "--prefix";
                 let result = if prefix_mode {
-                    self.engine.search_prefix(query)
+                    self.engine.search_prefix_legacy(query)
                 } else {
                     self.engine.search(query)
                 };
@@ -243,7 +243,7 @@ impl App {
                     self.log_push("\u{274c} Usage: SCAN <prefix>", C_ERR);
                     return;
                 }
-                match self.engine.search_prefix(parts[1]) {
+                match self.engine.search_prefix_legacy(parts[1]) {
                     Ok(rows) if rows.is_empty() => self.log_push(
                         format!("\u{26a0}  No records with prefix '{}'", parts[1]),
                         C_WARN,

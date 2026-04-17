@@ -8,11 +8,13 @@ use actix_web::{
     delete, dev::ServiceRequest, get, post, web, App, Error, HttpResponse, HttpServer, Responder,
 };
 use serde::{Deserialize, Serialize};
+use crate::core::engine::{MAX_SCAN_LIMIT, DEFAULT_SCAN_LIMIT};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::core::engine::LsmEngine;
 use crate::features::FeatureClient;
+use crate::infra::error::LsmError;
 
 pub use config::{AuthConfig, ServerConfig};
 
@@ -48,6 +50,38 @@ pub struct SearchQuery {
     pub q: String,
     #[serde(default)]
     pub prefix: bool,
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+fn default_limit() -> usize { DEFAULT_SCAN_LIMIT }
+
+#[derive(Deserialize)]
+pub struct ScanQuery {
+    #[serde(default)]
+    pub start_key: Option<String>,
+    #[serde(default)]
+    pub end_key: Option<String>,
+    #[serde(default = "default_scan_limit")]
+    pub limit: usize,
+}
+
+fn default_scan_limit() -> usize { DEFAULT_SCAN_LIMIT }
+
+/// Response format for paginated queries
+#[derive(Serialize)]
+pub struct PaginatedResponse {
+    pub data: Vec<KeyValueRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct KeyValueRecord {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Serialize)]
@@ -240,64 +274,122 @@ async fn list_keys(data: web::Data<AppState>) -> impl Responder {
 
 #[get("/keys/search")]
 async fn search_keys(query: web::Query<SearchQuery>, data: web::Data<AppState>) -> impl Responder {
-    let results = if query.prefix {
-        data.engine.search_prefix(&query.q)
-    } else {
-        data.engine.search(&query.q)
-    };
+    // Always use prefix search with pagination
+    // Validate limit
+    if query.limit == 0 {
+        return HttpResponse::BadRequest().json(ApiResponse {
+            success: false,
+            message: "limit must be greater than 0".to_string(),
+            data: None,
+        });
+    }
+    if query.limit > MAX_SCAN_LIMIT {
+        return HttpResponse::TooManyRequests().json(ApiResponse {
+            success: false,
+            message: format!("limit {} exceeds maximum allowed limit {}", query.limit, MAX_SCAN_LIMIT),
+            data: None,
+        });
+    }
 
-    match results {
-        Ok(records) => {
-            let records_json: Vec<serde_json::Value> = records
-                .into_iter()
-                .map(|(k, v): (String, Vec<u8>)| {
-                    serde_json::json!({
-                        "key": k,
-                        "value": String::from_utf8_lossy(&v).to_string()
+    match data.engine.search_prefix(&query.q, query.cursor.as_deref(), query.limit) {
+        Ok((records, next_cursor)) => {
+            let records_json: PaginatedResponse = PaginatedResponse {
+                data: records
+                    .into_iter()
+                    .map(|(k, v): (String, Vec<u8>)| KeyValueRecord {
+                        key: k,
+                        value: String::from_utf8_lossy(&v).to_string(),
                     })
-                })
-                .collect();
+                    .collect(),
+                next_cursor,
+            };
 
             HttpResponse::Ok().json(ApiResponse {
                 success: true,
-                message: format!("{} keys found matching '{}'", records_json.len(), query.q),
-                data: Some(serde_json::json!({ "records": records_json })),
+                message: format!("{} keys found matching '{}'", records_json.data.len(), query.q),
+                data: Some(serde_json::to_value(records_json).unwrap_or_default()),
             })
         }
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
-            success: false,
-            message: format!("Error: {}", e),
-            data: None,
-        }),
+        Err(e) => match e {
+            LsmError::InvalidArgument(msg) => HttpResponse::BadRequest().json(ApiResponse {
+                success: false,
+                message: msg,
+                data: None,
+            }),
+            _ => HttpResponse::InternalServerError().json(ApiResponse {
+                success: false,
+                message: format!("Error: {}", e),
+                data: None,
+            }),
+        },
     }
 }
 
 #[get("/scan")]
-async fn scan_all(data: web::Data<AppState>) -> impl Responder {
-    match data.engine.scan() {
-        Ok(records) => {
-            let records_json: Vec<serde_json::Value> = records
-                .into_iter()
-                .filter(|(k, _): &(String, Vec<u8>)| !k.starts_with("feature:"))
-                .map(|(k, v): (String, Vec<u8>)| {
-                    serde_json::json!({
-                        "key": k,
-                        "value": String::from_utf8_lossy(&v).to_string()
+async fn scan_all(query: web::Query<ScanQuery>, data: web::Data<AppState>) -> impl Responder {
+    // Validate limit
+    if query.limit == 0 {
+        return HttpResponse::BadRequest().json(ApiResponse {
+            success: false,
+            message: "limit must be greater than 0".to_string(),
+            data: None,
+        });
+    }
+    if query.limit > MAX_SCAN_LIMIT {
+        return HttpResponse::TooManyRequests().json(ApiResponse {
+            success: false,
+            message: format!("limit {} exceeds maximum allowed limit {}", query.limit, MAX_SCAN_LIMIT),
+            data: None,
+        });
+    }
+
+    // Validate start_key < end_key if both provided
+    if let (Some(ref start), Some(ref end)) = (&query.start_key, &query.end_key) {
+        if start >= end {
+            return HttpResponse::BadRequest().json(ApiResponse {
+                success: false,
+                message: format!("start_key '{}' must be less than end_key '{}'", start, end),
+                data: None,
+            });
+        }
+    }
+
+    match data.engine.scan_range(
+        query.start_key.as_deref(),
+        query.end_key.as_deref(),
+        query.limit,
+    ) {
+        Ok((records, next_cursor)) => {
+            let records_json: PaginatedResponse = PaginatedResponse {
+                data: records
+                    .into_iter()
+                    .filter(|(k, _): &(String, Vec<u8>)| !k.starts_with("feature:"))
+                    .map(|(k, v): (String, Vec<u8>)| KeyValueRecord {
+                        key: k,
+                        value: String::from_utf8_lossy(&v).to_string(),
                     })
-                })
-                .collect();
+                    .collect(),
+                next_cursor,
+            };
 
             HttpResponse::Ok().json(ApiResponse {
                 success: true,
-                message: format!("{} records found", records_json.len()),
-                data: Some(serde_json::json!({ "records": records_json })),
+                message: format!("{} records found", records_json.data.len()),
+                data: Some(serde_json::to_value(records_json).unwrap_or_default()),
             })
         }
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
-            success: false,
-            message: format!("Error: {}", e),
-            data: None,
-        }),
+        Err(e) => match e {
+            LsmError::InvalidArgument(msg) => HttpResponse::BadRequest().json(ApiResponse {
+                success: false,
+                message: msg,
+                data: None,
+            }),
+            _ => HttpResponse::InternalServerError().json(ApiResponse {
+                success: false,
+                message: format!("Error: {}", e),
+                data: None,
+            }),
+        },
     }
 }
 
@@ -404,7 +496,7 @@ async fn list_tokens(data: web::Data<AppState>) -> impl Responder {
                 .map(|t| TokenResponse {
                     id: t.id,
                     name: t.name,
-                    token: None, // Never expose raw token
+                    token: None,
                     created_at: t.created_at,
                     expires_at: t.expires_at,
                     permissions: t.permissions,
@@ -450,7 +542,6 @@ async fn auth_validator(
     req: ServiceRequest,
     credentials: actix_web_httpauth::extractors::bearer::BearerAuth,
 ) -> Result<ServiceRequest, (Error, ServiceRequest)> {
-    // Extract data before any moves
     let auth_enabled = {
         let data = req.app_data::<web::Data<AppState>>().unwrap();
         data.auth_enabled
@@ -467,6 +558,32 @@ async fn auth_validator(
 
     auth::middleware::bearer_validator(req, token_manager, Some(credentials.token().to_string()))
         .await
+}
+
+fn build_cors() -> Cors {
+    Cors::default()
+        .allow_any_origin()
+        .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"])
+        .allow_any_header()
+        .supports_credentials()
+        .max_age(3600)
+}
+
+fn register_services(app: actix_web::App<impl actix_web::dev::ServiceFactory<actix_web::dev::ServiceRequest, Config = (), Response = actix_web::dev::ServiceResponse, Error = actix_web::Error, InitError = ()>>) -> actix_web::App<impl actix_web::dev::ServiceFactory<actix_web::dev::ServiceRequest, Config = (), Response = actix_web::dev::ServiceResponse, Error = actix_web::Error, InitError = ()>> {
+    // Register static routes BEFORE dynamic ones to avoid /keys/{key} swallowing /keys/search
+    app
+        .service(health)
+        .service(get_stats)
+        .service(get_stats_all)
+        .service(list_keys)       // GET  /keys         (static, must come before /keys/{key})
+        .service(search_keys)     // GET  /keys/search  (static, must come before /keys/{key})
+        .service(set_key)         // POST /keys
+        .service(set_batch)       // POST /keys/batch
+        .service(get_key)         // GET  /keys/{key}   (dynamic, registered last)
+        .service(delete_key)      // DELETE /keys/{key}
+        .service(scan_all)
+        .service(list_features)
+        .service(set_feature)
 }
 
 pub async fn start_server(engine: LsmEngine, server_config: ServerConfig) -> std::io::Result<()> {
@@ -494,16 +611,16 @@ pub async fn start_server(engine: LsmEngine, server_config: ServerConfig) -> std
     let port = server_config.port;
 
     HttpServer::new(move || {
-        let cors = Cors::default()
-            .allow_any_origin()
-            .allow_any_method()
-            .allow_any_header();
+        let cors = build_cors();
 
         #[cfg(feature = "api")]
-        let auth_middleware =
-            actix_web_httpauth::middleware::HttpAuthentication::bearer(auth_validator);
+        let auth_middleware = if auth_enabled {
+            Some(actix_web_httpauth::middleware::HttpAuthentication::bearer(auth_validator))
+        } else {
+            None
+        };
 
-        let mut app = App::new()
+        let app = App::new()
             .wrap(cors)
             .app_data(web::Data::new(AppState {
                 engine: Arc::clone(&engine),
@@ -516,53 +633,63 @@ pub async fn start_server(engine: LsmEngine, server_config: ServerConfig) -> std
                 auth_enabled: false,
             }))
             .app_data(web::JsonConfig::default().limit(max_json))
-            .app_data(web::PayloadConfig::default().limit(max_raw))
-            // Public endpoints (no auth)
-            .service(health);
+            .app_data(web::PayloadConfig::default().limit(max_raw));
 
-        // Protected endpoints (with conditional auth)
         #[cfg(feature = "api")]
-        {
-            app = app
-                .service(
-                    web::scope("")
-                        .wrap(auth_middleware.clone())
-                        .service(get_stats)
-                        .service(get_stats_all)
-                        .service(get_key)
-                        .service(set_key)
-                        .service(set_batch)
-                        .service(delete_key)
-                        .service(list_keys)
-                        .service(search_keys)
-                        .service(scan_all)
-                        .service(list_features)
-                        .service(set_feature),
-                )
-                .service(
-                    web::scope("/admin")
-                        .wrap(auth_middleware)
-                        .service(create_token)
-                        .service(list_tokens)
-                        .service(delete_token),
-                );
-        }
+        let app = {
+            if let Some(ref middleware) = auth_middleware {
+                let scoped = web::scope("")
+                    .wrap(middleware.clone())
+                    .service(get_stats)
+                    .service(get_stats_all)
+                    .service(list_keys)
+                    .service(search_keys)
+                    .service(set_key)
+                    .service(set_batch)
+                    .service(get_key)
+                    .service(delete_key)
+                    .service(scan_all)
+                    .service(list_features)
+                    .service(set_feature);
+
+                let admin_scope = web::scope("/admin")
+                    .wrap(auth_middleware.clone().expect("Auth should be enabled here"))
+                    .service(create_token)
+                    .service(list_tokens)
+                    .service(delete_token);
+
+                app.service(health).service(scoped).service(admin_scope)
+            } else {
+                app
+                    .service(health)
+                    .service(get_stats)
+                    .service(get_stats_all)
+                    .service(list_keys)
+                    .service(search_keys)
+                    .service(set_key)
+                    .service(set_batch)
+                    .service(get_key)
+                    .service(delete_key)
+                    .service(scan_all)
+                    .service(list_features)
+                    .service(set_feature)
+            }
+        };
 
         #[cfg(not(feature = "api"))]
-        {
-            app = app
-                .service(get_stats)
-                .service(get_stats_all)
-                .service(get_key)
-                .service(set_key)
-                .service(set_batch)
-                .service(delete_key)
-                .service(list_keys)
-                .service(search_keys)
-                .service(scan_all)
-                .service(list_features)
-                .service(set_feature);
-        }
+        let app = app
+            .service(health)
+            .service(get_stats)
+            .service(get_stats_all)
+            .service(list_keys)
+            .service(search_keys)
+            .service(set_key)
+            .service(set_batch)
+            .service(get_key)
+            .service(delete_key)
+            .service(scan_all)
+            .service(list_features)
+            .service(set_feature);
 
         app
     })

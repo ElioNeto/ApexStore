@@ -8,13 +8,17 @@ use crate::storage::reader::SstableReader;
 use crate::storage::wal::WriteAheadLog;
 
 use parking_lot::{Mutex, RwLock};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tracing::{info, warn};
+
+/// Maximum number of records to return in a single scan/prefix search
+pub const MAX_SCAN_LIMIT: usize = 10000;
+pub const DEFAULT_SCAN_LIMIT: usize = 1000;
 
 #[derive(Serialize)]
 pub struct LsmStats {
@@ -260,7 +264,9 @@ impl LsmEngine {
             .collect())
     }
 
-    pub fn search_prefix(&self, prefix: &str) -> Result<Vec<(String, Vec<u8>)>> {
+    /// Legacy prefix search (full scan, no pagination) - kept for backwards compatibility
+    #[deprecated(since = "2.2.0", note = "Use search_prefix with pagination instead")]
+    pub fn search_prefix_legacy(&self, prefix: &str) -> Result<Vec<(String, Vec<u8>)>> {
         Ok(self
             .scan()?
             .into_iter()
@@ -320,6 +326,213 @@ impl LsmEngine {
 
     pub fn count(&self) -> Result<usize> {
         Ok(self.scan()?.len())
+    }
+
+    // -------------------------------------------------------------------------
+    // Range Scan & Prefix Search
+    // -------------------------------------------------------------------------
+
+    /// Returns up to `limit` key-value pairs in range [start, end).
+    /// If `start` is None, start from first key.
+    /// If `end` is None, continue until limit is reached.
+    /// Returns (items, next_cursor) where next_cursor is the last returned key (if any).
+    pub fn scan_range(
+        &self,
+        start: Option<&str>,
+        end: Option<&str>,
+        limit: usize,
+    ) -> Result<(Vec<(String, Vec<u8>)>, Option<String>)> {
+        if limit == 0 {
+            return Err(LsmError::InvalidArgument(
+                "limit must be greater than 0".to_string(),
+            ));
+        }
+        if limit > MAX_SCAN_LIMIT {
+            return Err(LsmError::InvalidArgument(format!(
+                "limit {} exceeds maximum allowed limit {}",
+                limit, MAX_SCAN_LIMIT
+            )));
+        }
+        // Validate end > start if both are provided
+        if let (Some(start_key), Some(end_key)) = (start, end) {
+            if start_key >= end_key {
+                return Err(LsmError::InvalidArgument(format!(
+                    "start_key '{}' must be less than end_key '{}'",
+                    start_key, end_key
+                )));
+            }
+        }
+
+        let mut seen_keys: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+
+        // Collect from MemTable (in sorted order)
+        {
+            let memtable = self.memtable.lock();
+
+            for (key, record) in memtable.iter_ordered() {
+                // Skip if key is before start range
+                if let Some(s) = start {
+                    if key.as_str() < s {
+                        continue;
+                    }
+                }
+
+                // Stop if we've reached end range
+                if let Some(e) = end {
+                    if key.as_str() >= e {
+                        break;
+                    }
+                }
+
+                // Skip tombstones
+                if record.is_deleted {
+                    continue;
+                }
+
+                // MemTable wins over SSTable for same key
+                seen_keys.insert(key.clone(), record.value.clone());
+            }
+        }
+
+        // Collect from SSTables (oldest first to ensure MemTable wins by insertion order)
+        let sstables = self.sstables.read();
+        for sst in sstables.iter() {
+            // Use efficient range scan with sparse index
+            let sst_scan = sst.scan_range(start, end)?;
+            for (key_bytes, record) in sst_scan {
+                let key = String::from_utf8(key_bytes)
+                    .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
+
+                // Skip if already seen (MemTable wins) or if we have enough
+                if seen_keys.contains_key(&key) {
+                    continue;
+                }
+
+                if record.is_deleted {
+                    continue;
+                }
+
+                seen_keys.insert(key, record.value);
+            }
+            // Check if we've reached limit across all SSTables
+            if seen_keys.len() >= limit {
+                break;
+            }
+        }
+
+        // Convert to Vec with limit applied
+        let results: Vec<(String, Vec<u8>)> = seen_keys
+            .into_iter()
+            .take(limit)
+            .collect();
+
+        // Determine next cursor for pagination
+        let next_cursor = if results.len() == limit && !results.is_empty() {
+            // Could be more results; return last key as cursor
+            results.last().map(|(k, _)| k.clone())
+        } else {
+            None
+        };
+
+        Ok((results, next_cursor))
+    }
+
+    /// Returns up to `limit` keys with the given prefix, starting after `cursor`.
+    pub fn search_prefix(
+        &self,
+        prefix: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<(Vec<(String, Vec<u8>)>, Option<String>)> {
+        if limit == 0 {
+            return Err(LsmError::InvalidArgument(
+                "limit must be greater than 0".to_string(),
+            ));
+        }
+        if limit > MAX_SCAN_LIMIT {
+            return Err(LsmError::InvalidArgument(format!(
+                "limit {} exceeds maximum allowed limit {}",
+                limit, MAX_SCAN_LIMIT
+            )));
+        }
+
+        let mut seen_keys: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+
+        // Collect from MemTable (sorted order)
+        {
+            let memtable = self.memtable.lock();
+
+            for (key, record) in memtable.iter_ordered() {
+                // Skip keys before cursor (cursor is exclusive)
+                if let Some(cur) = cursor {
+                    if key.as_str() <= cur {
+                        continue;
+                    }
+                }
+
+                // Check: key must have the prefix
+                if !key.starts_with(prefix) {
+                    continue;
+                }
+
+                // Skip tombstones
+                if record.is_deleted {
+                    continue;
+                }
+
+                seen_keys.insert(key.clone(), record.value.clone());
+            }
+        }
+
+        // Collect from SSTables
+        let sstables = self.sstables.read();
+
+        // Calculate end key for prefix range: prefix + '{' (next char after 'z')
+        // This captures all keys starting with this prefix
+        let prefix_end = format!("{}{}", prefix, '{');
+
+        for sst in sstables.iter() {
+            let sst_scan = sst.scan_range(
+                cursor.as_deref(),
+                Some(&prefix_end),
+            )?;
+            for (key_bytes, record) in sst_scan {
+                let key = String::from_utf8(key_bytes)
+                    .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
+
+                // Check: key must have the prefix (filter any edge cases)
+                if !key.starts_with(prefix) {
+                    continue;
+                }
+
+                // Skip if already in seen_keys (MemTable wins)
+                if seen_keys.contains_key(&key) {
+                    continue;
+                }
+
+                if record.is_deleted {
+                    continue;
+                }
+
+                seen_keys.insert(key, record.value);
+            }
+        }
+
+        // Convert to Vec with limit
+        let results: Vec<(String, Vec<u8>)> = seen_keys
+            .into_iter()
+            .take(limit)
+            .collect();
+
+        // Determine next cursor for pagination
+        let next_cursor = if results.len() == limit {
+            // Could be more results; return last key as cursor
+            results.last().map(|(k, _)| k.clone())
+        } else {
+            None
+        };
+
+        Ok((results, next_cursor))
     }
 
     // -------------------------------------------------------------------------
@@ -420,5 +633,294 @@ impl LsmEngine {
             total_records: (mem_records as u64) + sst_records_total,
             memtable_max_size: self.config.core.memtable_max_size / 1024,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn create_test_engine() -> Result<LsmEngine> {
+        let dir = tempdir()?;
+        let config = LsmConfig::builder()
+            .dir_path(dir.path().to_path_buf())
+            .memtable_max_size(4 * 1024) // 4KB for tests
+            .build()?;
+        Ok(LsmEngine::new(config)?)
+    }
+
+    fn setup_test_data(engine: &LsmEngine) {
+        // Insert keys in sorted order
+        for i in 0..20 {
+            let key = format!("user:{:03}", i);
+            let value = format!("user_data_{}", i).into_bytes();
+            engine.set(key, value).unwrap();
+        }
+        // Insert some with different prefixes
+        engine.set("product:001".to_string(), b"product1".to_vec()).unwrap();
+        engine.set("product:002".to_string(), b"product2".to_vec()).unwrap();
+    }
+
+    #[test]
+    fn test_scan_range_empty_db() -> Result<()> {
+        let engine = create_test_engine()?;
+        let (results, next_cursor) = engine.scan_range(None, None, 100)?;
+
+        assert!(results.is_empty());
+        assert!(next_cursor.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_range_basic() -> Result<()> {
+        let engine = create_test_engine()?;
+        setup_test_data(&engine);
+
+        let (results, next_cursor) = engine.scan_range(None, None, 100)?;
+
+        assert_eq!(results.len(), 22); // 20 user:* + 2 product:*
+        assert!(next_cursor.is_none()); // All results returned
+
+        // Check sorted order
+        for i in 1..results.len() {
+            assert!(results[i - 1].0 <= results[i].0);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_range_with_start() -> Result<()> {
+        let engine = create_test_engine()?;
+        setup_test_data(&engine);
+
+        let (results, _next_cursor) =
+            engine.scan_range(Some("user:010"), None, 100)?;
+
+        // Should start from user:010 (inclusive)
+        assert_eq!(results[0].0, "user:010");
+        assert_eq!(results.len(), 10); // user:010 to user:019 (10 keys)
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_range_with_end() -> Result<()> {
+        let engine = create_test_engine()?;
+        setup_test_data(&engine);
+
+        let (results, _next_cursor) =
+            engine.scan_range(None, Some("user:010"), 100)?;
+
+        // Should end before user:010 (exclusive)
+        assert!(results.iter().all(|(k, _)| k.as_str() < "user:010"));
+        // Contains user:000-009 (10 user keys) + product:001, product:002 (2 product keys) = 12
+        assert_eq!(results.len(), 12);
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_range_with_limit() -> Result<()> {
+        let engine = create_test_engine()?;
+        setup_test_data(&engine);
+
+        let (results, next_cursor) = engine.scan_range(None, None, 5)?;
+
+        assert_eq!(results.len(), 5);
+        assert!(next_cursor.is_some()); // Should have next cursor
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_range_pagination() -> Result<()> {
+        let engine = create_test_engine()?;
+        setup_test_data(&engine);
+
+        // First page
+        let (page1, cursor) = engine.scan_range(None, None, 5)?;
+        assert_eq!(page1.len(), 5);
+
+        // Second page using cursor
+        let (page2, _next_cursor) = engine.scan_range(cursor.as_deref(), None, 5)?;
+        assert_eq!(page2.len(), 5);
+
+        // Verify no overlap
+        let mut keys1: Vec<_> = page1.iter().map(|(k, _)| k).collect();
+        let keys2: Vec<_> = page2.iter().map(|(k, _)| k).collect();
+
+        // First page ends before second page starts
+        for (key1, key2) in keys1.iter().zip(keys2.iter()) {
+            assert!(key1 < key2);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_range_invalid_args() -> Result<()> {
+        let engine = create_test_engine()?;
+
+        // limit = 0
+        assert!(engine.scan_range(None, None, 0).is_err());
+
+        // limit > max
+        assert!(engine.scan_range(None, None, 20000).is_err());
+
+        // start >= end
+        assert!(engine.scan_range(Some("b"), Some("a"), 100).is_err());
+        assert!(engine.scan_range(Some("a"), Some("a"), 100).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_range_tombstones() -> Result<()> {
+        let engine = create_test_engine()?;
+
+        // Insert and delete
+        engine.set("user:001".to_string(), b"original".to_vec())?;
+        engine.set("user:002".to_string(), b"to_be_deleted".to_vec())?;
+        engine.delete("user:002".to_string())?;
+        engine.set("user:003".to_string(), b"final".to_vec())?;
+
+        let (results, _next_cursor) = engine.scan_range(None, None, 100)?;
+
+        // Should have user:001 and user:003, but not user:002 (tombstone)
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().any(|(k, _)| k == "user:001"));
+        assert!(results.iter().any(|(k, _)| k == "user:003"));
+        assert!(!results.iter().any(|(k, _)| k == "user:002"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_range_memtable_overrides_sstable() -> Result<()> {
+        let dir = tempdir()?;
+        let config = LsmConfig::builder()
+            .dir_path(dir.path().to_path_buf())
+            .memtable_max_size(4 * 1024)
+            .build()?;
+        let engine = LsmEngine::new(config)?;
+
+        // Insert in memtable
+        engine.set("user:001".to_string(), b"memtable_value".to_vec())?;
+
+        // Force flush to sstable
+        engine.flush()?;
+
+        // Update in memtable - this should override sstable value
+        engine.set("user:001".to_string(), b"new_memtable_value".to_vec())?;
+
+        let (results, _next_cursor) = engine.scan_range(None, None, 100)?;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1, b"new_memtable_value");
+        Ok(())
+    }
+
+    #[test]
+    fn test_search_prefix_empty_db() -> Result<()> {
+        let engine = create_test_engine()?;
+        let (results, next_cursor) = engine.search_prefix("user:", None, 100)?;
+
+        assert!(results.is_empty());
+        assert!(next_cursor.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_search_prefix_basic() -> Result<()> {
+        let engine = create_test_engine()?;
+        setup_test_data(&engine);
+
+        let (results, next_cursor) = engine.search_prefix("user:", None, 100)?;
+
+        assert_eq!(results.len(), 20);
+        assert!(next_cursor.is_none());
+        assert!(results.iter().all(|(k, _)| k.starts_with("user:")));
+        Ok(())
+    }
+
+    #[test]
+    fn test_search_prefix_pagination() -> Result<()> {
+        let engine = create_test_engine()?;
+        setup_test_data(&engine);
+
+        // First page
+        let (page1, cursor) = engine.search_prefix("user:", None, 5)?;
+        assert_eq!(page1.len(), 5);
+
+        // Second page using cursor
+        let (page2, _next_cursor) =
+            engine.search_prefix("user:", cursor.as_deref(), 5)?;
+        assert_eq!(page2.len(), 5);
+
+        // Keys in second page should all be after cursor
+        if let Some(cur_str) = &cursor {
+            let cur = cur_str.as_str();
+            for (k, _) in &page2 {
+                assert!(cur < k.as_str());
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_search_prefix_invalid_args() -> Result<()> {
+        let engine = create_test_engine()?;
+
+        // limit = 0
+        assert!(engine.search_prefix("user:", None, 0).is_err());
+
+        // limit > max
+        assert!(engine.search_prefix("user:", None, 20000).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_search_prefix_tombstones() -> Result<()> {
+        let engine = create_test_engine()?;
+
+        // Insert and delete
+        engine.set("user:001".to_string(), b"original".to_vec())?;
+        engine.set("user:002".to_string(), b"to_be_deleted".to_vec())?;
+        engine.delete("user:002".to_string())?;
+        engine.set("user:003".to_string(), b"final".to_vec())?;
+
+        let (results, _next_cursor) =
+            engine.search_prefix("user:", None, 100)?;
+
+        // Should have user:001 and user:003, but not user:002 (tombstone)
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().any(|(k, _)| k == "user:001"));
+        assert!(results.iter().any(|(k, _)| k == "user:003"));
+        assert!(!results.iter().any(|(k, _)| k == "user:002"));
+        Ok(())
+    }
+
+    // Performance test
+    #[test]
+    #[ignore] // Run with `cargo test -- --ignored` for performance tests
+    fn test_scan_range_performance_100k_keys() -> Result<()> {
+        let engine = create_test_engine()?;
+
+        // Insert 100k keys
+        for i in 0..100_000 {
+            let key = format!("perf:{}", i);
+            let value = vec![b'x'; 64];
+            engine.set(key, value).unwrap();
+        }
+
+        // Force flush
+        engine.flush()?;
+
+        // Measure scan performance
+        let start = std::time::Instant::now();
+        let (results, _cursor) = engine.scan_range(None, None, 10)?;
+        let elapsed = start.elapsed();
+
+        assert_eq!(results.len(), 10);
+        assert!(elapsed.as_millis() < 50, "Scan should return quickly, took {:?}", elapsed);
+
+        Ok(())
     }
 }

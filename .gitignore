@@ -4,3 +4,7 @@ target
 credentials
 *.sh
 .env
+node_modules
+.angular
+dist
+.notes/
