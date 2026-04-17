@@ -2,9 +2,6 @@ use crate::{LsmConfig, LsmEngine};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-const DEFAULT_SCAN_LIMIT: usize = 1000;
-const MAX_SCAN_LIMIT: usize = 10000;
-
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Configure tracing
     tracing_subscriber::fmt()

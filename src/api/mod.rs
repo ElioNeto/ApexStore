@@ -15,6 +15,10 @@ use crate::core::engine::LsmEngine;
 use crate::features::FeatureClient;
 use crate::infra::error::LsmError;
 
+// Maximum number of records to return in a single scan/prefix search
+const MAX_SCAN_LIMIT: usize = 10000;
+const DEFAULT_SCAN_LIMIT: usize = 1000;
+
 pub use config::{AuthConfig, ServerConfig};
 
 #[cfg(feature = "api")]
