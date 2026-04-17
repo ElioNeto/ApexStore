@@ -42,8 +42,8 @@ pub struct LsmStats {
 ///
 /// - `sstables` uses a `parking_lot::RwLock`.  Read operations (`get`,
 ///   `scan`, `stats`) take a **shared** read lock, allowing full read
-///   concurrency.  Only `flush()` takes an exclusive write lock to insert
-///   a new SSTable at the front of the list.
+///   concurrency.  Only `flush()` and `compact()` take an exclusive write lock to insert
+///   a new SSTable at the front of the list or replace old ones.
 ///
 /// Both lock types are non-poisoning (`parking_lot` guarantee), so there
 /// is no need to handle `PoisonError` anywhere in this module.
@@ -585,6 +585,155 @@ impl LsmEngine {
 
         self.wal.clear()?;
 
+        // Trigger compaction if needed
+        self.maybe_compact()?;
+
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Compaction
+    // -------------------------------------------------------------------------
+
+    /// Check if compaction is needed and trigger it if so.
+    ///
+    /// Uses size-tiered compaction: when the number of SSTables exceeds
+    /// `max_sstables`, merge the oldest `level_size` SSTables into one.
+    fn maybe_compact(&self) -> Result<()> {
+        let sstables_count = {
+            let sstables = self.sstables.read();
+            sstables.len()
+        };
+
+        let should_compact = sstables_count >= self.config.compaction.max_sstables
+            && sstables_count >= self.config.compaction.min_compaction_threshold;
+
+        if !should_compact {
+            return Ok(());
+        }
+
+        info!(
+            "Triggering compaction: {} SSTables (threshold: {})",
+            sstables_count, self.config.compaction.max_sstables
+        );
+
+        self.compact()?;
+
+        Ok(())
+    }
+
+    /// Perform size-tiered compaction.
+    ///
+    /// Merges the oldest `level_size` SSTables into a single new SSTable,
+    /// removing tombstones and keeping only the newest value for each key.
+    pub fn compact(&self) -> Result<()> {
+        let level_size = self.config.compaction.level_size;
+        let max_sstables = self.config.compaction.max_sstables;
+
+        // Get current SSTables under read lock
+        let sstables_to_compact: Vec<SstableReader> = {
+            let sstables = self.sstables.read();
+            if sstables.len() < level_size {
+                return Ok(());
+            }
+            // Take the oldest SSTables (they're at the end of the vector)
+            sstables
+                .iter()
+                .rev()
+                .take(level_size)
+                .cloned()
+                .collect()
+        };
+
+        if sstables_to_compact.is_empty() {
+            return Ok(());
+        }
+
+        // Collect all records from SSTables to compact
+        // Use BTreeMap to keep keys sorted and handle duplicates (newest wins)
+        let mut merged_records: BTreeMap<String, LogRecord> = BTreeMap::new();
+
+        for sst in &sstables_to_compact {
+            for (key_bytes, record) in sst.scan()? {
+                let key = String::from_utf8(key_bytes)
+                    .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
+
+                // Newer records (higher timestamp) win
+                // SSTables are ordered newest-first, so we only insert if key doesn't exist
+                if !merged_records.contains_key(&key) {
+                    merged_records.insert(key, record);
+                }
+            }
+        }
+
+        // Filter out tombstones
+        merged_records.retain(|_, record| !record.is_deleted);
+
+        if merged_records.is_empty() {
+            // All records were tombstones, just remove the old SSTables
+            self.remove_compacted_sstables(&sstables_to_compact)?;
+            return Ok(());
+        }
+
+        // Create new compacted SSTable
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = self.dir_path.join(format!("compact_{}.sst", timestamp));
+
+        let mut builder = SstableBuilder::new(path, self.config.storage.clone(), timestamp)?;
+        for (key, record) in &merged_records {
+            builder.add(key.as_bytes(), record)?;
+        }
+        let sst_path = builder.finish()?;
+
+        let new_reader = SstableReader::open(
+            sst_path,
+            self.config.storage.clone(),
+            Arc::clone(&self.block_cache),
+        )?;
+
+        // Atomically update SSTables list
+        let mut sstables = self.sstables.write();
+
+        // Remove the compacted SSTables
+        let old_count = sstables_to_compact.len();
+        sstables.retain(|sst| {
+            !sstables_to_compact
+                .iter()
+                .any(|old| old.path() == sst.path())
+        });
+
+        // Insert the new compacted SSTable at the front (newest)
+        sstables.insert(0, new_reader);
+
+        info!(
+            "Compaction complete: merged {} SSTables into 1, total SSTables: {}",
+            old_count,
+            sstables.len()
+        );
+
+        Ok(())
+    }
+
+    /// Remove compacted SSTables from the sstables list.
+    ///
+    /// This is a helper method that doesn't add the new SSTable.
+    /// Used when all records were tombstones.
+    fn remove_compacted_sstables(&self, sstables_to_remove: &[SstableReader]) -> Result<()> {
+        let mut sstables = self.sstables.write();
+
+        let old_count = sstables_to_remove.len();
+        sstables.retain(|sst| {
+            !sstables_to_remove
+                .iter()
+                .any(|old| old.path() == sst.path())
+        });
+
+        info!(
+            "Removed {} compacted SSTables (all tombstones), total SSTables: {}",
+            old_count,
+            sstables.len()
+        );
+
         Ok(())
     }
 
@@ -644,6 +793,9 @@ mod tests {
         let config = LsmConfig::builder()
             .dir_path(dir.path().to_path_buf())
             .memtable_max_size(4 * 1024) // 4KB for tests
+            .level_size(3)
+            .max_sstables(5)
+            .min_compaction_threshold(3)
             .build()?;
         LsmEngine::new(config)
     }
@@ -797,6 +949,9 @@ mod tests {
         let config = LsmConfig::builder()
             .dir_path(dir.path().to_path_buf())
             .memtable_max_size(4 * 1024)
+            .level_size(3)
+            .max_sstables(5)
+            .min_compaction_threshold(3)
             .build()?;
         let engine = LsmEngine::new(config)?;
 
@@ -923,6 +1078,198 @@ mod tests {
             elapsed
         );
 
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Compaction Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_compaction_no_trigger() -> Result<()> {
+        let engine = create_test_engine()?;
+
+        // Insert data that creates 2 SSTables (below threshold)
+        for i in 0..10 {
+            let key = format!("key:{}", i);
+            let value = vec![b'x'; 100];
+            engine.set(key, value)?;
+        }
+
+        let initial_count = {
+            let sstables = engine.sstables.read();
+            sstables.len()
+        };
+
+        // Compact should not change anything
+        engine.compact()?;
+
+        let final_count = {
+            let sstables = engine.sstables.read();
+            sstables.len()
+        };
+
+        assert_eq!(initial_count, final_count);
+        Ok(())
+    }
+
+    #[test]
+    fn test_compaction_triggers() -> Result<()> {
+        let engine = create_test_engine()?;
+
+        // Insert enough data to create 5 SSTables (at threshold)
+        for i in 0..50 {
+            let key = format!("key:{}", i);
+            let value = vec![b'x'; 100];
+            engine.set(key, value)?;
+        }
+
+        let initial_count = {
+            let sstables = engine.sstables.read();
+            sstables.len()
+        };
+
+        // Compact should reduce the count
+        engine.compact()?;
+
+        let final_count = {
+            let sstables = engine.sstables.read();
+            sstables.len()
+        };
+
+        assert!(final_count < initial_count, "Compaction should reduce SSTable count");
+        Ok(())
+    }
+
+    #[test]
+    fn test_compaction_removes_tombstones() -> Result<()> {
+        let engine = create_test_engine()?;
+
+        // Insert and delete multiple times to create tombstones
+        for i in 0..20 {
+            let key = format!("key:{}", i);
+            engine.set(key.clone(), vec![b'x'; 100])?;
+            engine.delete(key)?;
+        }
+
+        // Force multiple flushes
+        for _ in 0..5 {
+            engine.flush()?;
+        }
+
+        let initial_count = {
+            let sstables = engine.sstables.read();
+            sstables.len()
+        };
+
+        // Compact should remove tombstones
+        engine.compact()?;
+
+        let final_count = {
+            let sstables = engine.sstables.read();
+            sstables.len()
+        };
+
+        // Verify no tombstones remain
+        let all_records = engine.scan()?;
+        assert!(
+            all_records.is_empty(),
+            "All tombstoned keys should be removed after compaction"
+        );
+
+        assert!(final_count < initial_count, "Compaction should reduce SSTable count");
+        Ok(())
+    }
+
+    #[test]
+    fn test_compaction_preserves_newest_value() -> Result<()> {
+        let engine = create_test_engine()?;
+
+        // Insert same key multiple times with different values
+        engine.set("key:1".to_string(), b"value1".to_vec())?;
+        engine.set("key:1".to_string(), b"value2".to_vec())?;
+        engine.set("key:1".to_string(), b"value3".to_vec())?;
+
+        // Force flushes to create multiple SSTables
+        for _ in 0..3 {
+            engine.flush()?;
+        }
+
+        // Compact
+        engine.compact()?;
+
+        // Verify the newest value is preserved
+        let result = engine.get("key:1")?;
+        assert_eq!(result, Some(b"value3".to_vec()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_compaction_merges_multiple_sstables() -> Result<()> {
+        let engine = create_test_engine()?;
+
+        // Create 5 SSTables with different keys
+        for flush_num in 0..5 {
+            for i in 0..10 {
+                let key = format!("key:{}:{}", flush_num, i);
+                let value = format!("value_{}", i).into_bytes();
+                engine.set(key, value)?;
+            }
+            engine.flush()?;
+        }
+
+        let initial_count = {
+            let sstables = engine.sstables.read();
+            sstables.len()
+        };
+
+        // Compact should merge oldest 3 SSTables
+        engine.compact()?;
+
+        let final_count = {
+            let sstables = engine.sstables.read();
+            sstables.len()
+        };
+
+        // Should have reduced by 2 (3 merged into 1)
+        assert_eq!(final_count, initial_count - 2);
+
+        // Verify all keys are still accessible
+        let all_keys = engine.keys()?;
+        assert_eq!(all_keys.len(), 50); // 5 flushes * 10 keys each
+        Ok(())
+    }
+
+    #[test]
+    fn test_compaction_all_tombstones() -> Result<()> {
+        let engine = create_test_engine()?;
+
+        // Insert and delete everything
+        for i in 0..20 {
+            let key = format!("key:{}", i);
+            engine.set(key.clone(), vec![b'x'; 100])?;
+            engine.delete(key)?;
+        }
+
+        // Force flushes
+        for _ in 0..5 {
+            engine.flush()?;
+        }
+
+        let initial_count = {
+            let sstables = engine.sstables.read();
+            sstables.len()
+        };
+
+        // Compact should remove all SSTables (all tombstones)
+        engine.compact()?;
+
+        let final_count = {
+            let sstables = engine.sstables.read();
+            sstables.len()
+        };
+
+        assert!(final_count < initial_count, "All-tombstone SSTables should be removed");
         Ok(())
     }
 }
