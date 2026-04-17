@@ -8,11 +8,13 @@ use actix_web::{
     delete, dev::ServiceRequest, get, post, web, App, Error, HttpResponse, HttpServer, Responder,
 };
 use serde::{Deserialize, Serialize};
+use crate::core::engine::{MAX_SCAN_LIMIT, DEFAULT_SCAN_LIMIT};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::core::engine::LsmEngine;
 use crate::features::FeatureClient;
+use crate::infra::error::LsmError;
 
 pub use config::{AuthConfig, ServerConfig};
 
@@ -48,6 +50,38 @@ pub struct SearchQuery {
     pub q: String,
     #[serde(default)]
     pub prefix: bool,
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+fn default_limit() -> usize { DEFAULT_SCAN_LIMIT }
+
+#[derive(Deserialize)]
+pub struct ScanQuery {
+    #[serde(default)]
+    pub start_key: Option<String>,
+    #[serde(default)]
+    pub end_key: Option<String>,
+    #[serde(default = "default_scan_limit")]
+    pub limit: usize,
+}
+
+fn default_scan_limit() -> usize { DEFAULT_SCAN_LIMIT }
+
+/// Response format for paginated queries
+#[derive(Serialize)]
+pub struct PaginatedResponse {
+    pub data: Vec<KeyValueRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct KeyValueRecord {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Serialize)]
@@ -240,64 +274,122 @@ async fn list_keys(data: web::Data<AppState>) -> impl Responder {
 
 #[get("/keys/search")]
 async fn search_keys(query: web::Query<SearchQuery>, data: web::Data<AppState>) -> impl Responder {
-    let results = if query.prefix {
-        data.engine.search_prefix(&query.q)
-    } else {
-        data.engine.search(&query.q)
-    };
+    // Always use prefix search with pagination
+    // Validate limit
+    if query.limit == 0 {
+        return HttpResponse::BadRequest().json(ApiResponse {
+            success: false,
+            message: "limit must be greater than 0".to_string(),
+            data: None,
+        });
+    }
+    if query.limit > MAX_SCAN_LIMIT {
+        return HttpResponse::TooManyRequests().json(ApiResponse {
+            success: false,
+            message: format!("limit {} exceeds maximum allowed limit {}", query.limit, MAX_SCAN_LIMIT),
+            data: None,
+        });
+    }
 
-    match results {
-        Ok(records) => {
-            let records_json: Vec<serde_json::Value> = records
-                .into_iter()
-                .map(|(k, v): (String, Vec<u8>)| {
-                    serde_json::json!({
-                        "key": k,
-                        "value": String::from_utf8_lossy(&v).to_string()
+    match data.engine.search_prefix(&query.q, query.cursor.as_deref(), query.limit) {
+        Ok((records, next_cursor)) => {
+            let records_json: PaginatedResponse = PaginatedResponse {
+                data: records
+                    .into_iter()
+                    .map(|(k, v): (String, Vec<u8>)| KeyValueRecord {
+                        key: k,
+                        value: String::from_utf8_lossy(&v).to_string(),
                     })
-                })
-                .collect();
+                    .collect(),
+                next_cursor,
+            };
 
             HttpResponse::Ok().json(ApiResponse {
                 success: true,
-                message: format!("{} keys found matching '{}'", records_json.len(), query.q),
-                data: Some(serde_json::json!({ "records": records_json })),
+                message: format!("{} keys found matching '{}'", records_json.data.len(), query.q),
+                data: Some(serde_json::to_value(records_json).unwrap_or_default()),
             })
         }
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
-            success: false,
-            message: format!("Error: {}", e),
-            data: None,
-        }),
+        Err(e) => match e {
+            LsmError::InvalidArgument(msg) => HttpResponse::BadRequest().json(ApiResponse {
+                success: false,
+                message: msg,
+                data: None,
+            }),
+            _ => HttpResponse::InternalServerError().json(ApiResponse {
+                success: false,
+                message: format!("Error: {}", e),
+                data: None,
+            }),
+        },
     }
 }
 
 #[get("/scan")]
-async fn scan_all(data: web::Data<AppState>) -> impl Responder {
-    match data.engine.scan() {
-        Ok(records) => {
-            let records_json: Vec<serde_json::Value> = records
-                .into_iter()
-                .filter(|(k, _): &(String, Vec<u8>)| !k.starts_with("feature:"))
-                .map(|(k, v): (String, Vec<u8>)| {
-                    serde_json::json!({
-                        "key": k,
-                        "value": String::from_utf8_lossy(&v).to_string()
+async fn scan_all(query: web::Query<ScanQuery>, data: web::Data<AppState>) -> impl Responder {
+    // Validate limit
+    if query.limit == 0 {
+        return HttpResponse::BadRequest().json(ApiResponse {
+            success: false,
+            message: "limit must be greater than 0".to_string(),
+            data: None,
+        });
+    }
+    if query.limit > MAX_SCAN_LIMIT {
+        return HttpResponse::TooManyRequests().json(ApiResponse {
+            success: false,
+            message: format!("limit {} exceeds maximum allowed limit {}", query.limit, MAX_SCAN_LIMIT),
+            data: None,
+        });
+    }
+
+    // Validate start_key < end_key if both provided
+    if let (Some(ref start), Some(ref end)) = (&query.start_key, &query.end_key) {
+        if start >= end {
+            return HttpResponse::BadRequest().json(ApiResponse {
+                success: false,
+                message: format!("start_key '{}' must be less than end_key '{}'", start, end),
+                data: None,
+            });
+        }
+    }
+
+    match data.engine.scan_range(
+        query.start_key.as_deref(),
+        query.end_key.as_deref(),
+        query.limit,
+    ) {
+        Ok((records, next_cursor)) => {
+            let records_json: PaginatedResponse = PaginatedResponse {
+                data: records
+                    .into_iter()
+                    .filter(|(k, _): &(String, Vec<u8>)| !k.starts_with("feature:"))
+                    .map(|(k, v): (String, Vec<u8>)| KeyValueRecord {
+                        key: k,
+                        value: String::from_utf8_lossy(&v).to_string(),
                     })
-                })
-                .collect();
+                    .collect(),
+                next_cursor,
+            };
 
             HttpResponse::Ok().json(ApiResponse {
                 success: true,
-                message: format!("{} records found", records_json.len()),
-                data: Some(serde_json::json!({ "records": records_json })),
+                message: format!("{} records found", records_json.data.len()),
+                data: Some(serde_json::to_value(records_json).unwrap_or_default()),
             })
         }
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
-            success: false,
-            message: format!("Error: {}", e),
-            data: None,
-        }),
+        Err(e) => match e {
+            LsmError::InvalidArgument(msg) => HttpResponse::BadRequest().json(ApiResponse {
+                success: false,
+                message: msg,
+                data: None,
+            }),
+            _ => HttpResponse::InternalServerError().json(ApiResponse {
+                success: false,
+                message: format!("Error: {}", e),
+                data: None,
+            }),
+        },
     }
 }
 

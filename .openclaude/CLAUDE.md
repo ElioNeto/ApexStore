@@ -156,7 +156,7 @@ Use `/comando` ou `/comando argumento` na conversa:
 
 ## Skills disponíveis
 
-Arquivos de conhecimento especializado em `.claude/skills/`:
+Arquivos de conhecimento especializado em `.openclaude/skills/`:
 
 | Skill | Quando usar |
 |---|---|

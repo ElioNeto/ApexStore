@@ -7,3 +7,4 @@ credentials
 node_modules
 .angular
 dist
+.notes/
