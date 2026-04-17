@@ -85,6 +85,8 @@ Ver `.env.example` para lista completa. As principais:
 | POST | `/keys` | `{"key": "k", "value": "v"}` |
 | GET | `/keys/{key}` | `{"value": "v"}` |
 | GET | `/stats/all` | JSON com sections: memory, wal, disk, bloom, cache |
+| GET | `/scan` | Range scan com paginação cursor-based |
+| GET | `/keys/search` | Prefix search com paginação |
 
 ## Frontend (Angular 17)
 
@@ -134,5 +136,30 @@ cd frontend && npm install && npm start      # Angular em :4200
 ## Roadmap ativo
 
 - `v2.2` — Storage iterators para range queries (em desenvolvimento)
-- `v2.3` — Concurrent read optimization  
+- `v2.3` — Concurrent read optimization
 - `v3.0` — Leveled/Tiered Compaction Strategies
+
+---
+
+## Comandos slash disponíveis
+
+Use `/comando` ou `/comando argumento` na conversa:
+
+| Comando | O que faz |
+|---|---|
+| `/pr` | Gera rascunho completo de Pull Request |
+| `/test [filtro]` | Roda `cargo test` e interpreta resultados |
+| `/review [#PR]` | Code review do diff atual ou de um PR |
+| `/bench [filtro]` | Roda benchmarks Criterion e compara baseline |
+| `/debug <erro>` | Diagnostica erro/panic e propõe fix |
+| `/doc <arquivo>` | Gera ou completa docstrings Rust |
+
+## Skills disponíveis
+
+Arquivos de conhecimento especializado em `.claude/skills/`:
+
+| Skill | Quando usar |
+|---|---|
+| `rust-lsm.md` | Qualquer trabalho em `src/` — convenções, fluxos, checklist |
+| `api-contracts.md` | Trabalho em `src/api/` ou testes HTTP |
+| `angular-frontend.md` | Qualquer trabalho em `frontend/` |
