@@ -654,7 +654,10 @@ impl LsmEngine {
                 .enumerate()
                 .map(|(i, _)| sstables.len() - 1 - i)
                 .collect();
-            indices.into_iter().map(|i| sstables[i].path().clone()).collect()
+            indices
+                .into_iter()
+                .map(|i| sstables[i].path().clone())
+                .collect()
         };
 
         if sstables_to_compact.is_empty() {
