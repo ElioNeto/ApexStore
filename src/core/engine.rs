@@ -1150,7 +1150,10 @@ mod tests {
             sstables.len()
         };
 
-        assert!(final_count < initial_count, "Compaction should reduce SSTable count");
+        assert!(
+            final_count < initial_count,
+            "Compaction should reduce SSTable count"
+        );
         Ok(())
     }
 
@@ -1190,7 +1193,10 @@ mod tests {
             "All tombstoned keys should be removed after compaction"
         );
 
-        assert!(final_count < initial_count, "Compaction should reduce SSTable count");
+        assert!(
+            final_count < initial_count,
+            "Compaction should reduce SSTable count"
+        );
         Ok(())
     }
 
@@ -1282,7 +1288,10 @@ mod tests {
             sstables.len()
         };
 
-        assert!(final_count < initial_count, "All-tombstone SSTables should be removed");
+        assert!(
+            final_count < initial_count,
+            "All-tombstone SSTables should be removed"
+        );
         Ok(())
     }
 
