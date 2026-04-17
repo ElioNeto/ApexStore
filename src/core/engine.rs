@@ -85,7 +85,7 @@ impl LsmEngine {
         }
 
         // Newest-first: ensures get() returns the most recent version
-        sstables.sort_by(|a, b| b.metadata().timestamp.cmp(&a.metadata().timestamp));
+        sstables.sort_by_key(|b| std::cmp::Reverse(b.metadata().timestamp));
 
         let mut memtable = MemTable::new(config.core.memtable_max_size);
         for record in wal_records {
