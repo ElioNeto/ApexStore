@@ -637,12 +637,14 @@ impl LsmEngine {
                 return Ok(());
             }
             // Take the oldest SSTables (they're at the end of the vector)
-            sstables
+            let indices: Vec<usize> = sstables
                 .iter()
                 .rev()
                 .take(level_size)
-                .cloned()
-                .collect()
+                .enumerate()
+                .map(|(i, _)| sstables.len() - 1 - i)
+                .collect();
+            indices.into_iter().map(|i| sstables[i].clone()).collect()
         };
 
         if sstables_to_compact.is_empty() {

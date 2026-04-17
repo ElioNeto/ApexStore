@@ -26,7 +26,7 @@ pub struct StorageConfig {
     pub bloom_false_positive_rate: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompactionConfig {
     /// Number of SSTables to merge in one compaction cycle
     #[serde(default = "default_compaction_level")]
