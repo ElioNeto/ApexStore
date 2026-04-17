@@ -258,9 +258,9 @@ impl SstableReader {
                 // Read key
                 let key = block.data[offset + 2..offset + 2 + key_len].to_vec();
 
-                // Check start filter
+                // Check start filter (exclusive start for pagination)
                 if let Some(start_key) = start {
-                    if key.as_slice() < start_key.as_bytes() {
+                    if key.as_slice() <= start_key.as_bytes() {
                         continue;
                     }
                 }
