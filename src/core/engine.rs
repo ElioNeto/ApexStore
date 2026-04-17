@@ -640,8 +640,8 @@ impl LsmEngine {
         let level_size = self.config.compaction.level_size;
         let max_sstables = self.config.compaction.max_sstables;
 
-        // Get current SSTables under read lock
-        let sstables_to_compact: Vec<SstableReader> = {
+        // Get current SSTable paths under read lock
+        let sstables_to_compact: Vec<PathBuf> = {
             let sstables = self.sstables.read();
             if sstables.len() < level_size {
                 return Ok(());
@@ -654,7 +654,7 @@ impl LsmEngine {
                 .enumerate()
                 .map(|(i, _)| sstables.len() - 1 - i)
                 .collect();
-            indices.into_iter().map(|i| sstables[i].clone()).collect()
+            indices.into_iter().map(|i| sstables[i].path().clone()).collect()
         };
 
         if sstables_to_compact.is_empty() {
@@ -665,7 +665,14 @@ impl LsmEngine {
         // Use BTreeMap to keep keys sorted and handle duplicates (newest wins)
         let mut merged_records: BTreeMap<String, LogRecord> = BTreeMap::new();
 
-        for sst in &sstables_to_compact {
+        for path in &sstables_to_compact {
+            // Re-open the SSTable reader for scanning
+            let sst = SstableReader::open(
+                path.clone(),
+                self.config.storage.clone(),
+                Arc::clone(&self.block_cache),
+            )?;
+
             for (key_bytes, record) in sst.scan()? {
                 let key = String::from_utf8(key_bytes)
                     .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
@@ -711,7 +718,7 @@ impl LsmEngine {
         sstables.retain(|sst| {
             !sstables_to_compact
                 .iter()
-                .any(|old| old.path() == sst.path())
+                .any(|old_path| old_path == sst.path())
         });
 
         // Insert the new compacted SSTable at the front (newest)
@@ -731,14 +738,14 @@ impl LsmEngine {
     ///
     /// This is a helper method that doesn't add the new SSTable.
     /// Used when all records were tombstones.
-    fn remove_compacted_sstables(&self, sstables_to_remove: &[SstableReader]) -> Result<()> {
+    fn remove_compacted_sstables(&self, sstables_to_remove: &[PathBuf]) -> Result<()> {
         let mut sstables = self.sstables.write();
 
         let old_count = sstables_to_remove.len();
         sstables.retain(|sst| {
             !sstables_to_remove
                 .iter()
-                .any(|old| old.path() == sst.path())
+                .any(|old_path| old_path == sst.path())
         });
 
         info!(
