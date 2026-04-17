@@ -26,8 +26,9 @@ fn generate_key(index: usize, key_size: usize) -> String {
 fn generate_value(index: usize, value_size: usize) -> Vec<u8> {
     let pattern = format!("val_{}_{:08x}_", index, index);
     let remaining = value_size.saturating_sub(pattern.len());
+    let fill_count = remaining.min(64);
     let mut value = pattern.into_bytes();
-    value.extend(std::iter::repeat(b'x').take(remaining.min(64)));
+    value.extend(std::iter::repeat_n(b'x', fill_count));
     value.truncate(value_size);
     value
 }

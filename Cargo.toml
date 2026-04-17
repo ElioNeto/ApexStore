@@ -81,5 +81,21 @@ lto = true
 codegen-units = 1
 panic = "abort"
 
+[[bench]]
+name = "write_bench"
+harness = false
+
+[[bench]]
+name = "read_bench"
+harness = false
+
+[[bench]]
+name = "mixed_bench"
+harness = false
+
+[[bench]]
+name = "scan_bench"
+harness = false
+
 [profile.bench]
 inherits = "release"

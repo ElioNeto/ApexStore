@@ -287,10 +287,9 @@ fn bench_workload_read_heavy(c: &mut Criterion) {
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
 
-                for i in 0..nk {
-                    let key = keys[i].clone();
+                for (i, key) in keys.iter().enumerate() {
                     let value = generate_value(i, 100);
-                    engine.set(key, value).unwrap();
+                    engine.set(key.clone(), value).unwrap();
                 }
 
                 engine.flush_memtable().unwrap();
@@ -346,10 +345,9 @@ fn bench_workload_write_heavy(c: &mut Criterion) {
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
 
-                for i in 0..nk {
-                    let key = keys[i].clone();
+                for (i, key) in keys.iter().enumerate() {
                     let value = generate_value(i, 100);
-                    engine.set(key, value).unwrap();
+                    engine.set(key.clone(), value).unwrap();
                 }
 
                 let mut rng = rand::thread_rng();
