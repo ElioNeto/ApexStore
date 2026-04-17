@@ -532,6 +532,11 @@ impl LsmEngine {
     // Flush
     // -------------------------------------------------------------------------
 
+    /// Flush memtable to SSTable (public for benchmarking)
+    pub fn flush_memtable(&self) -> Result<()> {
+        self.flush()
+    }
+
     fn flush(&self) -> Result<()> {
         // Snapshot the MemTable contents while holding the lock.
         let records: Vec<(String, LogRecord)> = {

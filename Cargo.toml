@@ -39,6 +39,7 @@ path = "src/lib.rs"
 [features]
 default = ["api"]
 api = []
+benchmark = []
 
 [dependencies]
 bloomfilter = "3.0"
