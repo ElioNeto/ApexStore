@@ -68,12 +68,15 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - name: Download baseline results
+        # Baseline won't exist on the first run — safe to skip
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: baseline-results
           path: baseline
 
       - name: Download current results
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: benchmark-results
@@ -81,15 +84,20 @@ jobs:
 
       - name: Compare benchmarks
         run: |
-          echo "Comparing benchmarks..."
-          # TODO: Implement actual comparison logic
-          # This would typically use cargo-benchcmp or similar
+          if [ -f baseline/benchmark-results.json ] && [ -f current/benchmark-results.json ]; then
+            echo "Comparing benchmarks..."
+            # TODO: Implement actual comparison logic with cargo-benchcmp or similar
+          else
+            echo "No baseline available yet — skipping comparison. This is expected on the first run."
+          fi
 
       - name: Upload comparison report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: comparison-report
           path: comparison-report.md
+          if-no-files-found: ignore
 
   performance-regression:
     name: Check Performance Regressions
