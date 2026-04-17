@@ -8,16 +8,13 @@ use actix_web::{
     delete, dev::ServiceRequest, get, post, web, App, Error, HttpResponse, HttpServer, Responder,
 };
 use serde::{Deserialize, Serialize};
+use crate::core::engine::{MAX_SCAN_LIMIT, DEFAULT_SCAN_LIMIT};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::core::engine::LsmEngine;
 use crate::features::FeatureClient;
 use crate::infra::error::LsmError;
-
-// Maximum number of records to return in a single scan/prefix search
-const MAX_SCAN_LIMIT: usize = 10000;
-const DEFAULT_SCAN_LIMIT: usize = 1000;
 
 pub use config::{AuthConfig, ServerConfig};
 
@@ -60,10 +57,6 @@ pub struct SearchQuery {
 }
 
 fn default_limit() -> usize { DEFAULT_SCAN_LIMIT }
-
-/// Maximum number of records to return in a single scan/prefix search
-const MAX_SCAN_LIMIT: usize = 10000;
-const DEFAULT_SCAN_LIMIT: usize = 1000;
 
 #[derive(Deserialize)]
 pub struct ScanQuery {

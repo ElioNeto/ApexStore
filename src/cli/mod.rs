@@ -1,4 +1,5 @@
 use crate::{LsmConfig, LsmEngine};
+use crate::core::engine::{MAX_SCAN_LIMIT, DEFAULT_SCAN_LIMIT};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
@@ -280,15 +281,14 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 println!("Scanning range [{:?}, {:?}) with limit {}...", start_key, end_key, limit);
 
-                // Fetch first page
+                // Fetch pages with pagination
                 let mut fetched = 0;
-                let mut last_key: Option<String> = None;
-                let mut has_more = true;
+                let mut current_start: Option<String> = start_key;
 
-                while has_more {
+                loop {
                     match engine.scan_range(
-                        start_key.as_ref().map(|s| s.as_str()),
-                        end_key.as_ref().map(|e| e.as_str()),
+                        current_start.as_deref(),
+                        end_key.as_ref().map(|s| s.as_str()),
                         limit,
                     ) {
                         Ok((records, next_cursor)) => {
@@ -305,27 +305,30 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 fetched += 1;
                             }
 
-                            last_key = next_cursor.clone();
-
+                            // If we got fewer than limit records, we're done
                             if records.len() < limit {
-                                has_more = false;
-                            } else {
-                                // Continue with pagination
-                                if last_key.is_none() {
-                                    has_more = false;
-                                } else {
-                                    // For pagination, we use the next page starting after last_key
-                                    // The range scan doesn't support cursor-based pagination directly,
-                                    // so we use end_key for the first query, then continue
-                                    // For simplicity, just stop here for now
-                                    has_more = false;
-                                }
+                                break;
                             }
+
+                            // If no more cursor, we're done
+                            if next_cursor.is_none() {
+                                break;
+                            }
+
+                            // Move to next page: start from cursor
+                            // The cursor is the last key of this page, so we include it
+                            current_start = next_cursor;
                         }
                         Err(e) => {
                             println!("❌ Error: {}", e);
                             break;
                         }
+                    }
+
+                    // Safety: prevent infinite loop
+                    if fetched > 1_000_000 {
+                        println!("⚠ Stopping after 1M records to prevent infinite loop");
+                        break;
                     }
                 }
 

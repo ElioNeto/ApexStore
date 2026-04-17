@@ -17,8 +17,8 @@ use serde::Serialize;
 use tracing::{info, warn};
 
 /// Maximum number of records to return in a single scan/prefix search
-const MAX_SCAN_LIMIT: usize = 10000;
-const DEFAULT_SCAN_LIMIT: usize = 1000;
+pub const MAX_SCAN_LIMIT: usize = 10000;
+pub const DEFAULT_SCAN_LIMIT: usize = 1000;
 
 #[derive(Serialize)]
 pub struct LsmStats {
@@ -397,23 +397,11 @@ impl LsmEngine {
         // Collect from SSTables (oldest first to ensure MemTable wins by insertion order)
         let sstables = self.sstables.read();
         for sst in sstables.iter() {
-            // Scan range in SSTable and merge with results
-            let sst_scan = sst.scan()?;
+            // Use efficient range scan with sparse index
+            let sst_scan = sst.scan_range(start, end)?;
             for (key_bytes, record) in sst_scan {
                 let key = String::from_utf8(key_bytes)
                     .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
-
-                // Skip if in range check
-                if let Some(s) = start {
-                    if key.as_str() < s {
-                        continue;
-                    }
-                }
-                if let Some(e) = end {
-                    if key.as_str() >= e {
-                        break;
-                    }
-                }
 
                 // Skip if already seen (MemTable wins) or if we have enough
                 if seen_keys.contains_key(&key) {
@@ -498,20 +486,21 @@ impl LsmEngine {
 
         // Collect from SSTables
         let sstables = self.sstables.read();
+
+        // Calculate end key for prefix range: prefix + '{' (next char after 'z')
+        // This captures all keys starting with this prefix
+        let prefix_end = format!("{}{}", prefix, '{');
+
         for sst in sstables.iter() {
-            let sst_scan = sst.scan()?;
+            let sst_scan = sst.scan_range(
+                cursor.as_deref(),
+                Some(&prefix_end),
+            )?;
             for (key_bytes, record) in sst_scan {
                 let key = String::from_utf8(key_bytes)
                     .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
 
-                // Skip keys before cursor (cursor is exclusive)
-                if let Some(cur) = cursor {
-                    if key.as_str() <= cur {
-                        continue;
-                    }
-                }
-
-                // Check: key must have the prefix
+                // Check: key must have the prefix (filter any edge cases)
                 if !key.starts_with(prefix) {
                     continue;
                 }

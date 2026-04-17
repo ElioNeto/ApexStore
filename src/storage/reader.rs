@@ -181,12 +181,63 @@ impl SstableReader {
     /// # Thread Safety
     /// This method can be safely called concurrently from multiple threads.
     pub fn scan(&self) -> Result<Vec<(Vec<u8>, LogRecord)>> {
+        self.scan_range(None, None)
+    }
+
+    /// Scan records in the SSTable within the given range.
+    ///
+    /// This method efficiently skips blocks that are entirely before the start_key
+    /// using the sparse index stored in metadata. This provides O(num_blocks_in_range)
+    /// complexity instead of O(total_blocks) for full scans.
+    ///
+    /// # Arguments
+    /// * `start` - Inclusive lower bound (None = from first key)
+    /// * `end` - Exclusive upper bound (None = to last key)
+    ///
+    /// # Performance Note
+    ///
+    /// This method uses the sparse index to skip blocks before start_key. However,
+    /// once we reach the appropriate blocks, we still read all entries in each block
+    /// and filter by key. True O(result_count) complexity would require:
+    /// 1. A denser index with every k-th key (currently we have first_key per block)
+    /// 2. Binary search within blocks to find exact entry positions
+    ///
+    /// Current complexity: O(blocks_before_start + blocks_in_range * entries_per_block)
+    /// For typical block sizes (~256-512 bytes), this is much better than full scan.
+    ///
+    /// # Thread Safety
+    /// This method can be safely called concurrently from multiple threads.
+    pub fn scan_range(
+        &self,
+        start: Option<&str>,
+        end: Option<&str>,
+    ) -> Result<Vec<(Vec<u8>, LogRecord)>> {
         let mut records = Vec::new();
 
-        // Clone blocks to avoid borrow issues (immutable, no lock needed)
-        let blocks = self.metadata.blocks.clone();
+        // Find starting block using sparse index
+        let start_block_idx = if let Some(start_key) = start {
+            // Binary search for the first block where first_key >= start_key
+            // partition_point returns the first index where the predicate is false
+            // Since blocks are sorted by first_key, we find where block.first_key < start_key stops
+            self.metadata.blocks.partition_point(|block| {
+                // Use bytes comparison to avoid String allocation
+                block.first_key.as_slice() < start_key.as_bytes()
+            })
+        } else {
+            // Start from first block
+            0
+        };
 
-        for block_meta in &blocks {
+        // Iterate through blocks starting from the right position
+        for block_meta in &self.metadata.blocks[start_block_idx..] {
+            // Check if we've passed the end key
+            if let Some(end_key) = end {
+                // If the block's first key is >= end, we're done with this SSTable
+                if block_meta.first_key.as_slice() >= end_key.as_bytes() {
+                    break;
+                }
+            }
+
             let block_data = self.read_block(block_meta)?;
             let block = Block::decode(&block_data)?;
 
@@ -206,6 +257,21 @@ impl SstableReader {
 
                 // Read key
                 let key = block.data[offset + 2..offset + 2 + key_len].to_vec();
+
+                // Check start filter
+                if let Some(start_key) = start {
+                    if key.as_slice() < start_key.as_bytes() {
+                        continue;
+                    }
+                }
+
+                // Check end filter
+                if let Some(end_key) = end {
+                    if key.as_slice() >= end_key.as_bytes() {
+                        // Keys in a block are sorted, so we can break early
+                        break;
+                    }
+                }
 
                 // Read value length
                 let val_len_offset = offset + 2 + key_len;
