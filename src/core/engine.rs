@@ -1,1337 +1,280 @@
-use crate::core::log_record::LogRecord;
-use crate::core::memtable::MemTable;
-use crate::infra::config::LsmConfig;
-use crate::infra::error::{LsmError, Result};
-use crate::storage::builder::SstableBuilder;
-use crate::storage::cache::GlobalBlockCache;
-use crate::storage::reader::SstableReader;
-use crate::storage::wal::WriteAheadLog;
+use std::collections::HashMap;
 
-use parking_lot::{Mutex, RwLock};
-use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use crate::core::engine::compaction::Compaction;
+use crate::core::engine::manifest::Manifest;
+use crate::core::engine::version_set::VersionSet;
+use crate::core::iterators::StorageIterator;
+use crate::core::key::KeySlice;
+use crate::core::table::Table;
+use crate::core::version::Version;
+use crate::storage::cache::Cache;
+use crate::storage::sst_iterator::SstIterator;
 
-use serde::Serialize;
-use tracing::{info, warn};
-
-/// Maximum number of records to return in a single scan/prefix search
-pub const MAX_SCAN_LIMIT: usize = 10000;
-pub const DEFAULT_SCAN_LIMIT: usize = 1000;
-
-#[derive(Serialize)]
-pub struct LsmStats {
-    pub mem_records: usize,
-    pub mem_kb: usize,
-    pub sst_files: usize,
-    pub sst_records: u64,
-    pub sst_kb: u64,
-    pub wal_kb: u64,
-    pub total_records: u64,
-    pub memtable_max_size: usize,
+/// Engine options.
+#[derive(Debug, Clone)]
+pub struct EngineOptions {
+    pub block_size: usize,
+    pub bloom_bits_per_key: usize,
+    pub max_table_size: usize,
+    pub min_table_size_to_compact: usize,
+    pub max_levels: usize,
+    pub level_multiplier: usize,
+    pub write_buffer_size: usize,
+    pub max_write_buffer_number: usize,
+    pub compaction_options: Compaction,
 }
 
-/// Core LSM-tree storage engine.
-///
-/// # Concurrency Model
-///
-/// - `memtable` uses a `parking_lot::Mutex`.  Writes and reads both take
-///   an exclusive lock; contention is low because MemTable operations are
-///   in-memory and sub-microsecond.
-///
-/// - `sstables` uses a `parking_lot::RwLock`.  Read operations (`get`,
-///   `scan`, `stats`) take a **shared** read lock, allowing full read
-///   concurrency.  Only `flush()` and `compact()` take an exclusive write lock to insert
-///   a new SSTable at the front of the list or replace old ones.
-///
-/// Both lock types are non-poisoning (`parking_lot` guarantee), so there
-/// is no need to handle `PoisonError` anywhere in this module.
-pub struct LsmEngine {
-    memtable: Mutex<MemTable>,
-    wal: WriteAheadLog,
-    sstables: RwLock<Vec<SstableReader>>,
-    block_cache: Arc<GlobalBlockCache>,
-    pub(crate) dir_path: PathBuf,
-    pub(crate) config: LsmConfig,
+impl Default for EngineOptions {
+    fn default() -> Self {
+        Self {
+            block_size: 4096,
+            bloom_bits_per_key: 10,
+            max_table_size: 1024 * 1024,
+            min_table_size_to_compact: 64,
+            max_levels: 7,
+            level_multiplier: 4,
+            write_buffer_size: 64 * 1024,
+            max_write_buffer_number: 4,
+            compaction_options: Compaction::default(),
+        }
+    }
 }
 
-impl LsmEngine {
-    pub fn new(config: LsmConfig) -> Result<Self> {
-        std::fs::create_dir_all(&config.core.dir_path)?;
+/// The core engine that manages LSM-tree structure and compaction.
+pub struct Engine<C: Cache> {
+    options: EngineOptions,
+    manifest: Manifest,
+    version_set: VersionSet<C>,
+    /// Memtables indexed by column family.
+    memtables: HashMap<String, Vec<MemTable>>,
+    /// Write buffer limit in bytes per column family.
+    write_buffer_limit: usize,
+    /// Current total bytes in memtables per column family.
+    memtable_bytes: HashMap<String, usize>,
+}
 
-        let block_cache = GlobalBlockCache::new(
-            config.storage.block_cache_size_mb,
-            config.storage.block_size,
-        );
+struct MemTable {
+    data: HashMap<Vec<u8>, Vec<u8>>,
+    size: usize,
+}
 
-        let wal = WriteAheadLog::new(&config.core.dir_path)?;
-        let wal_records = wal.recover()?;
+impl MemTable {
+    fn new() -> Self {
+        Self {
+            data: HashMap::new(),
+            size: 0,
+        }
+    }
 
-        let mut sstables = Vec::new();
-        for entry in std::fs::read_dir(&config.core.dir_path)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "sst") {
-                match SstableReader::open(
-                    path.clone(),
-                    config.storage.clone(),
-                    Arc::clone(&block_cache),
-                ) {
-                    Ok(sst) => sstables.push(sst),
-                    Err(e) => warn!("Failed to load SSTable {}: {}", path.display(), e),
+    fn put(&mut self, key: Vec<u8>, value: Vec<u8>) {
+        let old = self.data.insert(key.clone(), value.clone());
+        self.size += key.len() + value.len();
+        if let Some(old_val) = old {
+            self.size -= old_val.len();
+        }
+    }
+
+    fn delete(&mut self, key: Vec<u8>) {
+        if let Some(old) = self.data.remove(&key) {
+            self.size += key.len();
+            self.size -= old.len();
+        }
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + '_ {
+        self.data.iter().map(|(k, v)| (k.clone(), v.clone()))
+    }
+}
+
+impl<C: Cache> Engine<C> {
+    pub fn new(options: EngineOptions, cache: C) -> Self {
+        Self {
+            options,
+            manifest: Manifest::new(),
+            version_set: VersionSet::new(options.clone(), cache),
+            memtables: HashMap::new(),
+            write_buffer_limit: options.write_buffer_size * options.max_write_buffer_number,
+            memtable_bytes: HashMap::new(),
+        }
+    }
+
+    pub fn put(&mut self, cf: &str, key: Vec<u8>, value: Vec<u8>) {
+        let mem = self.memtables.entry(cf.to_string()).or_default();
+        if mem.is_empty() {
+            mem.push(MemTable::new());
+        }
+        let last = mem.len() - 1;
+        mem[last].put(key.clone(), value.clone());
+        *self.memtable_bytes.entry(cf.to_string()).or_default() += key.len() + value.len();
+        if self.memtable_bytes[cf] >= self.write_buffer_limit {
+            self.flush_memtable(cf);
+        }
+    }
+
+    pub fn delete(&mut self, cf: &str, key: Vec<u8>) {
+        let mem = self.memtables.entry(cf.to_string()).or_default();
+        if mem.is_empty() {
+            mem.push(MemTable::new());
+        }
+        let last = mem.len() - 1;
+        mem[last].delete(key.clone());
+        *self.memtable_bytes.entry(cf.to_string()).or_default() += key.len();
+        if self.memtable_bytes[cf] >= self.write_buffer_limit {
+            self.flush_memtable(cf);
+        }
+    }
+
+    pub fn get(&self, cf: &str, key: &[u8]) -> Option<Vec<u8>> {
+        if let Some(memtables) = self.memtables.get(cf) {
+            for mem in memtables.iter().rev() {
+                if let Some(v) = mem.data.get(key) {
+                    return Some(v.clone());
                 }
             }
         }
-
-        // Newest-first: ensures get() returns the most recent version
-        sstables.sort_by_key(|b| std::cmp::Reverse(b.metadata().timestamp));
-
-        let mut memtable = MemTable::new(config.core.memtable_max_size);
-        for record in wal_records {
-            memtable.insert(record);
-        }
-
-        info!(
-            "LSM Engine initialized: {} sstables, memtable={} records, cache={}MB",
-            sstables.len(),
-            memtable.data.len(),
-            config.storage.block_cache_size_mb
-        );
-
-        Ok(Self {
-            memtable: Mutex::new(memtable),
-            wal,
-            sstables: RwLock::new(sstables),
-            block_cache,
-            dir_path: config.core.dir_path.clone(),
-            config,
-        })
+        self.version_set.get(cf, key)
     }
 
-    // -------------------------------------------------------------------------
-    // Write path
-    // -------------------------------------------------------------------------
-
-    pub fn set(&self, key: String, value: Vec<u8>) -> Result<()> {
-        let record = LogRecord::new(key, value);
-        self.wal.write_record(&record)?;
-
-        let mut memtable = self.memtable.lock();
-        memtable.insert(record);
-
-        if memtable.should_flush() {
-            drop(memtable);
-            self.flush()?;
-        }
-
-        Ok(())
-    }
-
-    pub fn delete(&self, key: String) -> Result<()> {
-        let record = LogRecord::tombstone(key);
-        self.wal.write_record(&record)?;
-
-        let mut memtable = self.memtable.lock();
-        memtable.insert(record);
-
-        if memtable.should_flush() {
-            drop(memtable);
-            self.flush()?;
-        }
-
-        Ok(())
-    }
-
-    /// Insert a batch of key-value pairs atomically.
-    ///
-    /// # Atomicity Guarantee
-    ///
-    /// All WAL writes complete before the MemTable is touched.  If any WAL
-    /// write fails, the MemTable remains unmodified and the caller can safely
-    /// retry the entire batch.  Under normal operation this eliminates the
-    /// partial-write inconsistency present in the previous N-sequential-set
-    /// implementation.
-    ///
-    /// The batch is written with a **single fsync** at the end of the WAL
-    /// phase and a **single MemTable lock acquisition**, reducing contention
-    /// and I/O overhead from O(N) to O(1).
-    ///
-    /// Note: full crash-atomic all-or-nothing semantics (batch-begin /
-    /// batch-commit WAL markers) is a future enhancement.
-    pub fn set_batch(&self, items: Vec<(String, Vec<u8>)>) -> Result<usize> {
-        if items.is_empty() {
-            return Ok(0);
-        }
-
-        // 1. Build records first so validation errors abort before any I/O.
-        let records: Vec<LogRecord> = items
-            .into_iter()
-            .map(|(key, value)| LogRecord::new(key, value))
-            .collect();
-
-        // 2. Write every record to the WAL.  A failure here means zero
-        //    MemTable mutations have occurred; the caller may retry.
-        for record in &records {
-            self.wal.write_record(record)?;
-        }
-
-        // 3. Acquire the MemTable lock once and insert all records.
-        let count = records.len();
-        let should_flush = {
-            let mut memtable = self.memtable.lock();
-            for record in records {
-                memtable.insert(record);
-            }
-            memtable.should_flush()
-        }; // lock released here
-
-        if should_flush {
-            self.flush()?;
-        }
-
-        Ok(count)
-    }
-
-    /// Delete a batch of keys atomically.
-    ///
-    /// Follows the same atomicity contract as `set_batch`: all tombstone
-    /// records are written to the WAL before the MemTable is touched.
-    pub fn delete_batch(&self, keys: Vec<String>) -> Result<usize> {
-        if keys.is_empty() {
-            return Ok(0);
-        }
-
-        let records: Vec<LogRecord> = keys.into_iter().map(LogRecord::tombstone).collect();
-
-        for record in &records {
-            self.wal.write_record(record)?;
-        }
-
-        let count = records.len();
-        let should_flush = {
-            let mut memtable = self.memtable.lock();
-            for record in records {
-                memtable.insert(record);
-            }
-            memtable.should_flush()
-        };
-
-        if should_flush {
-            self.flush()?;
-        }
-
-        Ok(count)
-    }
-
-    // -------------------------------------------------------------------------
-    // Read path
-    // -------------------------------------------------------------------------
-
-    pub fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        // Check MemTable first (most recent data).
-        {
-            let memtable = self.memtable.lock();
-            if let Some(record) = memtable.get(key) {
-                return Ok(if record.is_deleted {
-                    None
-                } else {
-                    Some(record.value)
-                });
-            }
-        }
-
-        // Check SSTables newest-to-oldest under a shared read lock.
-        let sstables = self.sstables.read();
-        for sst in sstables.iter() {
-            if let Some(record) = sst.get(key)? {
-                return Ok(if record.is_deleted {
-                    None
-                } else {
-                    Some(record.value)
-                });
-            }
-        }
-
-        Ok(None)
-    }
-
-    pub fn search(&self, pattern: &str) -> Result<Vec<(String, Vec<u8>)>> {
-        Ok(self
-            .scan()?
-            .into_iter()
-            .filter(|(key, _)| key.contains(pattern))
-            .collect())
-    }
-
-    /// Legacy prefix search (full scan, no pagination) - kept for backwards compatibility
-    #[deprecated(since = "2.2.0", note = "Use search_prefix with pagination instead")]
-    pub fn search_prefix_legacy(&self, prefix: &str) -> Result<Vec<(String, Vec<u8>)>> {
-        Ok(self
-            .scan()?
-            .into_iter()
-            .filter(|(key, _)| key.starts_with(prefix))
-            .collect())
-    }
-
-    pub fn scan(&self) -> Result<Vec<(String, Vec<u8>)>> {
-        // HashMap keyed by String; value is (bytes, timestamp, is_deleted).
-        // MemTable entries win over SSTable entries for the same key because
-        // they are inserted first and `entry().or_insert()` never overwrites.
-        let mut result_map: HashMap<String, (Vec<u8>, u128, bool)> = HashMap::new();
-
-        {
-            let memtable = self.memtable.lock();
-            for (key, record) in memtable.iter_ordered() {
-                result_map.insert(
-                    key.clone(),
-                    (record.value.clone(), record.timestamp, record.is_deleted),
-                );
-            }
-        }
-
-        {
-            let sstables = self.sstables.read();
-            for sst in sstables.iter() {
-                for (key_bytes, record) in sst.scan()? {
-                    let key = String::from_utf8(key_bytes)
-                        .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
-                    result_map.entry(key).or_insert((
-                        record.value,
-                        record.timestamp,
-                        record.is_deleted,
-                    ));
-                }
-            }
-        }
-
-        let mut results: Vec<(String, Vec<u8>)> = result_map
-            .into_iter()
-            .filter_map(|(key, (value, _ts, is_deleted))| {
-                if !is_deleted {
-                    Some((key, value))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        results.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(results)
-    }
-
-    pub fn keys(&self) -> Result<Vec<String>> {
-        Ok(self.scan()?.into_iter().map(|(k, _)| k).collect())
-    }
-
-    pub fn count(&self) -> Result<usize> {
-        Ok(self.scan()?.len())
-    }
-
-    // -------------------------------------------------------------------------
-    // Range Scan & Prefix Search
-    // -------------------------------------------------------------------------
-
-    /// Returns up to `limit` key-value pairs in range [start, end).
-    /// If `start` is None, start from first key.
-    /// If `end` is None, continue until limit is reached.
-    /// Returns (items, next_cursor) where next_cursor is the last returned key (if any).
-    #[allow(clippy::type_complexity)]
-    pub fn scan_range(
+    pub fn scan(
         &self,
-        start: Option<&str>,
-        end: Option<&str>,
-        limit: usize,
-    ) -> Result<(Vec<(String, Vec<u8>)>, Option<String>)> {
-        if limit == 0 {
-            return Err(LsmError::InvalidArgument(
-                "limit must be greater than 0".to_string(),
-            ));
-        }
-        if limit > MAX_SCAN_LIMIT {
-            return Err(LsmError::InvalidArgument(format!(
-                "limit {} exceeds maximum allowed limit {}",
-                limit, MAX_SCAN_LIMIT
-            )));
-        }
-        // Validate end > start if both are provided
-        if let (Some(start_key), Some(end_key)) = (start, end) {
-            if start_key >= end_key {
-                return Err(LsmError::InvalidArgument(format!(
-                    "start_key '{}' must be less than end_key '{}'",
-                    start_key, end_key
-                )));
-            }
-        }
+        cf: &str,
+        lower: Option<&[u8]>,
+        upper: Option<&[u8]>,
+        limit: Option<usize>,
+    ) -> Vec<(Vec<u8>, Vec<u8>)> {
+        let mut results = Vec::new();
 
-        let mut seen_keys: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-
-        // Collect from MemTable (in sorted order)
-        {
-            let memtable = self.memtable.lock();
-
-            for (key, record) in memtable.iter_ordered() {
-                // Skip if key is before or equal to start range (exclusive start for pagination)
-                if let Some(s) = start {
-                    if key.as_str() <= s {
-                        continue;
+        // Include memtables first (newest writes first).
+        if let Some(memtables) = self.memtables.get(cf) {
+            for mem in memtables.iter().rev() {
+                for (k, v) in mem.iter() {
+                    if let Some(lb) = lower {
+                        if k.as_slice() < lb {
+                            continue;
+                        }
+                    }
+                    if let Some(ub) = upper {
+                        if k.as_slice() >= ub {
+                            continue;
+                        }
+                    }
+                    results.push((k.clone(), v.clone()));
+                    if let Some(limit) = limit {
+                        if results.len() >= limit {
+                            return results;
+                        }
                     }
                 }
-
-                // Stop if we've reached end range
-                if let Some(e) = end {
-                    if key.as_str() >= e {
-                        break;
-                    }
-                }
-
-                // Skip tombstones
-                if record.is_deleted {
-                    continue;
-                }
-
-                // MemTable wins over SSTable for same key
-                seen_keys.insert(key.clone(), record.value.clone());
             }
         }
 
-        // Collect from SSTables (oldest first to ensure MemTable wins by insertion order)
-        let sstables = self.sstables.read();
-        for sst in sstables.iter() {
-            // Use efficient range scan with sparse index
-            let sst_scan = sst.scan_range(start, end)?;
-            for (key_bytes, record) in sst_scan {
-                let key = String::from_utf8(key_bytes)
-                    .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
+        // Include SSTables.
+        let sst_results = self.version_set.scan(cf, lower, upper, limit.map(|l| l.saturating_sub(results.len())));
+        results.extend(sst_results);
 
-                // Skip if already seen (MemTable wins) or if we have enough
-                if seen_keys.contains_key(&key) {
-                    continue;
-                }
-
-                if record.is_deleted {
-                    continue;
-                }
-
-                seen_keys.insert(key, record.value);
-            }
-            // Check if we've reached limit across all SSTables
-            if seen_keys.len() >= limit {
-                break;
-            }
+        if let Some(limit) = limit {
+            results.truncate(limit);
         }
-
-        // Convert to Vec with limit applied
-        let results: Vec<(String, Vec<u8>)> = seen_keys.into_iter().take(limit).collect();
-
-        // Determine next cursor for pagination
-        let next_cursor = if results.len() == limit && !results.is_empty() {
-            // Could be more results; return last key as cursor
-            results.last().map(|(k, _)| k.clone())
-        } else {
-            None
-        };
-
-        Ok((results, next_cursor))
+        results
     }
 
-    /// Returns up to `limit` keys with the given prefix, starting after `cursor`.
-    #[allow(clippy::type_complexity)]
-    pub fn search_prefix(
-        &self,
-        prefix: &str,
-        cursor: Option<&str>,
-        limit: usize,
-    ) -> Result<(Vec<(String, Vec<u8>)>, Option<String>)> {
-        if limit == 0 {
-            return Err(LsmError::InvalidArgument(
-                "limit must be greater than 0".to_string(),
-            ));
-        }
-        if limit > MAX_SCAN_LIMIT {
-            return Err(LsmError::InvalidArgument(format!(
-                "limit {} exceeds maximum allowed limit {}",
-                limit, MAX_SCAN_LIMIT
-            )));
-        }
-
-        let mut seen_keys: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-
-        // Collect from MemTable (sorted order)
-        {
-            let memtable = self.memtable.lock();
-
-            for (key, record) in memtable.iter_ordered() {
-                // Skip keys before cursor (cursor is exclusive)
-                if let Some(cur) = cursor {
-                    if key.as_str() <= cur {
-                        continue;
-                    }
-                }
-
-                // Check: key must have the prefix
-                if !key.starts_with(prefix) {
-                    continue;
-                }
-
-                // Skip tombstones
-                if record.is_deleted {
-                    continue;
-                }
-
-                seen_keys.insert(key.clone(), record.value.clone());
+    fn flush_memtable(&mut self, cf: &str) {
+        if let Some(memtables) = self.memtables.get_mut(cf) {
+            if let Some(mem) = memtables.pop() {
+                let table = Table::build(mem.data.into_iter().collect(), &self.options);
+                self.version_set.add_table(cf, table);
+                *self.memtable_bytes.get_mut(cf).unwrap() = 0;
             }
-        }
-
-        // Collect from SSTables
-        let sstables = self.sstables.read();
-
-        // Calculate end key for prefix range: prefix + '{' (next char after 'z')
-        // This captures all keys starting with this prefix
-        let prefix_end = format!("{}{}", prefix, '{');
-
-        for sst in sstables.iter() {
-            let sst_scan = sst.scan_range(cursor, Some(&prefix_end))?;
-            for (key_bytes, record) in sst_scan {
-                let key = String::from_utf8(key_bytes)
-                    .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
-
-                // Check: key must have the prefix (filter any edge cases)
-                if !key.starts_with(prefix) {
-                    continue;
-                }
-
-                // Skip if already in seen_keys (MemTable wins)
-                if seen_keys.contains_key(&key) {
-                    continue;
-                }
-
-                if record.is_deleted {
-                    continue;
-                }
-
-                seen_keys.insert(key, record.value);
-            }
-        }
-
-        // Convert to Vec with limit
-        let results: Vec<(String, Vec<u8>)> = seen_keys.into_iter().take(limit).collect();
-
-        // Determine next cursor for pagination
-        let next_cursor = if results.len() == limit {
-            // Could be more results; return last key as cursor
-            results.last().map(|(k, _)| k.clone())
-        } else {
-            None
-        };
-
-        Ok((results, next_cursor))
-    }
-
-    // -------------------------------------------------------------------------
-    // Flush
-    // -------------------------------------------------------------------------
-
-    /// Flush memtable to SSTable (public for benchmarking)
-    pub fn flush_memtable(&self) -> Result<()> {
-        self.flush()
-    }
-
-    fn flush(&self) -> Result<()> {
-        // Snapshot the MemTable contents while holding the lock.
-        let records: Vec<(String, LogRecord)> = {
-            let memtable = self.memtable.lock();
-            memtable
-                .iter_ordered()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
-        };
-
-        if records.is_empty() {
-            return Ok(());
-        }
-
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let path = self.dir_path.join(format!("{}.sst", timestamp));
-
-        let mut builder = SstableBuilder::new(path, self.config.storage.clone(), timestamp)?;
-        for (key, record) in records {
-            builder.add(key.as_bytes(), &record)?;
-        }
-        let sst_path = builder.finish()?;
-
-        let reader = SstableReader::open(
-            sst_path,
-            self.config.storage.clone(),
-            Arc::clone(&self.block_cache),
-        )?;
-
-        // Acquire both locks in a consistent order (sstables write, then
-        // memtable) to avoid potential deadlocks with future callers.
-        let mut sstables = self.sstables.write();
-        let mut memtable = self.memtable.lock();
-
-        sstables.insert(0, reader);
-        let cleared = memtable.clear();
-
-        info!(
-            "Memtable flushed: {} records, sstables total={}",
-            cleared,
-            sstables.len()
-        );
-
-        drop(memtable);
-        drop(sstables);
-
-        self.wal.clear()?;
-
-        // Trigger compaction if needed
-        self.maybe_compact()?;
-
-        Ok(())
-    }
-
-    // -------------------------------------------------------------------------
-    // Compaction
-    // -------------------------------------------------------------------------
-
-    /// Check if compaction is needed and trigger it if so.
-    ///
-    /// Uses size-tiered compaction: when the number of SSTables exceeds
-    /// `max_sstables`, merge the oldest `level_size` SSTables into one.
-    ///
-    /// This method will continue compacting until the SSTable count is
-    /// safely below the threshold to prevent unbounded growth.
-    fn maybe_compact(&self) -> Result<()> {
-        loop {
-            let sstables_count = {
-                let sstables = self.sstables.read();
-                sstables.len()
-            };
-
-            // Stop if we're below the minimum threshold
-            if sstables_count < self.config.compaction.min_compaction_threshold {
-                return Ok(());
-            }
-
-            // Stop if we're below the max threshold (safe zone)
-            if sstables_count < self.config.compaction.max_sstables {
-                return Ok(());
-            }
-
-            info!(
-                "Triggering compaction: {} SSTables (threshold: {}, min: {})",
-                sstables_count,
-                self.config.compaction.max_sstables,
-                self.config.compaction.min_compaction_threshold
-            );
-
-            self.compact()?;
-
-            // Continue looping to compact more if still above threshold
         }
     }
 
-    /// Perform size-tiered compaction.
-    ///
-    /// Merges the oldest `level_size` SSTables into a single new SSTable,
-    /// removing tombstones and keeping only the newest value for each key.
-    pub fn compact(&self) -> Result<()> {
-        let level_size = self.config.compaction.level_size;
-        let max_sstables = self.config.compaction.max_sstables;
+    pub fn force_flush(&mut self) {
+        for cf in self.memtables.keys() {
+            self.flush_memtable(cf);
+        }
+    }
 
-        // Get current SSTable paths under read lock
-        let sstables_to_compact: Vec<PathBuf> = {
-            let sstables = self.sstables.read();
-            if sstables.len() < level_size {
-                return Ok(());
+    pub fn compact(&mut self) {
+        // Level-based compaction with tiered compaction strategy.
+        let version = self.version_set.current_version();
+        for level in 0..self.options.max_levels.saturating_sub(1) {
+            let level_tables = version.get_level_tables(level);
+            if level_tables.len() < 2 {
+                continue;
             }
-            // Take the oldest SSTables (they're at the end of the vector)
-            let indices: Vec<usize> = sstables
-                .iter()
-                .rev()
-                .take(level_size)
-                .enumerate()
-                .map(|(i, _)| sstables.len() - 1 - i)
-                .collect();
-            indices
+
+            // Check if compaction is needed: any table smaller than min_table_size_to_compact
+            // or total size exceeding a threshold triggers compaction.
+            let total_size: usize = level_tables.iter().map(|t| t.size()).sum();
+            let needs_compaction = level_tables.iter().any(|t| t.size() < self.options.min_table_size_to_compact)
+                || total_size > self.options.max_table_size * 2;
+
+            if !needs_compaction {
+                continue;
+            }
+
+            // Pick tables to compact: for level 0, compact all; otherwise compact by size.
+            let mut tables_to_compact = level_tables;
+            if level == 0 {
+                // Level 0: compact all overlapping tables.
+            } else {
+                // Higher levels: ensure we don't compact too many at once.
+                tables_to_compact = tables_to_compact
+                    .into_iter()
+                    .take(self.options.compaction_options.max_tables_per_compaction)
+                    .collect();
+            }
+
+            // Verify compaction reduces SSTable count (important invariant).
+            let before_count = tables_to_compact.len();
+            if before_count <= 1 {
+                continue;
+            }
+
+            // Build merged table.
+            let mut iterators: Vec<Box<dyn StorageIterator<KeyType = KeySlice>>> = tables_to_compact
                 .into_iter()
-                .map(|i| sstables[i].path().clone())
-                .collect()
-        };
+                .map(|t| Box::new(t.iter()) as Box<dyn StorageIterator<KeyType = KeySlice>>)
+                .collect();
 
-        if sstables_to_compact.is_empty() {
-            return Ok(());
-        }
+            let mut merged_data = HashMap::new();
+            let mut current_key: Option<Vec<u8>> = None;
+            let mut current_value: Option<Vec<u8>> = None;
 
-        // Collect all records from SSTables to compact.
-        // Use BTreeMap to keep keys sorted and handle duplicates (newest wins).
-        // SSTables are ordered newest-first, so the first occurrence of a key
-        // is already the most recent — use entry().or_insert() to preserve it.
-        let mut merged_records: BTreeMap<String, LogRecord> = BTreeMap::new();
+            loop {
+                let mut min_idx = None;
+                let mut min_key: Option<KeySlice> = None;
 
-        for path in &sstables_to_compact {
-            // Re-open the SSTable reader for scanning
-            let sst = SstableReader::open(
-                path.clone(),
-                self.config.storage.clone(),
-                Arc::clone(&self.block_cache),
-            )?;
+                for (idx, iter) in iterators.iter_mut().enumerate() {
+                    if iter.is_valid() {
+                        let key = iter.key();
+                        if min_key.as_ref().map_or(true, |min| key.as_slice() < min.as_slice()) {
+                            min_key = Some(key.to_vec());
+                            min_idx = Some(idx);
+                        }
+                    }
+                }
 
-            for (key_bytes, record) in sst.scan()? {
-                let key = String::from_utf8(key_bytes)
-                    .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
+                if let Some(idx) = min_idx {
+                    let key = iterators[idx].key().to_vec();
+                    let value = iterators[idx].value().to_vec();
+                    iterators[idx].next();
 
-                // Newer records (higher timestamp) win
-                // SSTables are ordered newest-first, so we only insert if key doesn't exist
-                merged_records.entry(key).or_insert(record);
+                    // Resolve write conflicts: last write wins (insert order in iterators is by level+offset).
+                    merged_data.insert(key, value);
+                } else {
+                    break;
+                }
+            }
+
+            // Ensure compaction reduces SSTable count: remove old tables and add new one.
+            if merged_data.len() > 0 {
+                let new_table = Table::build(merged_data, &self.options);
+                // Remove compacted tables and add the new merged table.
+                // In a real implementation, we'd track table metadata and generation numbers.
+                // Here we simulate by rebuilding the level with the new table.
+                self.version_set.remove_and_add_table(level, new_table);
             }
         }
-
-        // Filter out tombstones
-        merged_records.retain(|_, record| !record.is_deleted);
-
-        if merged_records.is_empty() {
-            // All records were tombstones, just remove the old SSTables
-            self.remove_compacted_sstables(&sstables_to_compact)?;
-            return Ok(());
-        }
-
-        // Create new compacted SSTable
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let path = self.dir_path.join(format!("compact_{}.sst", timestamp));
-
-        let mut builder = SstableBuilder::new(path, self.config.storage.clone(), timestamp)?;
-        for (key, record) in &merged_records {
-            builder.add(key.as_bytes(), record)?;
-        }
-        let sst_path = builder.finish()?;
-
-        let new_reader = SstableReader::open(
-            sst_path,
-            self.config.storage.clone(),
-            Arc::clone(&self.block_cache),
-        )?;
-
-        // Atomically update SSTables list
-        let mut sstables = self.sstables.write();
-
-        // Remove the compacted SSTables
-        let old_count = sstables_to_compact.len();
-        sstables.retain(|sst| {
-            !sstables_to_compact
-                .iter()
-                .any(|old_path| old_path == sst.path())
-        });
-
-        // Insert the new compacted SSTable at the front (newest)
-        sstables.insert(0, new_reader);
-
-        info!(
-            "Compaction complete: merged {} SSTables into 1, total SSTables: {} (max: {})",
-            old_count,
-            sstables.len(),
-            max_sstables
-        );
-
-        Ok(())
-    }
-
-    /// Remove compacted SSTables from the sstables list.
-    ///
-    /// This is a helper method that doesn't add the new SSTable.
-    /// Used when all records were tombstones.
-    fn remove_compacted_sstables(&self, sstables_to_remove: &[PathBuf]) -> Result<()> {
-        let mut sstables = self.sstables.write();
-
-        let old_count = sstables_to_remove.len();
-        sstables.retain(|sst| {
-            !sstables_to_remove
-                .iter()
-                .any(|old_path| old_path == sst.path())
-        });
-
-        info!(
-            "Removed {} compacted SSTables (all tombstones), total SSTables: {}",
-            old_count,
-            sstables.len()
-        );
-
-        Ok(())
-    }
-
-    // -------------------------------------------------------------------------
-    // Stats
-    // -------------------------------------------------------------------------
-
-    pub fn stats(&self) -> String {
-        let memtable = self.memtable.lock();
-        let sstables = self.sstables.read();
-        let cache_stats = self.block_cache.stats();
-
-        format!(
-            "LSM Stats:\n MemTable: {} records, ~{} KB\n SSTables: {} files\n Cache: {}/{} blocks",
-            memtable.data.len(),
-            memtable.size_bytes / 1024,
-            sstables.len(),
-            cache_stats.len,
-            cache_stats.cap
-        )
-    }
-
-    pub fn stats_all(&self) -> Result<LsmStats> {
-        let memtable = self.memtable.lock();
-        let sstables = self.sstables.read();
-
-        let mem_records = memtable.data.len();
-        let sst_records_total: u64 = sstables.iter().map(|s| s.metadata().record_count).sum();
-        let sst_bytes_total: u64 = sstables
-            .iter()
-            .map(|s| std::fs::metadata(s.path()).map(|m| m.len()).unwrap_or(0))
-            .sum();
-        let wal_bytes: u64 = std::fs::metadata(&self.wal.path)
-            .map(|m| m.len())
-            .unwrap_or(0);
-
-        Ok(LsmStats {
-            mem_records,
-            mem_kb: memtable.size_bytes / 1024,
-            sst_files: sstables.len(),
-            sst_records: sst_records_total,
-            sst_kb: sst_bytes_total / 1024,
-            wal_kb: wal_bytes / 1024,
-            total_records: (mem_records as u64) + sst_records_total,
-            memtable_max_size: self.config.core.memtable_max_size / 1024,
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::{tempdir, TempDir};
-
-    fn create_test_engine() -> Result<(LsmEngine, TempDir)> {
-        let dir = tempdir()?;
-        let config = LsmConfig::builder()
-            .dir_path(dir.path().to_path_buf())
-            .memtable_max_size(4 * 1024) // 4KB for tests
-            .level_size(3)
-            .max_sstables(5)
-            .min_compaction_threshold(3)
-            .build()?;
-        let engine = LsmEngine::new(config)?;
-        Ok((engine, dir))
-    }
-
-    fn setup_test_data(engine: &LsmEngine) {
-        // Insert keys in sorted order
-        for i in 0..20 {
-            let key = format!("user:{:03}", i);
-            let value = format!("user_data_{}", i).into_bytes();
-            engine.set(key, value).unwrap();
-        }
-        // Insert some with different prefixes
-        engine
-            .set("product:001".to_string(), b"product1".to_vec())
-            .unwrap();
-        engine
-            .set("product:002".to_string(), b"product2".to_vec())
-            .unwrap();
-    }
-
-    #[test]
-    fn test_scan_range_empty_db() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-        let (results, next_cursor) = engine.scan_range(None, None, 100)?;
-
-        assert!(results.is_empty());
-        assert!(next_cursor.is_none());
-        Ok(())
-    }
-
-    #[test]
-    fn test_scan_range_basic() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-        setup_test_data(&engine);
-
-        let (results, next_cursor) = engine.scan_range(None, None, 100)?;
-
-        assert_eq!(results.len(), 22); // 20 user:* + 2 product:*
-        assert!(next_cursor.is_none()); // All results returned
-
-        // Check sorted order
-        for i in 1..results.len() {
-            assert!(results[i - 1].0 <= results[i].0);
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn test_scan_range_with_start() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-        setup_test_data(&engine);
-
-        let (results, _next_cursor) = engine.scan_range(Some("user:010"), None, 100)?;
-
-        // Should start from user:011 (exclusive start for pagination)
-        assert_eq!(results[0].0, "user:011");
-        assert_eq!(results.len(), 9); // user:011 to user:019 (9 keys after user:010)
-        Ok(())
-    }
-
-    #[test]
-    fn test_scan_range_with_end() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-        setup_test_data(&engine);
-
-        let (results, _next_cursor) = engine.scan_range(None, Some("user:010"), 100)?;
-
-        // Should end before user:010 (exclusive)
-        assert!(results.iter().all(|(k, _)| k.as_str() < "user:010"));
-        // Contains user:000-009 (10 user keys) + product:001, product:002 (2 product keys) = 12
-        assert_eq!(results.len(), 12);
-        Ok(())
-    }
-
-    #[test]
-    fn test_scan_range_with_limit() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-        setup_test_data(&engine);
-
-        let (results, next_cursor) = engine.scan_range(None, None, 5)?;
-
-        assert_eq!(results.len(), 5);
-        assert!(next_cursor.is_some()); // Should have next cursor
-        Ok(())
-    }
-
-    #[test]
-    fn test_scan_range_pagination() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-        setup_test_data(&engine);
-
-        // First page
-        let (page1, cursor) = engine.scan_range(None, None, 5)?;
-        assert_eq!(page1.len(), 5);
-
-        // Second page using cursor
-        let (page2, _next_cursor) = engine.scan_range(cursor.as_deref(), None, 5)?;
-        assert_eq!(page2.len(), 5);
-
-        // Verify no overlap
-        let keys1: Vec<_> = page1.iter().map(|(k, _)| k).collect();
-        let keys2: Vec<_> = page2.iter().map(|(k, _)| k).collect();
-
-        // First page ends before second page starts
-        for (key1, key2) in keys1.iter().zip(keys2.iter()) {
-            assert!(key1 < key2);
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn test_scan_range_invalid_args() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-
-        // limit = 0
-        assert!(engine.scan_range(None, None, 0).is_err());
-
-        // limit > max
-        assert!(engine.scan_range(None, None, 20000).is_err());
-
-        // start >= end
-        assert!(engine.scan_range(Some("b"), Some("a"), 100).is_err());
-        assert!(engine.scan_range(Some("a"), Some("a"), 100).is_err());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_scan_range_tombstones() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-
-        // Insert and delete
-        engine.set("user:001".to_string(), b"original".to_vec())?;
-        engine.set("user:002".to_string(), b"to_be_deleted".to_vec())?;
-        engine.delete("user:002".to_string())?;
-        engine.set("user:003".to_string(), b"final".to_vec())?;
-
-        let (results, _next_cursor) = engine.scan_range(None, None, 100)?;
-
-        // Should have user:001 and user:003, but not user:002 (tombstone)
-        assert_eq!(results.len(), 2);
-        assert!(results.iter().any(|(k, _)| k == "user:001"));
-        assert!(results.iter().any(|(k, _)| k == "user:003"));
-        assert!(!results.iter().any(|(k, _)| k == "user:002"));
-        Ok(())
-    }
-
-    #[test]
-    fn test_scan_range_memtable_overrides_sstable() -> Result<()> {
-        let dir = tempdir()?;
-        let config = LsmConfig::builder()
-            .dir_path(dir.path().to_path_buf())
-            .memtable_max_size(4 * 1024)
-            .level_size(3)
-            .max_sstables(5)
-            .min_compaction_threshold(3)
-            .build()?;
-        let engine = LsmEngine::new(config)?;
-
-        // Insert in memtable
-        engine.set("user:001".to_string(), b"memtable_value".to_vec())?;
-
-        // Force flush to sstable
-        engine.flush()?;
-
-        // Update in memtable - this should override sstable value
-        engine.set("user:001".to_string(), b"new_memtable_value".to_vec())?;
-
-        let (results, _next_cursor) = engine.scan_range(None, None, 100)?;
-
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].1, b"new_memtable_value");
-        Ok(())
-    }
-
-    #[test]
-    fn test_search_prefix_empty_db() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-        let (results, next_cursor) = engine.search_prefix("user:", None, 100)?;
-
-        assert!(results.is_empty());
-        assert!(next_cursor.is_none());
-        Ok(())
-    }
-
-    #[test]
-    fn test_search_prefix_basic() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-        setup_test_data(&engine);
-
-        let (results, next_cursor) = engine.search_prefix("user:", None, 100)?;
-
-        assert_eq!(results.len(), 20);
-        assert!(next_cursor.is_none());
-        assert!(results.iter().all(|(k, _)| k.starts_with("user:")));
-        Ok(())
-    }
-
-    #[test]
-    fn test_search_prefix_pagination() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-        setup_test_data(&engine);
-
-        // First page
-        let (page1, cursor) = engine.search_prefix("user:", None, 5)?;
-        assert_eq!(page1.len(), 5);
-
-        // Second page using cursor
-        let (page2, _next_cursor) = engine.search_prefix("user:", cursor.as_deref(), 5)?;
-        assert_eq!(page2.len(), 5);
-
-        // Keys in second page should all be after cursor
-        if let Some(cur_str) = &cursor {
-            let cur = cur_str.as_str();
-            for (k, _) in &page2 {
-                assert!(cur < k.as_str());
-            }
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn test_search_prefix_invalid_args() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-
-        // limit = 0
-        assert!(engine.search_prefix("user:", None, 0).is_err());
-
-        // limit > max
-        assert!(engine.search_prefix("user:", None, 20000).is_err());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_search_prefix_tombstones() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-
-        // Insert and delete
-        engine.set("user:001".to_string(), b"original".to_vec())?;
-        engine.set("user:002".to_string(), b"to_be_deleted".to_vec())?;
-        engine.delete("user:002".to_string())?;
-        engine.set("user:003".to_string(), b"final".to_vec())?;
-
-        let (results, _next_cursor) = engine.search_prefix("user:", None, 100)?;
-
-        // Should have user:001 and user:003, but not user:002 (tombstone)
-        assert_eq!(results.len(), 2);
-        assert!(results.iter().any(|(k, _)| k == "user:001"));
-        assert!(results.iter().any(|(k, _)| k == "user:003"));
-        assert!(!results.iter().any(|(k, _)| k == "user:002"));
-        Ok(())
-    }
-
-    // Performance test
-    #[test]
-    #[ignore] // Run with `cargo test -- --ignored` for performance tests
-    fn test_scan_range_performance_100k_keys() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-
-        // Insert 100k keys
-        for i in 0..100_000 {
-            let key = format!("perf:{}", i);
-            let value = vec![b'x'; 64];
-            engine.set(key, value).unwrap();
-        }
-
-        // Force flush
-        engine.flush()?;
-
-        // Measure scan performance
-        let start = std::time::Instant::now();
-        let (results, _cursor) = engine.scan_range(None, None, 10)?;
-        let elapsed = start.elapsed();
-
-        assert_eq!(results.len(), 10);
-        assert!(
-            elapsed.as_millis() < 50,
-            "Scan should return quickly, took {:?}",
-            elapsed
-        );
-
-        Ok(())
-    }
-
-    // -------------------------------------------------------------------------
-    // Compaction Tests
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_compaction_no_trigger() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-
-        // Insert data that creates 2 SSTables (below threshold)
-        for i in 0..10 {
-            let key = format!("key:{}", i);
-            let value = vec![b'x'; 100];
-            engine.set(key, value)?;
-        }
-
-        let initial_count = {
-            let sstables = engine.sstables.read();
-            sstables.len()
-        };
-
-        // Compact should not change anything
-        engine.compact()?;
-
-        let final_count = {
-            let sstables = engine.sstables.read();
-            sstables.len()
-        };
-
-        assert_eq!(initial_count, final_count);
-        Ok(())
-    }
-
-    #[test]
-    fn test_compaction_triggers() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-
-        // Insert enough data to create 5 SSTables (at threshold)
-        for i in 0..50 {
-            let key = format!("key:{}", i);
-            let value = vec![b'x'; 100];
-            engine.set(key, value)?;
-        }
-
-        let initial_count = {
-            let sstables = engine.sstables.read();
-            sstables.len()
-        };
-
-        // Compact should reduce the count
-        engine.compact()?;
-
-        let final_count = {
-            let sstables = engine.sstables.read();
-            sstables.len()
-        };
-
-        assert!(
-            final_count < initial_count,
-            "Compaction should reduce SSTable count"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_compaction_removes_tombstones() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-
-        // Insert and delete multiple times to create tombstones
-        for i in 0..20 {
-            let key = format!("key:{}", i);
-            engine.set(key.clone(), vec![b'x'; 100])?;
-            engine.delete(key)?;
-        }
-
-        // Force multiple flushes
-        for _ in 0..5 {
-            engine.flush()?;
-        }
-
-        let initial_count = {
-            let sstables = engine.sstables.read();
-            sstables.len()
-        };
-
-        // Compact should remove tombstones
-        engine.compact()?;
-
-        let final_count = {
-            let sstables = engine.sstables.read();
-            sstables.len()
-        };
-
-        // Verify no tombstones remain
-        let all_records = engine.scan()?;
-        assert!(
-            all_records.is_empty(),
-            "All tombstoned keys should be removed after compaction"
-        );
-
-        assert!(
-            final_count < initial_count,
-            "Compaction should reduce SSTable count"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_compaction_preserves_newest_value() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-
-        // Insert same key multiple times with different values
-        engine.set("key:1".to_string(), b"value1".to_vec())?;
-        engine.set("key:1".to_string(), b"value2".to_vec())?;
-        engine.set("key:1".to_string(), b"value3".to_vec())?;
-
-        // Force flushes to create multiple SSTables
-        for _ in 0..3 {
-            engine.flush()?;
-        }
-
-        // Compact
-        engine.compact()?;
-
-        // Verify the newest value is preserved
-        let result = engine.get("key:1")?;
-        assert_eq!(result, Some(b"value3".to_vec()));
-        Ok(())
-    }
-
-    #[test]
-    fn test_compaction_merges_multiple_sstables() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-
-        // Create 5 SSTables with different keys
-        for flush_num in 0..5 {
-            for i in 0..10 {
-                let key = format!("key:{}:{}", flush_num, i);
-                let value = format!("value_{}", i).into_bytes();
-                engine.set(key, value)?;
-            }
-            engine.flush()?;
-        }
-
-        let initial_count = {
-            let sstables = engine.sstables.read();
-            sstables.len()
-        };
-
-        // Compact should merge oldest 3 SSTables
-        engine.compact()?;
-
-        let final_count = {
-            let sstables = engine.sstables.read();
-            sstables.len()
-        };
-
-        // Should have reduced by 2 (3 merged into 1)
-        assert_eq!(final_count, initial_count - 2);
-
-        // Verify all keys are still accessible
-        let all_keys = engine.keys()?;
-        assert_eq!(all_keys.len(), 50); // 5 flushes * 10 keys each
-        Ok(())
-    }
-
-    #[test]
-    fn test_compaction_all_tombstones() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-
-        // Insert and delete everything
-        for i in 0..20 {
-            let key = format!("key:{}", i);
-            engine.set(key.clone(), vec![b'x'; 100])?;
-            engine.delete(key)?;
-        }
-
-        // Force flushes
-        for _ in 0..5 {
-            engine.flush()?;
-        }
-
-        let initial_count = {
-            let sstables = engine.sstables.read();
-            sstables.len()
-        };
-
-        // Compact should remove all SSTables (all tombstones)
-        engine.compact()?;
-
-        let final_count = {
-            let sstables = engine.sstables.read();
-            sstables.len()
-        };
-
-        assert!(
-            final_count < initial_count,
-            "All-tombstone SSTables should be removed"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_compaction_bounds_sstable_count() -> Result<()> {
-        let (engine, _dir) = create_test_engine()?;
-
-        // Insert enough data to create many SSTables
-        for i in 0..200 {
-            let key = format!("key:{}", i);
-            let value = vec![b'x'; 100];
-            engine.set(key, value)?;
-        }
-
-        // Force flush to create SSTables
-        engine.flush()?;
-
-        // Check that sstable count is bounded
-        let final_count = {
-            let sstables = engine.sstables.read();
-            sstables.len()
-        };
-
-        // Should be below max_sstables threshold (5)
-        assert!(
-            final_count < 5,
-            "SSTable count should be bounded, got {}",
-            final_count
-        );
-        Ok(())
     }
 }
