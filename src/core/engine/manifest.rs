@@ -5,3 +5,9 @@ impl Manifest {
         Self
     }
 }
+
+impl Default for Manifest {
+    fn default() -> Self {
+        Self::new()
+    }
+}

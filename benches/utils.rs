@@ -143,7 +143,7 @@ pub fn create_test_records(
 
 /// Pre-populate engine with keys for read benchmarks
 pub fn pre_populate_for_reads(
-    engine: &LsmEngine,
+    engine: &mut LsmEngine,
     num_keys: usize,
     key_size: usize,
     value_size: usize,

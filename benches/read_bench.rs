@@ -45,7 +45,7 @@ fn bench_read_memtable(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("read_memtable");
-                let engine = apexstore::LsmEngine::new(
+                let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(nk * 220)
@@ -92,7 +92,7 @@ fn bench_read_sstable_cold(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("read_sstable_cold");
-                let engine = apexstore::LsmEngine::new(
+                let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(nk * 110 / 2)
@@ -140,7 +140,7 @@ fn bench_read_sstable_warm(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("read_sstable_warm");
-                let engine = apexstore::LsmEngine::new(
+                let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(nk * 110 / 2)
@@ -193,7 +193,7 @@ fn bench_bloom_filter(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("bloom_filter");
-                let engine = apexstore::LsmEngine::new(
+                let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(nk * 110 / 2)
@@ -239,7 +239,7 @@ fn bench_read_latency(c: &mut Criterion) {
 
     group.bench_function("memtable_1k", |b| {
         let (temp_dir, data_dir) = setup_temp_dir("read_latency_memtable");
-        let engine = apexstore::LsmEngine::new(
+        let mut engine = apexstore::LsmEngine::new(
             LsmConfig::builder()
                 .dir_path(data_dir.clone())
                 .memtable_max_size(1_000 * 220)
@@ -311,7 +311,7 @@ fn bench_scan_sequential(c: &mut Criterion) {
             &(num_keys, 10, 100),
             |b, &(nk, ks, vs)| {
                 let (temp_dir, data_dir) = setup_temp_dir("scan_sequential");
-                let engine = apexstore::LsmEngine::new(
+                let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(nk * (ks + vs) / 2)
@@ -330,7 +330,7 @@ fn bench_scan_sequential(c: &mut Criterion) {
                 engine.flush_memtable().unwrap();
 
                 b.iter(|| {
-                    let results = engine.scan().unwrap();
+                    let results = engine.scan("default", None, None, None).unwrap();
                     assert_eq!(results.len(), nk);
                 });
 

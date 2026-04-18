@@ -92,5 +92,5 @@ async fn main() -> std::io::Result<()> {
 
     apexstore::api::start_server(engine, server_config)
         .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+        .map_err(|e| io::Error::other(e.to_string()))
 }

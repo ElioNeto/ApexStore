@@ -41,7 +41,7 @@ fn bench_ycsb_type_a(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("ycsb_type_a");
-                let engine = apexstore::LsmEngine::new(
+                let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(nk * 220)
@@ -92,7 +92,7 @@ fn bench_ycsb_type_b(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("ycsb_type_b");
-                let engine = apexstore::LsmEngine::new(
+                let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(16 * 1024 * 1024)
@@ -147,7 +147,7 @@ fn bench_ycsb_type_c(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("ycsb_type_c");
-                let engine = apexstore::LsmEngine::new(
+                let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(16 * 1024 * 1024)
@@ -201,7 +201,7 @@ fn bench_workload_balanced(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("workload_balanced");
-                let engine = apexstore::LsmEngine::new(
+                let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(32 * 1024 * 1024)
@@ -255,7 +255,7 @@ fn bench_workload_read_heavy(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("workload_read_heavy");
-                let engine = apexstore::LsmEngine::new(
+                let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(16 * 1024 * 1024)
@@ -310,7 +310,7 @@ fn bench_workload_write_heavy(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("workload_write_heavy");
-                let engine = apexstore::LsmEngine::new(
+                let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(32 * 1024 * 1024)

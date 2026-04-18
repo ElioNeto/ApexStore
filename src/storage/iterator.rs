@@ -126,19 +126,19 @@ mod tests {
 
         // First key
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_001");
-        assert_eq!(iter.value().value, b"value_001");
+        assert_eq!(iter.key().as_slice(), b"key_001");
+        assert_eq!(iter.value(), b"value_001");
 
         // Second key
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_010");
-        assert_eq!(iter.value().value, b"value_010");
+        assert_eq!(iter.key().as_slice(), b"key_010");
+        assert_eq!(iter.value(), b"value_010");
 
         // Third key
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_020");
+        assert_eq!(iter.key().as_slice(), b"key_020");
     }
 
     #[test]
@@ -167,13 +167,13 @@ mod tests {
         // Seek to exact key
         iter.seek(b"key_020");
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_020");
-        assert_eq!(iter.value().value, b"value_020");
+        assert_eq!(iter.key().as_slice(), b"key_020");
+        assert_eq!(iter.value(), b"value_020");
 
         // Continue iterating
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_030");
+        assert_eq!(iter.key().as_slice(), b"key_030");
     }
 
     #[test]
@@ -184,7 +184,7 @@ mod tests {
         // Seek to key between existing keys (should find next key)
         iter.seek(b"key_015");
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_020"); // Next key after key_015
+        assert_eq!(iter.key().as_slice(), b"key_020"); // Next key after key_015
     }
 
     #[test]
@@ -195,7 +195,7 @@ mod tests {
         // Seek before first key
         iter.seek(b"key_000");
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_001"); // First key
+        assert_eq!(iter.key().as_slice(), b"key_001"); // First key
     }
 
     #[test]
@@ -216,7 +216,7 @@ mod tests {
         // Seek to last key
         iter.seek(b"key_100");
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_100");
+        assert_eq!(iter.key().as_slice(), b"key_100");
 
         // Next should be invalid
         iter.next();
@@ -243,7 +243,7 @@ mod tests {
         let mut iter = MemTableIterator::new(&map);
 
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"only_key");
+        assert_eq!(iter.key().as_slice(), b"only_key");
 
         iter.next();
         assert!(!iter.is_valid());
@@ -257,15 +257,15 @@ mod tests {
         let mut iter = MemTableIterator::new_from(&map, "key_020");
 
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_020");
+        assert_eq!(iter.key().as_slice(), b"key_020");
 
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_030");
+        assert_eq!(iter.key().as_slice(), b"key_030");
 
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_100");
+        assert_eq!(iter.key().as_slice(), b"key_100");
 
         iter.next();
         assert!(!iter.is_valid());
@@ -291,17 +291,17 @@ mod tests {
 
         // Should iterate over all entries, including tombstones
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_001");
-        assert!(!iter.value().is_deleted);
+        assert_eq!(iter.key().as_slice(), b"key_001");
+        assert!(!iter.value().is_empty()); // Not a tombstone
 
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_002");
-        assert!(iter.value().is_deleted); // Tombstone
+        assert_eq!(iter.key().as_slice(), b"key_002");
+        assert!(iter.value().is_empty()); // Tombstone
 
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_003");
-        assert!(!iter.value().is_deleted);
+        assert_eq!(iter.key().as_slice(), b"key_003");
+        assert!(!iter.value().is_empty()); // Not a tombstone
     }
 }

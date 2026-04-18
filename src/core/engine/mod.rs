@@ -62,7 +62,7 @@ impl Default for EngineOptions {
 /// The core engine that manages LSM-tree structure and compaction.
 pub struct Engine<C: Cache> {
     options: EngineOptions,
-    manifest: Manifest,
+    _manifest: Manifest,
     version_set: VersionSet<C>,
     /// Memtables indexed by column family.
     memtables: HashMap<String, Vec<MemTable>>,
@@ -154,7 +154,7 @@ impl<C: Cache> Engine<C> {
         mem[last].put(key.clone(), value.clone());
         *self.memtable_bytes.entry(cf.to_string()).or_default() += key.len() + value.len();
         if self.memtable_bytes[cf] >= self.write_buffer_limit {
-            self.flush_memtable(cf);
+            self.flush_memtable_impl(cf);
         }
         Ok(())
     }
@@ -180,7 +180,7 @@ impl<C: Cache> Engine<C> {
         mem[last].delete(key.clone());
         *self.memtable_bytes.entry(cf.to_string()).or_default() += key.len();
         if self.memtable_bytes[cf] >= self.write_buffer_limit {
-            self.flush_memtable(cf);
+            self.flush_memtable_impl(cf);
         }
         Ok(())
     }
@@ -214,7 +214,11 @@ impl<C: Cache> Engine<C> {
         self.get_cf("default", key)
     }
 
-    pub fn scan(
+    pub fn scan(&self) -> crate::infra::error::Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.scan_cf("default", None, None, None)
+    }
+
+    pub fn scan_cf(
         &self,
         cf: &str,
         lower: Option<&[u8]>,
@@ -249,6 +253,38 @@ impl<C: Cache> Engine<C> {
         Ok(results)
     }
 
+    pub fn scan_range(
+        &self,
+        lower: Option<&str>,
+        upper: Option<&str>,
+        limit: usize,
+    ) -> crate::infra::error::Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<String>)> {
+        let l_bytes = lower.map(|s| s.as_bytes());
+        let u_bytes = upper.map(|s| s.as_bytes());
+        let results = self.scan_cf("default", l_bytes, u_bytes, Some(limit))?;
+        let next_cursor = if results.len() >= limit && !results.is_empty() {
+             // Use the last key + some increment as next cursor if we want real pagination,
+             // but for now let's just use the last key as a string if possible.
+             Some(String::from_utf8_lossy(&results.last().unwrap().0).to_string())
+        } else {
+            None
+        };
+        Ok((results, next_cursor))
+    }
+
+    pub fn search_prefix(
+        &self,
+        prefix: &str,
+        _cursor: Option<&str>,
+        limit: usize,
+    ) -> crate::infra::error::Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<String>)> {
+        // Simple implementation: scan with prefix as lower bound
+        let results = self.scan_cf("default", Some(prefix.as_bytes()), None, Some(limit))?;
+        // Filter results that actually start with prefix
+        let filtered: Vec<_> = results.into_iter().filter(|(k, _)| k.starts_with(prefix.as_bytes())).collect();
+        Ok((filtered, None))
+    }
+
     pub fn keys(&self) -> crate::infra::error::Result<Vec<Vec<u8>>> {
         Ok(self.memtables.get("default").map_or(Vec::new(), |m| {
             m.iter().flat_map(|mt| mt.data.keys().cloned()).collect()
@@ -278,7 +314,12 @@ impl<C: Cache> Engine<C> {
         Vec::new()
     }
 
-    fn flush_memtable(&mut self, cf: &str) {
+    pub fn flush_memtable(&mut self) -> crate::infra::error::Result<()> {
+        self.flush_memtable_impl("default");
+        Ok(())
+    }
+
+    fn flush_memtable_impl(&mut self, cf: &str) {
         if let Some(memtables) = self.memtables.get_mut(cf) {
             if let Some(mem) = memtables.pop() {
                 let table = Table::build(mem.data.into_iter().collect(), &self.options);
@@ -291,7 +332,7 @@ impl<C: Cache> Engine<C> {
     pub fn force_flush(&mut self) {
         let keys: Vec<String> = self.memtables.keys().cloned().collect();
         for cf in keys {
-            self.flush_memtable(&cf);
+            self.flush_memtable_impl(&cf);
         }
     }
 
@@ -354,7 +395,7 @@ impl<C: Cache> Engine<C> {
                         let key = iter.key();
                         if min_key
                             .as_ref()
-                            .map_or(true, |min| key.as_slice() < min.as_slice())
+                            .is_none_or(|min| key.as_slice() < min.as_slice())
                         {
                             min_key = Some(key);
                             min_idx = Some(idx);
@@ -375,7 +416,7 @@ impl<C: Cache> Engine<C> {
             }
 
             // Ensure compaction reduces SSTable count: remove old tables and add new one.
-            if merged_data.len() > 0 {
+            if !merged_data.is_empty() {
                 let new_table = Table::build(merged_data, &self.options);
                 // Remove compacted tables and add new merged table.
                 // In a real implementation, we'd track table metadata and generation numbers.
