@@ -1,4 +1,4 @@
-use apexstore::infra::config::{CoreConfig, LsmConfig, StorageConfig};
+use apexstore::infra::config::LsmConfig;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use rand::Rng;
 use std::path::PathBuf;
@@ -41,18 +41,13 @@ fn bench_ycsb_type_a(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("ycsb_type_a");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: nk * 220,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 64,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.01,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(nk * 220)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
@@ -97,18 +92,15 @@ fn bench_ycsb_type_b(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("ycsb_type_b");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: 16 * 1024 * 1024,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 512,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.001,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(16 * 1024 * 1024)
+                        .block_cache_size_mb(512)
+                        .bloom_false_positive_rate(0.001)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
@@ -155,18 +147,15 @@ fn bench_ycsb_type_c(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("ycsb_type_c");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: 16 * 1024 * 1024,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 1024,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.001,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(16 * 1024 * 1024)
+                        .block_cache_size_mb(1024)
+                        .bloom_false_positive_rate(0.001)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
@@ -178,7 +167,6 @@ fn bench_ycsb_type_c(c: &mut Criterion) {
 
                 engine.flush_memtable().unwrap();
 
-                // Warm cache
                 let warmup = nk.min(10_000);
                 for key in keys.iter().take(warmup) {
                     let _ = engine.get(key.as_str()).unwrap();
@@ -213,18 +201,14 @@ fn bench_workload_balanced(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("workload_balanced");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: 32 * 1024 * 1024,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 256,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.01,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(32 * 1024 * 1024)
+                        .block_cache_size_mb(256)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
@@ -271,18 +255,15 @@ fn bench_workload_read_heavy(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("workload_read_heavy");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: 16 * 1024 * 1024,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 512,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.001,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(16 * 1024 * 1024)
+                        .block_cache_size_mb(512)
+                        .bloom_false_positive_rate(0.001)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
@@ -329,18 +310,14 @@ fn bench_workload_write_heavy(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("workload_write_heavy");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: 32 * 1024 * 1024,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 128,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.01,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(32 * 1024 * 1024)
+                        .block_cache_size_mb(128)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();

@@ -664,8 +664,10 @@ impl LsmEngine {
             return Ok(());
         }
 
-        // Collect all records from SSTables to compact
-        // Use BTreeMap to keep keys sorted and handle duplicates (newest wins)
+        // Collect all records from SSTables to compact.
+        // Use BTreeMap to keep keys sorted and handle duplicates (newest wins).
+        // SSTables are ordered newest-first, so the first occurrence of a key
+        // is already the most recent — use entry().or_insert() to preserve it.
         let mut merged_records: BTreeMap<String, LogRecord> = BTreeMap::new();
 
         for path in &sstables_to_compact {
@@ -807,9 +809,9 @@ impl LsmEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use tempfile::{tempdir, TempDir};
 
-    fn create_test_engine() -> Result<LsmEngine> {
+    fn create_test_engine() -> Result<(LsmEngine, TempDir)> {
         let dir = tempdir()?;
         let config = LsmConfig::builder()
             .dir_path(dir.path().to_path_buf())
@@ -818,7 +820,8 @@ mod tests {
             .max_sstables(5)
             .min_compaction_threshold(3)
             .build()?;
-        LsmEngine::new(config)
+        let engine = LsmEngine::new(config)?;
+        Ok((engine, dir))
     }
 
     fn setup_test_data(engine: &LsmEngine) {
@@ -839,7 +842,7 @@ mod tests {
 
     #[test]
     fn test_scan_range_empty_db() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
         let (results, next_cursor) = engine.scan_range(None, None, 100)?;
 
         assert!(results.is_empty());
@@ -849,7 +852,7 @@ mod tests {
 
     #[test]
     fn test_scan_range_basic() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
         setup_test_data(&engine);
 
         let (results, next_cursor) = engine.scan_range(None, None, 100)?;
@@ -866,7 +869,7 @@ mod tests {
 
     #[test]
     fn test_scan_range_with_start() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
         setup_test_data(&engine);
 
         let (results, _next_cursor) = engine.scan_range(Some("user:010"), None, 100)?;
@@ -879,7 +882,7 @@ mod tests {
 
     #[test]
     fn test_scan_range_with_end() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
         setup_test_data(&engine);
 
         let (results, _next_cursor) = engine.scan_range(None, Some("user:010"), 100)?;
@@ -893,7 +896,7 @@ mod tests {
 
     #[test]
     fn test_scan_range_with_limit() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
         setup_test_data(&engine);
 
         let (results, next_cursor) = engine.scan_range(None, None, 5)?;
@@ -905,7 +908,7 @@ mod tests {
 
     #[test]
     fn test_scan_range_pagination() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
         setup_test_data(&engine);
 
         // First page
@@ -929,7 +932,7 @@ mod tests {
 
     #[test]
     fn test_scan_range_invalid_args() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
 
         // limit = 0
         assert!(engine.scan_range(None, None, 0).is_err());
@@ -946,7 +949,7 @@ mod tests {
 
     #[test]
     fn test_scan_range_tombstones() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
 
         // Insert and delete
         engine.set("user:001".to_string(), b"original".to_vec())?;
@@ -994,7 +997,7 @@ mod tests {
 
     #[test]
     fn test_search_prefix_empty_db() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
         let (results, next_cursor) = engine.search_prefix("user:", None, 100)?;
 
         assert!(results.is_empty());
@@ -1004,7 +1007,7 @@ mod tests {
 
     #[test]
     fn test_search_prefix_basic() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
         setup_test_data(&engine);
 
         let (results, next_cursor) = engine.search_prefix("user:", None, 100)?;
@@ -1017,7 +1020,7 @@ mod tests {
 
     #[test]
     fn test_search_prefix_pagination() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
         setup_test_data(&engine);
 
         // First page
@@ -1040,7 +1043,7 @@ mod tests {
 
     #[test]
     fn test_search_prefix_invalid_args() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
 
         // limit = 0
         assert!(engine.search_prefix("user:", None, 0).is_err());
@@ -1053,7 +1056,7 @@ mod tests {
 
     #[test]
     fn test_search_prefix_tombstones() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
 
         // Insert and delete
         engine.set("user:001".to_string(), b"original".to_vec())?;
@@ -1075,7 +1078,7 @@ mod tests {
     #[test]
     #[ignore] // Run with `cargo test -- --ignored` for performance tests
     fn test_scan_range_performance_100k_keys() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
 
         // Insert 100k keys
         for i in 0..100_000 {
@@ -1108,7 +1111,7 @@ mod tests {
 
     #[test]
     fn test_compaction_no_trigger() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
 
         // Insert data that creates 2 SSTables (below threshold)
         for i in 0..10 {
@@ -1136,7 +1139,7 @@ mod tests {
 
     #[test]
     fn test_compaction_triggers() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
 
         // Insert enough data to create 5 SSTables (at threshold)
         for i in 0..50 {
@@ -1167,7 +1170,7 @@ mod tests {
 
     #[test]
     fn test_compaction_removes_tombstones() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
 
         // Insert and delete multiple times to create tombstones
         for i in 0..20 {
@@ -1210,7 +1213,7 @@ mod tests {
 
     #[test]
     fn test_compaction_preserves_newest_value() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
 
         // Insert same key multiple times with different values
         engine.set("key:1".to_string(), b"value1".to_vec())?;
@@ -1233,7 +1236,7 @@ mod tests {
 
     #[test]
     fn test_compaction_merges_multiple_sstables() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
 
         // Create 5 SSTables with different keys
         for flush_num in 0..5 {
@@ -1269,7 +1272,7 @@ mod tests {
 
     #[test]
     fn test_compaction_all_tombstones() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
 
         // Insert and delete everything
         for i in 0..20 {
@@ -1305,7 +1308,7 @@ mod tests {
 
     #[test]
     fn test_compaction_bounds_sstable_count() -> Result<()> {
-        let engine = create_test_engine()?;
+        let (engine, _dir) = create_test_engine()?;
 
         // Insert enough data to create many SSTables
         for i in 0..200 {
