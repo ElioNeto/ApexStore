@@ -222,7 +222,11 @@ impl SstableReader {
                 // Use bytes comparison to avoid String allocation
                 block.first_key.as_slice() <= start_key.as_bytes()
             });
-            if idx == 0 { 0 } else { idx - 1 }
+            if idx == 0 {
+                0
+            } else {
+                idx - 1
+            }
         } else {
             // Start from first block
             0

@@ -266,10 +266,10 @@ impl<C: Cache> Engine<C> {
             b
         });
         let u_bytes = upper.map(|s| s.as_bytes());
-        
+
         let results = self.scan_cf("default", l_bytes.as_deref(), u_bytes, Some(limit))?;
         let next_cursor = if results.len() >= limit && !results.is_empty() {
-             Some(String::from_utf8_lossy(&results.last().unwrap().0).to_string())
+            Some(String::from_utf8_lossy(&results.last().unwrap().0).to_string())
         } else {
             None
         };
@@ -285,7 +285,10 @@ impl<C: Cache> Engine<C> {
         // Simple implementation: scan with prefix as lower bound
         let results = self.scan_cf("default", Some(prefix.as_bytes()), None, Some(limit))?;
         // Filter results that actually start with prefix
-        let filtered: Vec<_> = results.into_iter().filter(|(k, _)| k.starts_with(prefix.as_bytes())).collect();
+        let filtered: Vec<_> = results
+            .into_iter()
+            .filter(|(k, _)| k.starts_with(prefix.as_bytes()))
+            .collect();
         Ok((filtered, None))
     }
 

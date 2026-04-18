@@ -1,5 +1,5 @@
-use apexstore::{LsmConfig, LsmEngine};
 use apexstore::infra::error::LsmError;
+use apexstore::{LsmConfig, LsmEngine};
 use tempfile::tempdir;
 
 use std::fs::OpenOptions;
