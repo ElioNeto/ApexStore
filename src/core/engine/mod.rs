@@ -1,6 +1,2 @@
-pub mod compaction;
-pub mod engine;
-pub mod manifest;
-pub mod version_set;
-
-pub use engine::*;
+// Engine sub-module implementation.
+// Keep this file to satisfy the module tree and avoid file/directory name conflicts.
