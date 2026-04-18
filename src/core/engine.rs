@@ -281,7 +281,7 @@ impl<C: Cache> Engine<C> {
             // Ensure compaction reduces SSTable count: remove old tables and add new one.
             if merged_data.len() > 0 {
                 let new_table = Table::build(merged_data, &self.options);
-                // Remove compacted tables and add the new merged table.
+                // Remove compacted tables and add new merged table.
                 // In a real implementation, we'd track table metadata and generation numbers.
                 // Here we simulate by rebuilding the level with the new table.
                 self.version_set.remove_and_add_table(level, new_table);
