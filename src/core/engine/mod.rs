@@ -6,9 +6,7 @@ use std::collections::HashMap;
 use crate::core::iterators::StorageIterator;
 use crate::core::key::KeySlice;
 use crate::core::table::Table;
-use crate::core::version::Version;
 use crate::storage::cache::Cache;
-use crate::storage::sst_iterator::SstIterator;
 
 use self::compaction::Compaction;
 use self::manifest::Manifest;
@@ -331,8 +329,8 @@ impl<C: Cache> Engine<C> {
                     .collect();
 
             let mut merged_data = HashMap::new();
-            let mut current_key: Option<Vec<u8>> = None;
-            let mut current_value: Option<Vec<u8>> = None;
+            let _current_key: Option<Vec<u8>> = None;
+            let _current_value: Option<Vec<u8>> = None;
 
             loop {
                 let mut min_idx = None;

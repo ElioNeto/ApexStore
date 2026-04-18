@@ -1,5 +1,4 @@
 use crate::core::engine::{DEFAULT_SCAN_LIMIT, MAX_SCAN_LIMIT};
-use crate::LsmEngine;
 
 pub fn main() -> crate::infra::error::Result<()> {
     Ok(())

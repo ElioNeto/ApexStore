@@ -1,4 +1,3 @@
-use crate::core::engine::LsmEngine;
 use crate::storage::cache::Cache;
 
 pub struct VersionSet<C: Cache> {
