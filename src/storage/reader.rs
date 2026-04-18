@@ -3,8 +3,8 @@ use crate::infra::codec::decode;
 use crate::infra::config::StorageConfig;
 use crate::infra::error::{LsmError, Result};
 use crate::storage::block::Block;
-use crate::storage::cache::GlobalBlockCache;
 use crate::storage::builder::{BlockMeta, MetaBlock};
+use crate::storage::cache::GlobalBlockCache;
 use bloomfilter::Bloom;
 use lz4_flex::decompress_size_prepended;
 use parking_lot::Mutex;
@@ -402,9 +402,10 @@ impl SstableReader {
     /// Returns the block metadata if the key might exist in this block.
     fn read_block_by_key(&self, key: &[u8]) -> Option<BlockMeta> {
         // Binary search for the first block where first_key >= key
-        let idx = self.metadata.blocks.partition_point(|block| {
-            block.first_key.as_slice() < key
-        });
+        let idx = self
+            .metadata
+            .blocks
+            .partition_point(|block| block.first_key.as_slice() < key);
 
         if idx == 0 {
             // Key is before first block's first_key; no block can contain it
