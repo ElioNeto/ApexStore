@@ -216,12 +216,13 @@ impl SstableReader {
 
         // Find starting block using sparse index
         let start_block_idx = if let Some(start_key) = start {
-            // Binary search for the first block where first_key >= start_key
-            // partition_point returns the first index where the predicate is false
-            self.metadata.blocks.partition_point(|block| {
+            // Binary search for the first block where first_key > start_key
+            // and then step back by 1 to get the block that could contain start_key.
+            let idx = self.metadata.blocks.partition_point(|block| {
                 // Use bytes comparison to avoid String allocation
-                block.first_key.as_slice() < start_key.as_bytes()
-            })
+                block.first_key.as_slice() <= start_key.as_bytes()
+            });
+            if idx == 0 { 0 } else { idx - 1 }
         } else {
             // Start from first block
             0
@@ -401,11 +402,11 @@ impl SstableReader {
     /// Find block metadata by key using sparse index.
     /// Returns the block metadata if the key might exist in this block.
     fn read_block_by_key(&self, key: &[u8]) -> Option<BlockMeta> {
-        // Binary search for the first block where first_key >= key
+        // Binary search for the first block where first_key > key
         let idx = self
             .metadata
             .blocks
-            .partition_point(|block| block.first_key.as_slice() < key);
+            .partition_point(|block| block.first_key.as_slice() <= key);
 
         if idx == 0 {
             // Key is before first block's first_key; no block can contain it

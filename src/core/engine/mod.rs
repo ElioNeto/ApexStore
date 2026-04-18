@@ -74,16 +74,17 @@ pub struct Engine<C: Cache> {
 
 pub type LsmEngineGeneric<C> = Engine<C>;
 pub type LsmEngine = Engine<crate::storage::cache::GlobalBlockCache>;
+pub type ScanRangeResult = crate::infra::error::Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<String>)>;
 
 struct MemTable {
-    data: HashMap<Vec<u8>, Vec<u8>>,
+    data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
     size: usize,
 }
 
 impl MemTable {
     fn new() -> Self {
         Self {
-            data: HashMap::new(),
+            data: std::collections::BTreeMap::new(),
             size: 0,
         }
     }
@@ -112,7 +113,7 @@ impl<C: Cache> Engine<C> {
     pub fn new_generic(options: EngineOptions, cache: C) -> Self {
         Self {
             options: options.clone(),
-            manifest: Manifest::new(),
+            _manifest: Manifest::new(),
             version_set: VersionSet::new(options.clone(), cache),
             memtables: HashMap::new(),
             write_buffer_limit: options.write_buffer_size * options.max_write_buffer_number,
@@ -130,7 +131,7 @@ impl Engine<crate::storage::cache::GlobalBlockCache> {
         );
         Ok(Engine {
             options: options.clone(),
-            manifest: Manifest::new(),
+            _manifest: Manifest::new(),
             version_set: VersionSet::new(options.clone(), (*cache).clone()),
             memtables: HashMap::new(),
             write_buffer_limit: options.write_buffer_size * options.max_write_buffer_number,
@@ -258,13 +259,16 @@ impl<C: Cache> Engine<C> {
         lower: Option<&str>,
         upper: Option<&str>,
         limit: usize,
-    ) -> crate::infra::error::Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<String>)> {
-        let l_bytes = lower.map(|s| s.as_bytes());
+    ) -> ScanRangeResult {
+        let l_bytes = lower.map(|s| {
+            let mut b = s.as_bytes().to_vec();
+            b.push(0);
+            b
+        });
         let u_bytes = upper.map(|s| s.as_bytes());
-        let results = self.scan_cf("default", l_bytes, u_bytes, Some(limit))?;
+        
+        let results = self.scan_cf("default", l_bytes.as_deref(), u_bytes, Some(limit))?;
         let next_cursor = if results.len() >= limit && !results.is_empty() {
-             // Use the last key + some increment as next cursor if we want real pagination,
-             // but for now let's just use the last key as a string if possible.
              Some(String::from_utf8_lossy(&results.last().unwrap().0).to_string())
         } else {
             None
@@ -277,7 +281,7 @@ impl<C: Cache> Engine<C> {
         prefix: &str,
         _cursor: Option<&str>,
         limit: usize,
-    ) -> crate::infra::error::Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<String>)> {
+    ) -> ScanRangeResult {
         // Simple implementation: scan with prefix as lower bound
         let results = self.scan_cf("default", Some(prefix.as_bytes()), None, Some(limit))?;
         // Filter results that actually start with prefix
@@ -382,7 +386,7 @@ impl<C: Cache> Engine<C> {
                     .map(|t| Box::new(t.iter()) as Box<dyn StorageIterator<KeyType = KeySlice>>)
                     .collect();
 
-            let mut merged_data = HashMap::new();
+            let mut merged_data = std::collections::BTreeMap::new();
             let _current_key: Option<Vec<u8>> = None;
             let _current_value: Option<Vec<u8>> = None;
 

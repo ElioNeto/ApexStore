@@ -267,7 +267,7 @@ fn bench_read_latency(c: &mut Criterion) {
 
     group.bench_function("sstable_cold_1k", |b| {
         let (temp_dir, data_dir) = setup_temp_dir("read_latency_sstable");
-        let engine = apexstore::LsmEngine::new(
+        let mut engine = apexstore::LsmEngine::new(
             LsmConfig::builder()
                 .dir_path(data_dir.clone())
                 .memtable_max_size(1_000 * 110 / 2)
@@ -330,7 +330,7 @@ fn bench_scan_sequential(c: &mut Criterion) {
                 engine.flush_memtable().unwrap();
 
                 b.iter(|| {
-                    let results = engine.scan("default", None, None, None).unwrap();
+                    let results = engine.scan().unwrap();
                     assert_eq!(results.len(), nk);
                 });
 

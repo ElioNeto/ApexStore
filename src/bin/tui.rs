@@ -274,7 +274,7 @@ impl App {
             }
 
             // ALL ──────────────────────────────────────────────────────────────
-            "ALL" => match self.engine.scan("default", None, None, None) {
+            "ALL" => match self.engine.scan() {
                 Ok(rows) if rows.is_empty() => self.log_push("\u{26a0}  Database is empty", C_WARN),
                 Ok(rows) => {
                     self.log_push(format!("\u{2713} {} record(s):", rows.len()), C_OK);
@@ -499,7 +499,7 @@ impl App {
                     self.incr_ops();
                 }
                 self.log_push("  10 DEL ops done".to_string(), C_TEXT);
-                let count = self.engine.count().unwrap_or_else(|_| 0);
+                let count = self.engine.count().unwrap_or(0);
                 self.log_push(
                     format!(
                         "\u{2713} Demo done in {:.2?}  active keys={}",

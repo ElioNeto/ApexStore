@@ -1,12 +1,14 @@
 #[derive(Clone)]
-pub struct Table;
+pub struct Table {
+    pub data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
+}
 
 impl Table {
     pub fn build(
-        _data: std::collections::HashMap<Vec<u8>, Vec<u8>>,
+        data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
         _options: &crate::core::engine::EngineOptions,
     ) -> Self {
-        Self
+        Self { data }
     }
     pub fn size(&self) -> usize {
         0
