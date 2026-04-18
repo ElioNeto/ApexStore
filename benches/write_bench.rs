@@ -1,4 +1,4 @@
-use apexstore::infra::config::{CoreConfig, LsmConfig, StorageConfig};
+use apexstore::infra::config::LsmConfig;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -42,18 +42,13 @@ fn bench_single_write(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(value_size), &(), |b, &_| {
             let (temp_dir, data_dir) = setup_temp_dir("single_write");
-            let engine = apexstore::LsmEngine::new(LsmConfig {
-                core: CoreConfig {
-                    dir_path: data_dir.clone(),
-                    memtable_max_size: 16 * 1024 * 1024,
-                },
-                storage: StorageConfig {
-                    block_size: 4096,
-                    block_cache_size_mb: 64,
-                    sparse_index_interval: 16,
-                    bloom_false_positive_rate: 0.01,
-                },
-            })
+            let engine = apexstore::LsmEngine::new(
+                LsmConfig::builder()
+                    .dir_path(data_dir.clone())
+                    .memtable_max_size(16 * 1024 * 1024)
+                    .build()
+                    .unwrap(),
+            )
             .unwrap();
 
             let key = String::from("benchmark_key");
@@ -83,18 +78,13 @@ fn bench_batch_write(c: &mut Criterion) {
             &batch_size,
             |b, &bs| {
                 let (temp_dir, data_dir) = setup_temp_dir("batch_write");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: bs * 220,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 64,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.01,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(bs * 220)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let keys: Vec<String> = (0..bs).map(|i| generate_key(i, 10)).collect();
@@ -127,18 +117,13 @@ fn bench_memtable_flush(c: &mut Criterion) {
             &memtable_size,
             |b, &ms| {
                 let (temp_dir, data_dir) = setup_temp_dir("memtable_flush");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: ms,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 64,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.01,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(ms)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let records_per_batch = (ms / 2) / 110;
@@ -175,18 +160,13 @@ fn bench_sstable_flush(c: &mut Criterion) {
         &100_000,
         |b, &_records| {
             let (temp_dir, data_dir) = setup_temp_dir("sstable_flush");
-            let engine = apexstore::LsmEngine::new(LsmConfig {
-                core: CoreConfig {
-                    dir_path: data_dir.clone(),
-                    memtable_max_size: 10 * 1024 * 1024,
-                },
-                storage: StorageConfig {
-                    block_size: 4096,
-                    block_cache_size_mb: 64,
-                    sparse_index_interval: 16,
-                    bloom_false_positive_rate: 0.01,
-                },
-            })
+            let engine = apexstore::LsmEngine::new(
+                LsmConfig::builder()
+                    .dir_path(data_dir.clone())
+                    .memtable_max_size(10 * 1024 * 1024)
+                    .build()
+                    .unwrap(),
+            )
             .unwrap();
 
             let records = 100_000usize;
@@ -233,18 +213,13 @@ fn bench_write_by_size(c: &mut Criterion) {
             &(),
             |b, &_| {
                 let (temp_dir, data_dir) = setup_temp_dir("write_by_size");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: 16 * 1024 * 1024,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 64,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.01,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(16 * 1024 * 1024)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let key = generate_key(0, key_size);
