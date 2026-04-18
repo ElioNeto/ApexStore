@@ -1,4 +1,4 @@
-use apexstore::infra::config::{CoreConfig, LsmConfig, StorageConfig};
+use apexstore::infra::config::LsmConfig;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -45,18 +45,13 @@ fn bench_read_memtable(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("read_memtable");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: nk * 220,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 64,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.01,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(nk * 220)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
@@ -97,18 +92,14 @@ fn bench_read_sstable_cold(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("read_sstable_cold");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: nk * 110 / 2,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 0, // No cache for cold reads
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.01,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(nk * 110 / 2)
+                        .block_cache_size_mb(0)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
@@ -149,18 +140,14 @@ fn bench_read_sstable_warm(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("read_sstable_warm");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: nk * 110 / 2,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 256,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.01,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(nk * 110 / 2)
+                        .block_cache_size_mb(256)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
@@ -206,18 +193,14 @@ fn bench_bloom_filter(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("bloom_filter");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: nk * 110 / 2,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 0,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.01,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(nk * 110 / 2)
+                        .block_cache_size_mb(0)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let existing_keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
@@ -256,18 +239,13 @@ fn bench_read_latency(c: &mut Criterion) {
 
     group.bench_function("memtable_1k", |b| {
         let (temp_dir, data_dir) = setup_temp_dir("read_latency_memtable");
-        let engine = apexstore::LsmEngine::new(LsmConfig {
-            core: CoreConfig {
-                dir_path: data_dir.clone(),
-                memtable_max_size: 1_000 * 220,
-            },
-            storage: StorageConfig {
-                block_size: 4096,
-                block_cache_size_mb: 64,
-                sparse_index_interval: 16,
-                bloom_false_positive_rate: 0.01,
-            },
-        })
+        let engine = apexstore::LsmEngine::new(
+            LsmConfig::builder()
+                .dir_path(data_dir.clone())
+                .memtable_max_size(1_000 * 220)
+                .build()
+                .unwrap(),
+        )
         .unwrap();
 
         let keys: Vec<String> = (0..1_000).map(|i| generate_key(i, 10)).collect();
@@ -289,18 +267,14 @@ fn bench_read_latency(c: &mut Criterion) {
 
     group.bench_function("sstable_cold_1k", |b| {
         let (temp_dir, data_dir) = setup_temp_dir("read_latency_sstable");
-        let engine = apexstore::LsmEngine::new(LsmConfig {
-            core: CoreConfig {
-                dir_path: data_dir.clone(),
-                memtable_max_size: 1_000 * 110 / 2,
-            },
-            storage: StorageConfig {
-                block_size: 4096,
-                block_cache_size_mb: 0,
-                sparse_index_interval: 16,
-                bloom_false_positive_rate: 0.01,
-            },
-        })
+        let engine = apexstore::LsmEngine::new(
+            LsmConfig::builder()
+                .dir_path(data_dir.clone())
+                .memtable_max_size(1_000 * 110 / 2)
+                .block_cache_size_mb(0)
+                .build()
+                .unwrap(),
+        )
         .unwrap();
 
         let keys: Vec<String> = (0..1_000).map(|i| generate_key(i, 10)).collect();
@@ -337,18 +311,13 @@ fn bench_scan_sequential(c: &mut Criterion) {
             &(num_keys, 10, 100),
             |b, &(nk, ks, vs)| {
                 let (temp_dir, data_dir) = setup_temp_dir("scan_sequential");
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: nk * (ks + vs) / 2,
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 64,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.01,
-                    },
-                })
+                let engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(nk * (ks + vs) / 2)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, ks)).collect();
