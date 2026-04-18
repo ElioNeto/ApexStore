@@ -664,8 +664,10 @@ impl LsmEngine {
             return Ok(());
         }
 
-        // Collect all records from SSTables to compact
-        // Use BTreeMap to keep keys sorted and handle duplicates (newest wins)
+        // Collect all records from SSTables to compact.
+        // Use BTreeMap to keep keys sorted and handle duplicates (newest wins).
+        // SSTables are ordered newest-first, so the first occurrence of a key
+        // is already the most recent — use entry().or_insert() to preserve it.
         let mut merged_records: BTreeMap<String, LogRecord> = BTreeMap::new();
 
         for path in &sstables_to_compact {
@@ -680,11 +682,7 @@ impl LsmEngine {
                 let key = String::from_utf8(key_bytes)
                     .map_err(|e| LsmError::CorruptedData(e.to_string()))?;
 
-                // Newer records (higher timestamp) win
-                // SSTables are ordered newest-first, so we only insert if key doesn't exist
-                if !merged_records.contains_key(&key) {
-                    merged_records.insert(key, record);
-                }
+                merged_records.entry(key).or_insert(record);
             }
         }
 
