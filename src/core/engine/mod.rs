@@ -1,2 +1,3 @@
 // Engine sub-module implementation.
-// Keep this file to satisfy the module tree and avoid file/directory name conflicts.
+// This file exists to avoid conflict with src/core/engine.rs.
+// The actual engine implementation lives in src/core/engine/mod.rs.
