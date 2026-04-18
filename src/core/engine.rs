@@ -682,9 +682,7 @@ impl LsmEngine {
 
                 // Newer records (higher timestamp) win
                 // SSTables are ordered newest-first, so we only insert if key doesn't exist
-                if !merged_records.contains_key(&key) {
-                    merged_records.insert(key, record);
-                }
+                merged_records.entry(key).or_insert(record);
             }
         }
 
