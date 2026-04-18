@@ -193,7 +193,8 @@ fn bench_many_sstables(c: &mut Criterion) {
 
                 let records_per_sstable = 1_000;
                 for sstable in 0..sstable_count {
-                    for i in (sstable * records_per_sstable)..((sstable + 1) * records_per_sstable) {
+                    for i in (sstable * records_per_sstable)..((sstable + 1) * records_per_sstable)
+                    {
                         let key = generate_key(i, 10);
                         let value = generate_value(i, 100);
                         engine.set(key, value).unwrap();
