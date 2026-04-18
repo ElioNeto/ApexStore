@@ -169,7 +169,12 @@ impl<C: Cache> Engine<C> {
         }
 
         // Include SSTables.
-        let sst_results = self.version_set.scan(cf, lower, upper, limit.map(|l| l.saturating_sub(results.len())));
+        let sst_results = self.version_set.scan(
+            cf,
+            lower,
+            upper,
+            limit.map(|l| l.saturating_sub(results.len())),
+        );
         results.extend(sst_results);
 
         if let Some(limit) = limit {
@@ -206,7 +211,9 @@ impl<C: Cache> Engine<C> {
             // Check if compaction is needed: any table smaller than min_table_size_to_compact
             // or total size exceeding a threshold triggers compaction.
             let total_size: usize = level_tables.iter().map(|t| t.size()).sum();
-            let needs_compaction = level_tables.iter().any(|t| t.size() < self.options.min_table_size_to_compact)
+            let needs_compaction = level_tables
+                .iter()
+                .any(|t| t.size() < self.options.min_table_size_to_compact)
                 || total_size > self.options.max_table_size * 2;
 
             if !needs_compaction {
@@ -232,10 +239,11 @@ impl<C: Cache> Engine<C> {
             }
 
             // Build merged table.
-            let mut iterators: Vec<Box<dyn StorageIterator<KeyType = KeySlice>>> = tables_to_compact
-                .into_iter()
-                .map(|t| Box::new(t.iter()) as Box<dyn StorageIterator<KeyType = KeySlice>>)
-                .collect();
+            let mut iterators: Vec<Box<dyn StorageIterator<KeyType = KeySlice>>> =
+                tables_to_compact
+                    .into_iter()
+                    .map(|t| Box::new(t.iter()) as Box<dyn StorageIterator<KeyType = KeySlice>>)
+                    .collect();
 
             let mut merged_data = HashMap::new();
             let mut current_key: Option<Vec<u8>> = None;
@@ -248,7 +256,10 @@ impl<C: Cache> Engine<C> {
                 for (idx, iter) in iterators.iter_mut().enumerate() {
                     if iter.is_valid() {
                         let key = iter.key();
-                        if min_key.as_ref().map_or(true, |min| key.as_slice() < min.as_slice()) {
+                        if min_key
+                            .as_ref()
+                            .map_or(true, |min| key.as_slice() < min.as_slice())
+                        {
                             min_key = Some(key.to_vec());
                             min_idx = Some(idx);
                         }
