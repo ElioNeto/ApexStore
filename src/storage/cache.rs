@@ -1,6 +1,11 @@
+use std::sync::{Arc, Mutex};
 use lru::LruCache;
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex};
+
+pub trait Cache: Clone + Send + Sync + 'static {}
+
+impl Cache for Arc<GlobalBlockCache> {}
+impl Cache for GlobalBlockCache {}
 
 type BlockId = (u64, usize);
 
