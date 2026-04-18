@@ -8,58 +8,10 @@
 //! - Merge operations during compaction
 //! - Prefix scans and filtered iterations
 
+use crate::core::iterators::StorageIterator;
+use crate::core::key::KeySlice;
 use crate::core::log_record::LogRecord;
 use std::collections::btree_map;
-
-/// Unified iterator interface for storage layers
-///
-/// This trait provides a common abstraction for iterating over key-value pairs
-/// stored in different layers of the LSM tree (MemTable, SSTables).
-///
-/// # Example
-///
-/// ```ignore
-/// let mut iter = memtable.iter();
-/// iter.seek(b"key_100");
-///
-/// while iter.is_valid() {
-///     let key = iter.key();
-///     let value = iter.value();
-///     println!("{}={:?}", String::from_utf8_lossy(key), value);
-///     iter.next();
-/// }
-/// ```
-pub trait StorageIterator {
-    /// Returns the current key as a byte slice
-    ///
-    /// # Panics
-    /// May panic if called when `is_valid()` returns `false`
-    fn key(&self) -> &[u8];
-
-    /// Returns the current value (LogRecord)
-    ///
-    /// # Panics
-    /// May panic if called when `is_valid()` returns `false`
-    fn value(&self) -> &LogRecord;
-
-    /// Returns `true` if the iterator is pointing to valid data
-    ///
-    /// Must be checked before calling `key()` or `value()`
-    fn is_valid(&self) -> bool;
-
-    /// Advances the iterator to the next position
-    ///
-    /// After calling `next()`, you must check `is_valid()` again
-    fn next(&mut self);
-
-    /// Positions the iterator at the first key >= `key`
-    ///
-    /// If no such key exists, the iterator becomes invalid.
-    ///
-    /// # Arguments
-    /// * `key` - The target key to seek to
-    fn seek(&mut self, key: &[u8]);
-}
 
 /// Iterator over MemTable entries
 ///
@@ -94,15 +46,19 @@ impl<'a> MemTableIterator<'a> {
 }
 
 impl<'a> StorageIterator for MemTableIterator<'a> {
-    fn key(&self) -> &[u8] {
-        self.current
-            .expect("key() called on invalid iterator")
-            .0
-            .as_bytes()
+    type KeyType = KeySlice<'a>;
+
+    fn key(&self) -> Self::KeyType {
+        KeySlice::new(
+            self.current
+                .expect("key() called on invalid iterator")
+                .0
+                .as_bytes(),
+        )
     }
 
-    fn value(&self) -> &LogRecord {
-        self.current.expect("value() called on invalid iterator").1
+    fn value(&self) -> &[u8] {
+        &self.current.expect("value() called on invalid iterator").1.value
     }
 
     fn is_valid(&self) -> bool {

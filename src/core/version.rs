@@ -1,8 +1,8 @@
-use crate::core::engine::LsmEngine;
+use crate::core::engine::{LsmEngine, LsmEngineGeneric};
 use crate::storage::cache::Cache;
 
 pub struct Version<C: Cache> {
-    _engine: std::marker::PhantomData<LsmEngine<C>>,
+    _engine: std::marker::PhantomData<LsmEngineGeneric<C>>,
 }
 
 impl<C: Cache> Version<C> {

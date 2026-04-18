@@ -1,6 +1,6 @@
-use crate::core::engine::LsmEngine;
+use crate::core::engine::{LsmEngine, LsmEngineGeneric};
 use crate::storage::cache::Cache;
 
 pub struct SstIterator<C: Cache> {
-    engine: LsmEngine<C>,
+    engine: LsmEngineGeneric<C>,
 }
