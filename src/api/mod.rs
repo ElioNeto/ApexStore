@@ -11,7 +11,10 @@ impl ServerConfig {
     }
 }
 
-pub async fn start_server(_engine: LsmEngine, _config: ServerConfig) -> crate::infra::error::Result<()> {
+pub async fn start_server(
+    _engine: LsmEngine,
+    _config: ServerConfig,
+) -> crate::infra::error::Result<()> {
     Ok(())
 }
 

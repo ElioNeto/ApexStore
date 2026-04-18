@@ -58,7 +58,11 @@ impl<'a> StorageIterator for MemTableIterator<'a> {
     }
 
     fn value(&self) -> &[u8] {
-        &self.current.expect("value() called on invalid iterator").1.value
+        &self
+            .current
+            .expect("value() called on invalid iterator")
+            .1
+            .value
     }
 
     fn is_valid(&self) -> bool {

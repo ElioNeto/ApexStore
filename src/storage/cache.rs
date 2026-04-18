@@ -1,6 +1,6 @@
-use std::sync::{Arc, Mutex};
 use lru::LruCache;
 use std::num::NonZeroUsize;
+use std::sync::{Arc, Mutex};
 
 pub trait Cache: Clone + Send + Sync + 'static {}
 

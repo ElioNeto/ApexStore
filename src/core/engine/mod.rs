@@ -2,11 +2,11 @@ pub mod compaction;
 pub mod manifest;
 pub mod version_set;
 
-use std::collections::HashMap;
 use crate::core::iterators::StorageIterator;
 use crate::core::key::KeySlice;
 use crate::core::table::Table;
 use crate::storage::cache::Cache;
+use std::collections::HashMap;
 
 use self::compaction::Compaction;
 use self::manifest::Manifest;
@@ -140,8 +140,12 @@ impl Engine<crate::storage::cache::GlobalBlockCache> {
 }
 
 impl<C: Cache> Engine<C> {
-
-    pub fn put_cf(&mut self, cf: &str, key: Vec<u8>, value: Vec<u8>) -> crate::infra::error::Result<()> {
+    pub fn put_cf(
+        &mut self,
+        cf: &str,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    ) -> crate::infra::error::Result<()> {
         let mem = self.memtables.entry(cf.to_string()).or_default();
         if mem.is_empty() {
             mem.push(MemTable::new());
@@ -155,13 +159,18 @@ impl<C: Cache> Engine<C> {
         Ok(())
     }
 
-    pub fn set<K, V>(&mut self, key: K, value: V) -> crate::infra::error::Result<()> 
-    where K: Into<Vec<u8>>, V: Into<Vec<u8>> {
+    pub fn set<K, V>(&mut self, key: K, value: V) -> crate::infra::error::Result<()>
+    where
+        K: Into<Vec<u8>>,
+        V: Into<Vec<u8>>,
+    {
         self.put_cf("default", key.into(), value.into())
     }
 
-    pub fn delete_cf<K>(&mut self, cf: &str, key: K) -> crate::infra::error::Result<()> 
-    where K: Into<Vec<u8>> {
+    pub fn delete_cf<K>(&mut self, cf: &str, key: K) -> crate::infra::error::Result<()>
+    where
+        K: Into<Vec<u8>>,
+    {
         let key = key.into();
         let mem = self.memtables.entry(cf.to_string()).or_default();
         if mem.is_empty() {
@@ -176,13 +185,17 @@ impl<C: Cache> Engine<C> {
         Ok(())
     }
 
-    pub fn delete<K>(&mut self, key: K) -> crate::infra::error::Result<()> 
-    where K: Into<Vec<u8>> {
+    pub fn delete<K>(&mut self, key: K) -> crate::infra::error::Result<()>
+    where
+        K: Into<Vec<u8>>,
+    {
         self.delete_cf("default", key)
     }
 
-    pub fn get_cf<K>(&self, cf: &str, key: K) -> crate::infra::error::Result<Option<Vec<u8>>> 
-    where K: AsRef<[u8]> {
+    pub fn get_cf<K>(&self, cf: &str, key: K) -> crate::infra::error::Result<Option<Vec<u8>>>
+    where
+        K: AsRef<[u8]>,
+    {
         let key = key.as_ref();
         if let Some(memtables) = self.memtables.get(cf) {
             for mem in memtables.iter().rev() {
@@ -194,12 +207,12 @@ impl<C: Cache> Engine<C> {
         Ok(self.version_set.get(cf, key))
     }
 
-    pub fn get<K>(&self, key: K) -> crate::infra::error::Result<Option<Vec<u8>>> 
-    where K: AsRef<[u8]> {
+    pub fn get<K>(&self, key: K) -> crate::infra::error::Result<Option<Vec<u8>>>
+    where
+        K: AsRef<[u8]>,
+    {
         self.get_cf("default", key)
     }
-
-
 
     pub fn scan(
         &self,
@@ -243,9 +256,10 @@ impl<C: Cache> Engine<C> {
     }
 
     pub fn count(&self) -> crate::infra::error::Result<usize> {
-        Ok(self.memtables.get("default").map_or(0, |m| {
-            m.iter().map(|mt| mt.data.len()).sum()
-        }))
+        Ok(self
+            .memtables
+            .get("default")
+            .map_or(0, |m| m.iter().map(|mt| mt.data.len()).sum()))
     }
 
     pub fn stats(&self) -> crate::infra::error::Result<LsmStats> {
@@ -263,7 +277,6 @@ impl<C: Cache> Engine<C> {
     pub fn search_prefix_legacy(&self, _prefix: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
         Vec::new()
     }
-
 
     fn flush_memtable(&mut self, cf: &str) {
         if let Some(memtables) = self.memtables.get_mut(cf) {

@@ -223,7 +223,11 @@ impl App {
                     self.log_push(format!("\u{2713} {} record(s) found:", rows.len()), C_OK);
                     for (k, v) in rows.iter().take(20) {
                         self.log_push(
-                            format!("  {} = {}", String::from_utf8_lossy(k), String::from_utf8_lossy(v)),
+                            format!(
+                                "  {} = {}",
+                                String::from_utf8_lossy(k),
+                                String::from_utf8_lossy(v)
+                            ),
                             C_TEXT,
                         );
                     }
@@ -254,7 +258,11 @@ impl App {
                     );
                     for (k, v) in rows.iter().take(20) {
                         self.log_push(
-                            format!("  {} = {}", String::from_utf8_lossy(k), String::from_utf8_lossy(v)),
+                            format!(
+                                "  {} = {}",
+                                String::from_utf8_lossy(k),
+                                String::from_utf8_lossy(v)
+                            ),
                             C_TEXT,
                         );
                     }
@@ -271,7 +279,14 @@ impl App {
                 Ok(rows) => {
                     self.log_push(format!("\u{2713} {} record(s):", rows.len()), C_OK);
                     for (k, v) in rows.iter().take(30) {
-                        self.log_push(format!("  {} = {}", String::from_utf8_lossy(k), String::from_utf8_lossy(v)), C_TEXT);
+                        self.log_push(
+                            format!(
+                                "  {} = {}",
+                                String::from_utf8_lossy(k),
+                                String::from_utf8_lossy(v)
+                            ),
+                            C_TEXT,
+                        );
                     }
                     if rows.len() > 30 {
                         self.log_push(format!("  ... and {} more", rows.len() - 30), C_DIM);
@@ -287,7 +302,10 @@ impl App {
                 Ok(keys) => {
                     self.log_push(format!("\u{2713} {} key(s):", keys.len()), C_OK);
                     for (i, k) in keys.iter().enumerate().take(30) {
-                        self.log_push(format!("  {}. {}", i + 1, String::from_utf8_lossy(k)), C_TEXT);
+                        self.log_push(
+                            format!("  {}. {}", i + 1, String::from_utf8_lossy(k)),
+                            C_TEXT,
+                        );
                     }
                     if keys.len() > 30 {
                         self.log_push(format!("  ... and {} more", keys.len() - 30), C_DIM);
@@ -328,13 +346,22 @@ impl App {
                                     ),
                                     C_TEXT,
                                 );
-                                self.log_push(format!("  SSTable files    : {}", s.sst_files), C_TEXT);
+                                self.log_push(
+                                    format!("  SSTable files    : {}", s.sst_files),
+                                    C_TEXT,
+                                );
                                 self.log_push(
                                     format!("  SSTable records  : {}", s.sst_records),
                                     C_TEXT,
                                 );
-                                self.log_push(format!("  SSTable size     : {} KB", s.sst_kb), C_TEXT);
-                                self.log_push(format!("  WAL size         : {} KB", s.wal_kb), C_TEXT);
+                                self.log_push(
+                                    format!("  SSTable size     : {} KB", s.sst_kb),
+                                    C_TEXT,
+                                );
+                                self.log_push(
+                                    format!("  WAL size         : {} KB", s.wal_kb),
+                                    C_TEXT,
+                                );
                                 self.log_push(
                                     format!("  Total records    : {}", s.total_records),
                                     C_TEXT,
