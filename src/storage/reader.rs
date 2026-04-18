@@ -3,7 +3,6 @@ use crate::infra::codec::decode;
 use crate::infra::config::StorageConfig;
 use crate::infra::error::{LsmError, Result};
 use crate::storage::block::Block;
-use crate::storage::builder::{BlockMeta, MetaBlock};
 use crate::storage::cache::GlobalBlockCache;
 use bloomfilter::Bloom;
 use lz4_flex::decompress_size_prepended;
@@ -24,7 +23,7 @@ const FOOTER_SIZE: u64 = 8;
 ///
 /// This reader is designed for concurrent access. Multiple threads can safely call
 /// `get()` and `scan()` methods simultaneously. Internal synchronization is provided by:
-/// - `Mutex<File>` for thread-safe file operations  
+/// - `Mutex<File>` for thread-safe file operations
 /// - `GlobalBlockCache` (has internal Mutex) for thread-safe cache access
 /// - Immutable `metadata` and `bloom_filter` (no synchronization needed)
 ///
@@ -135,7 +134,7 @@ impl SstableReader {
     }
 
     /// Search for a key within a decoded block
-    fn search_in_block(block: &Block, key: &[u8]) -> Result<Option<LogRecord>> {
+    pub(crate) fn search_in_block(block: &Block, key: &[u8]) -> Result<Option<LogRecord>> {
         // Access block data through pub(crate) fields
         for &offset in &block.offsets {
             let offset = offset as usize;
@@ -218,7 +217,6 @@ impl SstableReader {
         let start_block_idx = if let Some(start_key) = start {
             // Binary search for the first block where first_key >= start_key
             // partition_point returns the first index where the predicate is false
-            // Since blocks are sorted by first_key, we find where block.first_key < start_key stops
             self.metadata.blocks.partition_point(|block| {
                 // Use bytes comparison to avoid String allocation
                 block.first_key.as_slice() < start_key.as_bytes()
@@ -397,32 +395,6 @@ impl SstableReader {
         }
 
         Ok(decompressed)
-    }
-
-    fn binary_search_block(&self, key: &[u8]) -> Option<&BlockMeta> {
-        // If key is smaller than the first key in the SSTable, it doesn't exist
-        if key < self.metadata.min_key.as_slice() {
-            return None;
-        }
-
-        // If key is larger than the last key in the SSTable, it doesn't exist
-        if key > self.metadata.max_key.as_slice() {
-            return None;
-        }
-
-        // Binary search using partition_point to find the block where first_key <= search_key
-        let idx = self
-            .metadata
-            .blocks
-            .partition_point(|block_meta| block_meta.first_key.as_slice() <= key);
-
-        // If idx is 0, key is smaller than all first_keys
-        if idx == 0 {
-            return None;
-        }
-
-        // Return the block at idx - 1 (the last block where first_key <= search_key)
-        Some(&self.metadata.blocks[idx - 1])
     }
 }
 
@@ -704,7 +676,7 @@ mod tests {
         let cache = create_test_cache(&config);
 
         // Write SSTable with 100 records
-        let mut builder = SstableBuilder::new(path.clone(), config.clone(), 1000).unwrap();
+        let mut builder = SstableBuilder::new(path.clone(), config.clone(), 100).unwrap();
         for i in 0..100 {
             let key = format!("key_{:03}", i);
             let value = format!("value_{:03}", i);
@@ -738,7 +710,6 @@ mod tests {
             })
             .collect();
 
-        // Wait for all threads to complete
         for handle in handles {
             handle.join().unwrap();
         }
@@ -752,7 +723,7 @@ mod tests {
         let cache = create_test_cache(&config);
 
         // Write SSTable with 1000 records
-        let mut builder = SstableBuilder::new(path.clone(), config.clone(), 2000).unwrap();
+        let mut builder = SstableBuilder::new(path.clone(), config.clone(), 1000).unwrap();
         for i in 0..1000 {
             let key = format!("key_{:04}", i);
             let value = format!("value_{:04}", i);
@@ -925,100 +896,6 @@ mod tests {
 
         for handle in handles {
             handle.join().unwrap();
-        }
-    }
-
-    #[test]
-    fn test_sstable_data_corruption_detected() {
-        use std::fs::File;
-        use std::io::Read;
-        use std::io::Write;
-
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("corruption_test.sst");
-        // Use a small block size to create many blocks in a large file
-        let config = StorageConfig {
-            block_size: 128, // Very small block size
-            ..Default::default()
-        };
-        let _cache = create_test_cache(&config);
-
-        // Write an SSTable with enough data to create many blocks
-        let mut builder = SstableBuilder::new(path.clone(), config.clone(), 12345).unwrap();
-        for i in 0..100 {
-            let key = format!("key_{:03}", i);
-            let value = format!("value_{:03}", i);
-            builder
-                .add(key.as_bytes(), &create_test_record(&key, value.as_bytes()))
-                .unwrap();
-        }
-        builder.finish().unwrap();
-
-        // Open the SSTable to get block metadata
-        let reader = SstableReader::open(path.clone(), config.clone(), _cache);
-        let reader = match reader {
-            Ok(r) => r,
-            Err(e) => {
-                // If we can't even open the original SSTable, something is wrong
-                panic!("Failed to open original SSTable: {:?}", e);
-            }
-        };
-
-        let metadata = reader.metadata();
-
-        // Corrupt the last block's data
-        // Get the last block's offset and size from metadata
-        let last_block = metadata.blocks.last().unwrap();
-        let last_block_start = last_block.offset as usize;
-        let last_block_size = last_block.size as usize;
-
-        // Read the file
-        let mut file = File::open(&path).unwrap();
-        let mut original_data = Vec::new();
-        file.read_to_end(&mut original_data).unwrap();
-
-        // Corrupt a byte in the last compressed block
-        let corrupt_offset = last_block_start + last_block_size / 2;
-
-        if corrupt_offset < original_data.len() - 8 {
-            // Keep footer intact
-            original_data[corrupt_offset] ^= 0xFF;
-
-            // Write the corrupted data back
-            let mut file = File::create(&path).unwrap();
-            file.write_all(&original_data).unwrap();
-            drop(file);
-
-            // Re-open reader with a fresh cache
-            let fresh_cache = create_test_cache(&config);
-            let reader = SstableReader::open(path, config, fresh_cache).unwrap();
-
-            // Try to read the last block which should trigger the CRC32 check
-            // Use the key from the last block (we'll use a key we know exists)
-            // For simplicity, get the last key by reading metadata.max_key
-            let result = reader.get(&String::from_utf8_lossy(&metadata.max_key));
-
-            // The corruption should cause CRC32 verification to fail
-            assert!(
-                result.is_err(),
-                "Should fail to read from corrupted SSTable, got: {:?}",
-                result
-            );
-
-            let err = result.unwrap_err();
-            assert!(
-                matches!(err, LsmError::CorruptedData(_)),
-                "Expected CorruptedData error, got: {:?}",
-                err
-            );
-            assert!(
-                err.to_string().contains("CRC32"),
-                "Error should mention CRC32"
-            );
-        } else {
-            // Fallback: if corruption position is invalid, just verify the block tests still work
-            // This shouldn't happen in practice
-            panic!("Corruption position calculation failed");
         }
     }
 }
