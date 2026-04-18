@@ -1,5 +1,5 @@
 use crate::core::engine::LsmEngine;
 
-pub struct SstIterator {
+pub struct Version {
     engine: LsmEngine,
 }
