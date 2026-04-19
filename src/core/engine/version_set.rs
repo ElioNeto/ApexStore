@@ -1,5 +1,5 @@
-use crate::storage::cache::Cache;
 use crate::core::engine::Compaction;
+use crate::storage::cache::Cache;
 
 pub struct VersionSet<C: Cache> {
     _cache: std::marker::PhantomData<C>,
