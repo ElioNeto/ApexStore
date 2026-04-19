@@ -69,8 +69,10 @@ pub struct Engine<C: Cache> {
     /// Current total bytes in memtables per column family.
     memtable_bytes: HashMap<String, usize>,
     /// Compaction policy.
+    #[allow(dead_code)]
     compaction_options: Compaction,
     /// Compaction executor.
+    #[allow(dead_code)]
     compaction: Compaction,
 }
 
@@ -260,6 +262,7 @@ impl<C: Cache> Engine<C> {
         Ok(results)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn scan_range(
         &self,
         lower: Option<&str>,
@@ -282,6 +285,7 @@ impl<C: Cache> Engine<C> {
         Ok((results, next_cursor))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn search_prefix(
         &self,
         prefix: &str,
