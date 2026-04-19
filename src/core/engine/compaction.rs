@@ -1,3 +1,4 @@
+use crate::core::engine::EngineOptions;
 use crate::core::table::Table;
 use std::collections::BTreeMap;
 
@@ -8,7 +9,7 @@ pub struct Compaction {
 }
 
 impl Compaction {
-    pub fn merge_tables(tables: Vec<Table>) -> Option<Table> {
+    pub fn merge_tables(tables: Vec<Table>, options: &EngineOptions) -> Option<Table> {
         if tables.is_empty() {
             return None;
         }
@@ -26,6 +27,6 @@ impl Compaction {
             return None;
         }
 
-        Some(Table::build(merged_data.into_iter().collect()))
+        Some(Table::build(merged_data.into_iter().collect(), options))
     }
 }

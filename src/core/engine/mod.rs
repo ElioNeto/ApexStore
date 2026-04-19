@@ -2,8 +2,6 @@ pub mod compaction;
 pub mod manifest;
 pub mod version_set;
 
-use crate::core::iterators::StorageIterator;
-use crate::core::key::KeySlice;
 use crate::core::table::Table;
 use crate::storage::cache::Cache;
 use std::collections::HashMap;
@@ -352,7 +350,7 @@ impl<C: Cache> Engine<C> {
 
     pub fn compact_cf(&mut self, cf: &str) {
         let tables = self.version_set.drain_tables(cf);
-        if let Some(merged) = Compaction::merge_tables(tables) {
+        if let Some(merged) = Compaction::merge_tables(tables, &self.options) {
             self.version_set.remove_and_add_table(cf, merged);
         }
     }
@@ -364,7 +362,7 @@ impl<C: Cache> Engine<C> {
         for cf in column_families {
             let tables = self.version_set.drain_tables(&cf);
             if !tables.is_empty() {
-                if let Some(merged) = Compaction::merge_tables(tables) {
+                if let Some(merged) = Compaction::merge_tables(tables, &self.options) {
                     self.version_set.remove_and_add_table(&cf, merged);
                 }
             }
