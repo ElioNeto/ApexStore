@@ -360,7 +360,7 @@ impl<C: Cache> Engine<C> {
     pub fn compact(&mut self) {
         // Compact all column families
         let column_families: Vec<String> = self.memtables.keys().cloned().collect();
-        
+
         for cf in column_families {
             let tables = self.version_set.drain_tables(&cf);
             if !tables.is_empty() {
