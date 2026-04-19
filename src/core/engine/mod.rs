@@ -2,8 +2,6 @@ pub mod compaction;
 pub mod manifest;
 pub mod version_set;
 
-use crate::core::iterators::StorageIterator;
-use crate::core::key::KeySlice;
 use crate::core::table::Table;
 use crate::storage::cache::Cache;
 use std::collections::HashMap;
@@ -70,6 +68,12 @@ pub struct Engine<C: Cache> {
     write_buffer_limit: usize,
     /// Current total bytes in memtables per column family.
     memtable_bytes: HashMap<String, usize>,
+    /// Compaction policy.
+    #[allow(dead_code)]
+    compaction_options: Compaction,
+    /// Compaction executor.
+    #[allow(dead_code)]
+    compaction: Compaction,
 }
 
 pub type LsmEngineGeneric<C> = Engine<C>;
@@ -118,6 +122,8 @@ impl<C: Cache> Engine<C> {
             memtables: HashMap::new(),
             write_buffer_limit: options.write_buffer_size * options.max_write_buffer_number,
             memtable_bytes: HashMap::new(),
+            compaction_options: options.compaction_options.clone(),
+            compaction: Compaction::default(),
         }
     }
 }
@@ -136,6 +142,8 @@ impl Engine<crate::storage::cache::GlobalBlockCache> {
             memtables: HashMap::new(),
             write_buffer_limit: options.write_buffer_size * options.max_write_buffer_number,
             memtable_bytes: HashMap::new(),
+            compaction_options: options.compaction_options.clone(),
+            compaction: Compaction::default(),
         })
     }
 }
@@ -242,7 +250,7 @@ impl<C: Cache> Engine<C> {
                             continue;
                         }
                     }
-                    results.push((k, v));
+                    results.push((k.clone(), v.clone()));
                     if let Some(l) = limit {
                         if results.len() >= l {
                             return Ok(results);
@@ -254,12 +262,13 @@ impl<C: Cache> Engine<C> {
         Ok(results)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn scan_range(
         &self,
         lower: Option<&str>,
         upper: Option<&str>,
         limit: usize,
-    ) -> ScanRangeResult {
+    ) -> crate::infra::error::Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<String>)> {
         let l_bytes = lower.map(|s| {
             let mut b = s.as_bytes().to_vec();
             b.push(0);
@@ -276,12 +285,13 @@ impl<C: Cache> Engine<C> {
         Ok((results, next_cursor))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn search_prefix(
         &self,
         prefix: &str,
         _cursor: Option<&str>,
         limit: usize,
-    ) -> ScanRangeResult {
+    ) -> crate::infra::error::Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<String>)> {
         // Simple implementation: scan with prefix as lower bound
         let results = self.scan_cf("default", Some(prefix.as_bytes()), None, Some(limit))?;
         // Filter results that actually start with prefix
@@ -332,103 +342,33 @@ impl<C: Cache> Engine<C> {
                 let table = Table::build(mem.data.into_iter().collect(), &self.options);
                 self.version_set.add_table(cf, table);
                 *self.memtable_bytes.get_mut(cf).unwrap() = 0;
+
+                // ✅ FIX issue #105: acionar compactação se SSTable count exceder threshold
+                let threshold = self.options.compaction_options.compaction_threshold;
+                if self.version_set.table_count(cf) > threshold {
+                    self.compact_cf(cf);
+                }
             }
         }
     }
 
-    pub fn force_flush(&mut self) {
-        let keys: Vec<String> = self.memtables.keys().cloned().collect();
-        for cf in keys {
-            self.flush_memtable_impl(&cf);
+    pub fn compact_cf(&mut self, cf: &str) {
+        let tables = self.version_set.drain_tables(cf);
+        if let Some(merged) = Compaction::merge_tables(tables, &self.options) {
+            self.version_set.remove_and_add_table(cf, merged);
         }
     }
 
     pub fn compact(&mut self) {
-        // Level-based compaction with tiered compaction strategy.
-        let version: crate::core::version::Version<C> = self.version_set.current_version();
-        for level in 0..self.options.max_levels.saturating_sub(1) {
-            let level_tables = version.get_level_tables(level);
-            if level_tables.len() < 2 {
-                continue;
-            }
+        // Compact all column families
+        let column_families: Vec<String> = self.memtables.keys().cloned().collect();
 
-            // Check if compaction is needed: any table smaller than min_table_size_to_compact
-            // or total size exceeding a threshold triggers compaction.
-            let total_size: usize = level_tables.iter().map(|t| t.size()).sum();
-            let needs_compaction = level_tables
-                .iter()
-                .any(|t| t.size() < self.options.min_table_size_to_compact)
-                || total_size > self.options.max_table_size * 2;
-
-            if !needs_compaction {
-                continue;
-            }
-
-            // Pick tables to compact: for level 0, compact all; otherwise compact by size.
-            let mut tables_to_compact = level_tables;
-            if level == 0 {
-                // Level 0: compact all overlapping tables.
-            } else {
-                // Higher levels: ensure we don't compact too many at once.
-                tables_to_compact = tables_to_compact
-                    .into_iter()
-                    .take(self.options.compaction_options.max_tables_per_compaction)
-                    .collect();
-            }
-
-            // Verify compaction reduces SSTable count (important invariant).
-            let before_count = tables_to_compact.len();
-            if before_count <= 1 {
-                continue;
-            }
-
-            // Build merged table.
-            let mut iterators: Vec<Box<dyn StorageIterator<KeyType = KeySlice>>> =
-                tables_to_compact
-                    .into_iter()
-                    .map(|t| Box::new(t.iter()) as Box<dyn StorageIterator<KeyType = KeySlice>>)
-                    .collect();
-
-            let mut merged_data = std::collections::BTreeMap::new();
-            let _current_key: Option<Vec<u8>> = None;
-            let _current_value: Option<Vec<u8>> = None;
-
-            loop {
-                let mut min_idx = None;
-                let mut min_key: Option<KeySlice> = None;
-
-                for (idx, iter) in iterators.iter_mut().enumerate() {
-                    if iter.is_valid() {
-                        let key = iter.key();
-                        if min_key
-                            .as_ref()
-                            .is_none_or(|min| key.as_slice() < min.as_slice())
-                        {
-                            min_key = Some(key);
-                            min_idx = Some(idx);
-                        }
-                    }
+        for cf in column_families {
+            let tables = self.version_set.drain_tables(&cf);
+            if !tables.is_empty() {
+                if let Some(merged) = Compaction::merge_tables(tables, &self.options) {
+                    self.version_set.remove_and_add_table(&cf, merged);
                 }
-
-                if let Some(idx) = min_idx {
-                    let key = iterators[idx].key().to_vec();
-                    let value = iterators[idx].value().to_vec();
-                    iterators[idx].next();
-
-                    // Resolve write conflicts: last write wins (insert order in iterators is by level+offset).
-                    merged_data.insert(key, value);
-                } else {
-                    break;
-                }
-            }
-
-            // Ensure compaction reduces SSTable count: remove old tables and add new one.
-            if !merged_data.is_empty() {
-                let new_table = Table::build(merged_data, &self.options);
-                // Remove compacted tables and add new merged table.
-                // In a real implementation, we'd track table metadata and generation numbers.
-                // Here we simulate by rebuilding the level with the new table.
-                self.version_set.remove_and_add_table(level, new_table);
             }
         }
     }

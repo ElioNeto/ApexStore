@@ -42,7 +42,18 @@ impl<C: Cache> VersionSet<C> {
         crate::core::version::Version::new()
     }
 
-    pub fn remove_and_add_table(&mut self, _level: usize, _table: crate::core::table::Table) {
-        // Mock
+    pub fn table_count(&self, cf: &str) -> usize {
+        self.tables.get(cf).map_or(0, |v| v.len())
+    }
+
+    pub fn drain_tables(&mut self, cf: &str) -> Vec<crate::core::table::Table> {
+        self.tables.remove(cf).unwrap_or_default()
+    }
+
+    pub fn remove_and_add_table(&mut self, cf: &str, new_table: crate::core::table::Table) {
+        // Remove todas as tabelas da CF e substitui pela tabela compactada.
+        let entry = self.tables.entry(cf.to_string()).or_default();
+        entry.clear();
+        entry.push(new_table);
     }
 }
