@@ -70,6 +70,10 @@ pub struct Engine<C: Cache> {
     write_buffer_limit: usize,
     /// Current total bytes in memtables per column family.
     memtable_bytes: HashMap<String, usize>,
+    /// Compaction policy.
+    compaction_options: Compaction,
+    /// Compaction executor.
+    compaction: Compaction,
 }
 
 pub type LsmEngineGeneric<C> = Engine<C>;
@@ -118,6 +122,8 @@ impl<C: Cache> Engine<C> {
             memtables: HashMap::new(),
             write_buffer_limit: options.write_buffer_size * options.max_write_buffer_number,
             memtable_bytes: HashMap::new(),
+            compaction_options: options.compaction_options.clone(),
+            compaction: Compaction::default(),
         }
     }
 }
@@ -136,6 +142,8 @@ impl Engine<crate::storage::cache::GlobalBlockCache> {
             memtables: HashMap::new(),
             write_buffer_limit: options.write_buffer_size * options.max_write_buffer_number,
             memtable_bytes: HashMap::new(),
+            compaction_options: options.compaction_options.clone(),
+            compaction: Compaction::default(),
         })
     }
 }
@@ -242,7 +250,7 @@ impl<C: Cache> Engine<C> {
                             continue;
                         }
                     }
-                    results.push((k, v));
+                    results.push((k.clone(), v.clone()));
                     if let Some(l) = limit {
                         if results.len() >= l {
                             return Ok(results);
@@ -259,7 +267,7 @@ impl<C: Cache> Engine<C> {
         lower: Option<&str>,
         upper: Option<&str>,
         limit: usize,
-    ) -> ScanRangeResult {
+    ) -> crate::infra::error::Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<String>)> {
         let l_bytes = lower.map(|s| {
             let mut b = s.as_bytes().to_vec();
             b.push(0);
@@ -281,7 +289,7 @@ impl<C: Cache> Engine<C> {
         prefix: &str,
         _cursor: Option<&str>,
         limit: usize,
-    ) -> ScanRangeResult {
+    ) -> crate::infra::error::Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<String>)> {
         // Simple implementation: scan with prefix as lower bound
         let results = self.scan_cf("default", Some(prefix.as_bytes()), None, Some(limit))?;
         // Filter results that actually start with prefix
@@ -293,9 +301,14 @@ impl<C: Cache> Engine<C> {
     }
 
     pub fn keys(&self) -> crate::infra::error::Result<Vec<Vec<u8>>> {
-        Ok(self.memtables.get("default").map_or(Vec::new(), |m| {
-            m.iter().flat_map(|mt| mt.data.keys().cloned()).collect()
-        }))
+        Ok(self
+            .memtables
+            .get("default")
+            .map_or(Vec::new(), |m| {
+                m.iter()
+                    .flat_map(|mt| mt.data.keys().cloned())
+                    .collect()
+            }))
     }
 
     pub fn count(&self) -> crate::infra::error::Result<usize> {
@@ -332,14 +345,20 @@ impl<C: Cache> Engine<C> {
                 let table = Table::build(mem.data.into_iter().collect(), &self.options);
                 self.version_set.add_table(cf, table);
                 *self.memtable_bytes.get_mut(cf).unwrap() = 0;
+
+                // ✅ FIX issue #105: acionar compactação se SSTable count exceder threshold
+                let threshold = self.options.compaction_options.compaction_threshold;
+                if self.version_set.table_count(cf) > threshold {
+                    self.compact_cf(cf);
+                }
             }
         }
     }
 
-    pub fn force_flush(&mut self) {
-        let keys: Vec<String> = self.memtables.keys().cloned().collect();
-        for cf in keys {
-            self.flush_memtable_impl(&cf);
+    pub fn compact_cf(&mut self, cf: &str) {
+        let tables = self.version_set.drain_tables(cf);
+        if let Some(merged) = Compaction::merge_tables(tables) {
+            self.version_set.remove_and_add_table(cf, merged);
         }
     }
 
@@ -424,7 +443,7 @@ impl<C: Cache> Engine<C> {
 
             // Ensure compaction reduces SSTable count: remove old tables and add new one.
             if !merged_data.is_empty() {
-                let new_table = Table::build(merged_data, &self.options);
+                let new_table = Table::build(merged_data.into_iter().collect(), &self.options);
                 // Remove compacted tables and add new merged table.
                 // In a real implementation, we'd track table metadata and generation numbers.
                 // Here we simulate by rebuilding the level with the new table.
