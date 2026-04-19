@@ -301,14 +301,9 @@ impl<C: Cache> Engine<C> {
     }
 
     pub fn keys(&self) -> crate::infra::error::Result<Vec<Vec<u8>>> {
-        Ok(self
-            .memtables
-            .get("default")
-            .map_or(Vec::new(), |m| {
-                m.iter()
-                    .flat_map(|mt| mt.data.keys().cloned())
-                    .collect()
-            }))
+        Ok(self.memtables.get("default").map_or(Vec::new(), |m| {
+            m.iter().flat_map(|mt| mt.data.keys().cloned()).collect()
+        }))
     }
 
     pub fn count(&self) -> crate::infra::error::Result<usize> {
