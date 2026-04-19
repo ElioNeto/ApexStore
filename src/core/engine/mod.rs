@@ -20,6 +20,8 @@ pub struct LsmStats {
     pub total_records: usize,
     pub sst_kb: usize,
     pub wal_kb: usize,
+    pub num_tables_at_max: usize,
+    pub max_levels_reached: usize,
     pub memtable_max_size: usize,
     pub mem_kb: usize,
     pub mem_records: usize,
@@ -234,23 +236,21 @@ impl<C: Cache> Engine<C> {
         upper: Option<&[u8]>,
         limit: Option<usize>,
     ) -> crate::infra::error::Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let mut seen_keys = std::collections::HashSet::new();
         let mut results = Vec::new();
 
-        // Include memtables first (newest writes first).
+        // 1. Memtables primeiro (mais recentes)
         if let Some(memtables) = self.memtables.get(cf) {
             for mem in memtables.iter().rev() {
                 for (k, v) in mem.iter() {
-                    if let Some(lb) = lower {
-                        if k.as_slice() < lb {
-                            continue;
+                    // aplicar filtros lower/upper
+                    if lower.map_or(true, |lb| k.as_slice() >= lb)
+                        && upper.map_or(true, |ub| k.as_slice() < ub)
+                    {
+                        if seen_keys.insert(k.clone()) {
+                            results.push((k.clone(), v.clone()));
                         }
                     }
-                    if let Some(ub) = upper {
-                        if k.as_slice() >= ub {
-                            continue;
-                        }
-                    }
-                    results.push((k.clone(), v.clone()));
                     if let Some(l) = limit {
                         if results.len() >= l {
                             return Ok(results);
@@ -259,10 +259,21 @@ impl<C: Cache> Engine<C> {
                 }
             }
         }
+
+        // 2. SSTables do version_set (mais antigas)
+        let sst_results = self.version_set.scan(cf, lower, upper, limit);
+        for (k, v) in sst_results {
+            if seen_keys.insert(k.clone()) {
+                results.push((k, v));
+            }
+            if limit.map_or(false, |l| results.len() >= l) {
+                break;
+            }
+        }
+
         Ok(results)
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn scan_range(
         &self,
         lower: Option<&str>,
@@ -285,7 +296,6 @@ impl<C: Cache> Engine<C> {
         Ok((results, next_cursor))
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn search_prefix(
         &self,
         prefix: &str,
