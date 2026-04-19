@@ -26,12 +26,29 @@ impl<C: Cache> VersionSet<C> {
 
     pub fn scan(
         &self,
-        _cf: &str,
-        _lower: Option<&[u8]>,
-        _upper: Option<&[u8]>,
-        _limit: Option<usize>,
+        cf: &str,
+        lower: Option<&[u8]>,
+        upper: Option<&[u8]>,
+        limit: Option<usize>,
     ) -> Vec<(Vec<u8>, Vec<u8>)> {
-        Vec::new()
+        let mut results = Vec::new();
+        if let Some(cf_tables) = self.tables.get(cf) {
+            for table in cf_tables.iter().rev() {
+                for (k, v) in &table.data {
+                    if lower.is_none_or(|lb| k.as_slice() >= lb)
+                        && upper.is_none_or(|ub| k.as_slice() < ub)
+                    {
+                        results.push((k.clone(), v.clone()));
+                    }
+                    if let Some(l) = limit {
+                        if results.len() >= l {
+                            return results;
+                        }
+                    }
+                }
+            }
+        }
+        results
     }
 
     pub fn add_table(&mut self, cf: &str, table: crate::core::table::Table) {
