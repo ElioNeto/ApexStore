@@ -1,4 +1,4 @@
-use apexstore::infra::config::{CoreConfig, LsmConfig, StorageConfig};
+use apexstore::infra::config::LsmConfig;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -36,21 +36,16 @@ fn bench_large_dataset_1m(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::from_parameter("1m_keys"), &(), |b, &_| {
         let (temp_dir, data_dir) = setup_temp_dir("large_1m");
-        let engine = apexstore::LsmEngine::new(LsmConfig {
-            core: CoreConfig {
-                dir_path: data_dir.clone(),
-                memtable_max_size: 16 * 1024 * 1024,
-            },
-            storage: StorageConfig {
-                block_size: 4096,
-                block_cache_size_mb: 512,
-                sparse_index_interval: 16,
-                bloom_false_positive_rate: 0.01,
-            },
-        })
+        let mut engine = apexstore::LsmEngine::new(
+            LsmConfig::builder()
+                .dir_path(data_dir.clone())
+                .memtable_max_size(16 * 1024 * 1024)
+                .block_cache_size_mb(512)
+                .build()
+                .unwrap(),
+        )
         .unwrap();
 
-        // Insert 1M keys
         let keys_per_batch = 100_000;
         for batch in 0..10 {
             for i in batch * keys_per_batch..(batch + 1) * keys_per_batch {
@@ -61,7 +56,6 @@ fn bench_large_dataset_1m(c: &mut Criterion) {
             engine.flush_memtable().unwrap();
         }
 
-        // Benchmark reads
         let benchmark_keys: Vec<String> = (0..10_000).map(|i| generate_key(i, 10)).collect();
 
         b.iter(|| {
@@ -88,21 +82,16 @@ fn bench_concurrent_access(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(threads), &threads, |b, &_t| {
             let (temp_dir, data_dir) = setup_temp_dir("concurrent");
-            let engine = apexstore::LsmEngine::new(LsmConfig {
-                core: CoreConfig {
-                    dir_path: data_dir.clone(),
-                    memtable_max_size: 16 * 1024 * 1024,
-                },
-                storage: StorageConfig {
-                    block_size: 4096,
-                    block_cache_size_mb: 256,
-                    sparse_index_interval: 16,
-                    bloom_false_positive_rate: 0.01,
-                },
-            })
+            let mut engine = apexstore::LsmEngine::new(
+                LsmConfig::builder()
+                    .dir_path(data_dir.clone())
+                    .memtable_max_size(16 * 1024 * 1024)
+                    .block_cache_size_mb(256)
+                    .build()
+                    .unwrap(),
+            )
             .unwrap();
 
-            // Pre-populate some data
             for i in 0..10_000 {
                 let key = generate_key(i, 10);
                 let value = generate_value(i, 100);
@@ -150,28 +139,21 @@ fn bench_memory_pressure(c: &mut Criterion) {
         &(),
         |b, &_| {
             let (temp_dir, data_dir) = setup_temp_dir("memory_pressure");
-            let engine = apexstore::LsmEngine::new(LsmConfig {
-                core: CoreConfig {
-                    dir_path: data_dir.clone(),
-                    memtable_max_size: 2 * 1024 * 1024, // Only 2MB memtable
-                },
-                storage: StorageConfig {
-                    block_size: 4096,
-                    block_cache_size_mb: 64,
-                    sparse_index_interval: 16,
-                    bloom_false_positive_rate: 0.01,
-                },
-            })
+            let mut engine = apexstore::LsmEngine::new(
+                LsmConfig::builder()
+                    .dir_path(data_dir.clone())
+                    .memtable_max_size(2 * 1024 * 1024)
+                    .build()
+                    .unwrap(),
+            )
             .unwrap();
 
-            // Insert more data than memtable can hold to force frequent flushes
             for i in 0..100_000 {
                 let key = generate_key(i, 10);
                 let value = generate_value(i, 100);
                 engine.set(key, value).unwrap();
             }
 
-            // Benchmark reads - should have many SSTables
             let benchmark_keys: Vec<String> = (0..10_000).map(|i| generate_key(i, 10)).collect();
 
             b.iter(|| {
@@ -200,21 +182,15 @@ fn bench_many_sstables(c: &mut Criterion) {
             &(),
             |b, &_sc| {
                 let (temp_dir, data_dir) = setup_temp_dir(&format!("many_sst_{}", sstable_count));
-                let engine = apexstore::LsmEngine::new(LsmConfig {
-                    core: CoreConfig {
-                        dir_path: data_dir.clone(),
-                        memtable_max_size: 512 * 1024, // Very small memtable
-                    },
-                    storage: StorageConfig {
-                        block_size: 4096,
-                        block_cache_size_mb: 64,
-                        sparse_index_interval: 16,
-                        bloom_false_positive_rate: 0.01,
-                    },
-                })
+                let mut engine = apexstore::LsmEngine::new(
+                    LsmConfig::builder()
+                        .dir_path(data_dir.clone())
+                        .memtable_max_size(512 * 1024)
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap();
 
-                // Create many SSTables by flushing after each small batch
                 let records_per_sstable = 1_000;
                 for sstable in 0..sstable_count {
                     for i in (sstable * records_per_sstable)..((sstable + 1) * records_per_sstable)
@@ -226,7 +202,6 @@ fn bench_many_sstables(c: &mut Criterion) {
                     engine.flush_memtable().unwrap();
                 }
 
-                // Benchmark reads across many SSTables
                 let benchmark_keys: Vec<String> = (0..1_000).map(|i| generate_key(i, 10)).collect();
 
                 b.iter(|| {
@@ -254,21 +229,16 @@ fn bench_cache_thrashing(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(cache_mb), &(), |b, &_cm| {
             let (temp_dir, data_dir) =
                 setup_temp_dir(format!("cache_thrash_{}", cache_mb).as_str());
-            let engine = apexstore::LsmEngine::new(LsmConfig {
-                core: CoreConfig {
-                    dir_path: data_dir.clone(),
-                    memtable_max_size: 16 * 1024 * 1024,
-                },
-                storage: StorageConfig {
-                    block_size: 4096,
-                    block_cache_size_mb: cache_mb,
-                    sparse_index_interval: 16,
-                    bloom_false_positive_rate: 0.01,
-                },
-            })
+            let mut engine = apexstore::LsmEngine::new(
+                LsmConfig::builder()
+                    .dir_path(data_dir.clone())
+                    .memtable_max_size(16 * 1024 * 1024)
+                    .block_cache_size_mb(cache_mb)
+                    .build()
+                    .unwrap(),
+            )
             .unwrap();
 
-            // Populate with lots of keys
             let total_keys = 100_000;
             for i in 0..total_keys {
                 let key = generate_key(i, 10);
@@ -277,11 +247,9 @@ fn bench_cache_thrashing(c: &mut Criterion) {
             }
             engine.flush_memtable().unwrap();
 
-            // Benchmark with access pattern that thrashes cache
             let keys: Vec<String> = (0..total_keys).map(|i| generate_key(i, 10)).collect();
 
             b.iter(|| {
-                // Access keys in a pattern that causes cache misses
                 for i in (0..10_000).step_by(50) {
                     let _ = engine.get(&keys[i]).unwrap();
                 }
@@ -301,32 +269,26 @@ fn bench_key_updates(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::from_parameter("10k_keys"), &(), |b, &_| {
         let (temp_dir, data_dir) = setup_temp_dir("key_updates");
-        let engine = apexstore::LsmEngine::new(LsmConfig {
-            core: CoreConfig {
-                dir_path: data_dir.clone(),
-                memtable_max_size: 64 * 1024 * 1024, // Large memtable
-            },
-            storage: StorageConfig {
-                block_size: 4096,
-                block_cache_size_mb: 256,
-                sparse_index_interval: 16,
-                bloom_false_positive_rate: 0.01,
-            },
-        })
+        let mut engine = apexstore::LsmEngine::new(
+            LsmConfig::builder()
+                .dir_path(data_dir.clone())
+                .memtable_max_size(64 * 1024 * 1024)
+                .block_cache_size_mb(256)
+                .build()
+                .unwrap(),
+        )
         .unwrap();
 
         let initial_keys: Vec<String> = (0..10_000).map(|i| generate_key(i, 10)).collect();
 
-        // Initial inserts
         for key in initial_keys.iter() {
             let value = generate_value(0, 100);
             engine.set(key.clone(), value).unwrap();
         }
 
-        // Benchmark update pattern (update 1000 times on same keys)
         b.iter(|| {
             for (i, key) in initial_keys.iter().enumerate() {
-                let value = generate_value(i, 100); // Different value each time
+                let value = generate_value(i, 100);
                 engine.set(key.clone(), value).unwrap();
             }
         });
@@ -344,29 +306,23 @@ fn bench_delete_operations(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::from_parameter("10k_keys"), &(), |b, &_| {
         let (temp_dir, data_dir) = setup_temp_dir("delete_ops");
-        let engine = apexstore::LsmEngine::new(LsmConfig {
-            core: CoreConfig {
-                dir_path: data_dir.clone(),
-                memtable_max_size: 64 * 1024 * 1024,
-            },
-            storage: StorageConfig {
-                block_size: 4096,
-                block_cache_size_mb: 256,
-                sparse_index_interval: 16,
-                bloom_false_positive_rate: 0.01,
-            },
-        })
+        let mut engine = apexstore::LsmEngine::new(
+            LsmConfig::builder()
+                .dir_path(data_dir.clone())
+                .memtable_max_size(64 * 1024 * 1024)
+                .block_cache_size_mb(256)
+                .build()
+                .unwrap(),
+        )
         .unwrap();
 
         let keys: Vec<String> = (0..10_000).map(|i| generate_key(i, 10)).collect();
 
-        // Initial inserts
         for key in keys.iter() {
             let value = generate_value(0, 100);
             engine.set(key.clone(), value).unwrap();
         }
 
-        // Benchmark delete pattern
         b.iter(|| {
             for key in keys.iter() {
                 engine.delete(key.clone()).unwrap();

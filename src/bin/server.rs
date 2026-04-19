@@ -90,5 +90,7 @@ async fn main() -> std::io::Result<()> {
 
     println!("✓ Engine initialized successfully!\n");
 
-    apexstore::api::start_server(engine, server_config).await
+    apexstore::api::start_server(engine, server_config)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))
 }

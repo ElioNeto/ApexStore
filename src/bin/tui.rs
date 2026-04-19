@@ -109,7 +109,7 @@ impl App {
 
     fn tick(&mut self) {
         self.uptime = self.start.elapsed().as_secs();
-        self.stats = self.engine.stats_all().ok();
+        self.stats = self.engine.stats().ok();
 
         let elapsed = self.ops_last_sample.elapsed().as_secs_f64();
         if elapsed >= 0.25 {
@@ -211,30 +211,30 @@ impl App {
                 }
                 let query = parts[1];
                 let prefix_mode = parts.len() > 2 && parts[2] == "--prefix";
-                let result = if prefix_mode {
+                let rows = if prefix_mode {
                     #[allow(deprecated)]
                     self.engine.search_prefix_legacy(query)
                 } else {
                     self.engine.search(query)
                 };
-                match result {
-                    Ok(rows) if rows.is_empty() => {
-                        self.log_push("\u{26a0}  No records found", C_WARN)
+                if rows.is_empty() {
+                    self.log_push("\u{26a0}  No records found", C_WARN);
+                } else {
+                    self.log_push(format!("\u{2713} {} record(s) found:", rows.len()), C_OK);
+                    for (k, v) in rows.iter().take(20) {
+                        self.log_push(
+                            format!(
+                                "  {} = {}",
+                                String::from_utf8_lossy(k),
+                                String::from_utf8_lossy(v)
+                            ),
+                            C_TEXT,
+                        );
                     }
-                    Ok(rows) => {
-                        self.log_push(format!("\u{2713} {} record(s) found:", rows.len()), C_OK);
-                        for (k, v) in rows.iter().take(20) {
-                            self.log_push(
-                                format!("  {} = {}", k, String::from_utf8_lossy(v)),
-                                C_TEXT,
-                            );
-                        }
-                        if rows.len() > 20 {
-                            self.log_push(format!("  ... and {} more", rows.len() - 20), C_DIM);
-                        }
-                        self.incr_ops();
+                    if rows.len() > 20 {
+                        self.log_push(format!("  ... and {} more", rows.len() - 20), C_DIM);
                     }
-                    Err(e) => self.log_push(format!("\u{274c} {}", e), C_ERR),
+                    self.incr_ops();
                 }
             }
 
@@ -245,28 +245,31 @@ impl App {
                     return;
                 }
                 #[allow(deprecated)]
-                match self.engine.search_prefix_legacy(parts[1]) {
-                    Ok(rows) if rows.is_empty() => self.log_push(
+                let rows = self.engine.search_prefix_legacy(parts[1]);
+                if rows.is_empty() {
+                    self.log_push(
                         format!("\u{26a0}  No records with prefix '{}'", parts[1]),
                         C_WARN,
-                    ),
-                    Ok(rows) => {
+                    );
+                } else {
+                    self.log_push(
+                        format!("\u{2713} {} record(s) [prefix='{}']:", rows.len(), parts[1]),
+                        C_OK,
+                    );
+                    for (k, v) in rows.iter().take(20) {
                         self.log_push(
-                            format!("\u{2713} {} record(s) [prefix='{}']:", rows.len(), parts[1]),
-                            C_OK,
+                            format!(
+                                "  {} = {}",
+                                String::from_utf8_lossy(k),
+                                String::from_utf8_lossy(v)
+                            ),
+                            C_TEXT,
                         );
-                        for (k, v) in rows.iter().take(20) {
-                            self.log_push(
-                                format!("  {} = {}", k, String::from_utf8_lossy(v)),
-                                C_TEXT,
-                            );
-                        }
-                        if rows.len() > 20 {
-                            self.log_push(format!("  ... and {} more", rows.len() - 20), C_DIM);
-                        }
-                        self.incr_ops();
                     }
-                    Err(e) => self.log_push(format!("\u{274c} {}", e), C_ERR),
+                    if rows.len() > 20 {
+                        self.log_push(format!("  ... and {} more", rows.len() - 20), C_DIM);
+                    }
+                    self.incr_ops();
                 }
             }
 
@@ -276,7 +279,14 @@ impl App {
                 Ok(rows) => {
                     self.log_push(format!("\u{2713} {} record(s):", rows.len()), C_OK);
                     for (k, v) in rows.iter().take(30) {
-                        self.log_push(format!("  {} = {}", k, String::from_utf8_lossy(v)), C_TEXT);
+                        self.log_push(
+                            format!(
+                                "  {} = {}",
+                                String::from_utf8_lossy(k),
+                                String::from_utf8_lossy(v)
+                            ),
+                            C_TEXT,
+                        );
                     }
                     if rows.len() > 30 {
                         self.log_push(format!("  ... and {} more", rows.len() - 30), C_DIM);
@@ -292,7 +302,10 @@ impl App {
                 Ok(keys) => {
                     self.log_push(format!("\u{2713} {} key(s):", keys.len()), C_OK);
                     for (i, k) in keys.iter().enumerate().take(30) {
-                        self.log_push(format!("  {}. {}", i + 1, k), C_TEXT);
+                        self.log_push(
+                            format!("  {}. {}", i + 1, String::from_utf8_lossy(k)),
+                            C_TEXT,
+                        );
                     }
                     if keys.len() > 30 {
                         self.log_push(format!("  ... and {} more", keys.len() - 30), C_DIM);
@@ -316,39 +329,55 @@ impl App {
                 let all_mode = parts.len() > 1 && parts[1].to_uppercase() == "ALL";
                 if all_mode {
                     match self.engine.stats_all() {
-                        Ok(s) => {
+                        Ok(entries) => {
                             self.log_push(
                                 "\u{2500}\u{2500}\u{2500} Detailed Statistics \u{2500}\u{2500}\u{2500}".to_string(),
                                 C_ORANGE,
                             );
-                            self.log_push(
-                                format!("  MemTable records : {}", s.mem_records),
-                                C_TEXT,
-                            );
-                            self.log_push(
-                                format!(
-                                    "  MemTable size    : {} KB / {} KB",
-                                    s.mem_kb, s.memtable_max_size
-                                ),
-                                C_TEXT,
-                            );
-                            self.log_push(format!("  SSTable files    : {}", s.sst_files), C_TEXT);
-                            self.log_push(
-                                format!("  SSTable records  : {}", s.sst_records),
-                                C_TEXT,
-                            );
-                            self.log_push(format!("  SSTable size     : {} KB", s.sst_kb), C_TEXT);
-                            self.log_push(format!("  WAL size         : {} KB", s.wal_kb), C_TEXT);
-                            self.log_push(
-                                format!("  Total records    : {}", s.total_records),
-                                C_TEXT,
-                            );
+                            for (_name, s) in &entries {
+                                self.log_push(
+                                    format!("  MemTable records : {}", s.mem_records),
+                                    C_TEXT,
+                                );
+                                self.log_push(
+                                    format!(
+                                        "  MemTable size    : {} KB / {} KB",
+                                        s.mem_kb, s.memtable_max_size
+                                    ),
+                                    C_TEXT,
+                                );
+                                self.log_push(
+                                    format!("  SSTable files    : {}", s.sst_files),
+                                    C_TEXT,
+                                );
+                                self.log_push(
+                                    format!("  SSTable records  : {}", s.sst_records),
+                                    C_TEXT,
+                                );
+                                self.log_push(
+                                    format!("  SSTable size     : {} KB", s.sst_kb),
+                                    C_TEXT,
+                                );
+                                self.log_push(
+                                    format!("  WAL size         : {} KB", s.wal_kb),
+                                    C_TEXT,
+                                );
+                                self.log_push(
+                                    format!("  Total records    : {}", s.total_records),
+                                    C_TEXT,
+                                );
+                            }
                         }
                         Err(e) => self.log_push(format!("\u{274c} {}", e), C_ERR),
                     }
                 } else {
-                    for line in self.engine.stats().lines() {
-                        self.log_push(line.to_string(), C_TEXT);
+                    match self.engine.stats() {
+                        Ok(s) => {
+                            self.log_push(format!("  Total records: {}", s.total_records), C_TEXT);
+                            self.log_push(format!("  Num tables:    {}", s.num_tables), C_TEXT);
+                            self.log_push(format!("  Total size:    {}", s.total_size), C_TEXT);
+                        }
+                        Err(e) => self.log_push(format!("\u{274c} {}", e), C_ERR),
                     }
                 }
             }
@@ -461,7 +490,7 @@ impl App {
                 }
                 self.log_push("  100 SET ops done".to_string(), C_TEXT);
                 for i in (0..100).step_by(10) {
-                    let _ = self.engine.get(&format!("demo:{:04}", i));
+                    let _ = self.engine.get(format!("demo:{:04}", i).as_bytes());
                     self.incr_ops();
                 }
                 self.log_push("  10 GET ops done".to_string(), C_TEXT);

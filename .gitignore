@@ -8,3 +8,4 @@ node_modules
 .angular
 dist
 .notes/
+.aider*

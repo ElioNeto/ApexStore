@@ -1,5 +1,5 @@
 use apexstore::core::engine::LsmEngine;
-use apexstore::infra::config::{CoreConfig, LsmConfig, StorageConfig};
+use apexstore::infra::config::LsmConfig;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
@@ -91,18 +91,14 @@ pub fn setup_temp_dir(name: &str) -> (TempDir, PathBuf) {
 
 /// Create an LsmEngine with benchmark-specific configuration
 pub fn create_bench_engine(config: &BenchmarkConfig, data_dir: &std::path::Path) -> LsmEngine {
-    let lsm_config = LsmConfig {
-        core: CoreConfig {
-            dir_path: data_dir.to_path_buf(),
-            memtable_max_size: config.memtable_max_size,
-        },
-        storage: StorageConfig {
-            block_size: 4096,
-            block_cache_size_mb: config.block_cache_size_mb,
-            sparse_index_interval: config.sparse_index_interval,
-            bloom_false_positive_rate: config.bloom_false_positive_rate,
-        },
-    };
+    let lsm_config = LsmConfig::builder()
+        .dir_path(data_dir.to_path_buf())
+        .memtable_max_size(config.memtable_max_size)
+        .block_cache_size_mb(config.block_cache_size_mb)
+        .bloom_false_positive_rate(config.bloom_false_positive_rate)
+        .sparse_index_interval(config.sparse_index_interval)
+        .build()
+        .expect("Invalid LsmConfig");
 
     LsmEngine::new(lsm_config).expect("Failed to create LsmEngine")
 }
@@ -147,7 +143,7 @@ pub fn create_test_records(
 
 /// Pre-populate engine with keys for read benchmarks
 pub fn pre_populate_for_reads(
-    engine: &LsmEngine,
+    engine: &mut LsmEngine,
     num_keys: usize,
     key_size: usize,
     value_size: usize,

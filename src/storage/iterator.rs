@@ -8,58 +8,10 @@
 //! - Merge operations during compaction
 //! - Prefix scans and filtered iterations
 
+use crate::core::iterators::StorageIterator;
+use crate::core::key::KeySlice;
 use crate::core::log_record::LogRecord;
 use std::collections::btree_map;
-
-/// Unified iterator interface for storage layers
-///
-/// This trait provides a common abstraction for iterating over key-value pairs
-/// stored in different layers of the LSM tree (MemTable, SSTables).
-///
-/// # Example
-///
-/// ```ignore
-/// let mut iter = memtable.iter();
-/// iter.seek(b"key_100");
-///
-/// while iter.is_valid() {
-///     let key = iter.key();
-///     let value = iter.value();
-///     println!("{}={:?}", String::from_utf8_lossy(key), value);
-///     iter.next();
-/// }
-/// ```
-pub trait StorageIterator {
-    /// Returns the current key as a byte slice
-    ///
-    /// # Panics
-    /// May panic if called when `is_valid()` returns `false`
-    fn key(&self) -> &[u8];
-
-    /// Returns the current value (LogRecord)
-    ///
-    /// # Panics
-    /// May panic if called when `is_valid()` returns `false`
-    fn value(&self) -> &LogRecord;
-
-    /// Returns `true` if the iterator is pointing to valid data
-    ///
-    /// Must be checked before calling `key()` or `value()`
-    fn is_valid(&self) -> bool;
-
-    /// Advances the iterator to the next position
-    ///
-    /// After calling `next()`, you must check `is_valid()` again
-    fn next(&mut self);
-
-    /// Positions the iterator at the first key >= `key`
-    ///
-    /// If no such key exists, the iterator becomes invalid.
-    ///
-    /// # Arguments
-    /// * `key` - The target key to seek to
-    fn seek(&mut self, key: &[u8]);
-}
 
 /// Iterator over MemTable entries
 ///
@@ -94,15 +46,23 @@ impl<'a> MemTableIterator<'a> {
 }
 
 impl<'a> StorageIterator for MemTableIterator<'a> {
-    fn key(&self) -> &[u8] {
-        self.current
-            .expect("key() called on invalid iterator")
-            .0
-            .as_bytes()
+    type KeyType = KeySlice<'a>;
+
+    fn key(&self) -> Self::KeyType {
+        KeySlice::new(
+            self.current
+                .expect("key() called on invalid iterator")
+                .0
+                .as_bytes(),
+        )
     }
 
-    fn value(&self) -> &LogRecord {
-        self.current.expect("value() called on invalid iterator").1
+    fn value(&self) -> &[u8] {
+        &self
+            .current
+            .expect("value() called on invalid iterator")
+            .1
+            .value
     }
 
     fn is_valid(&self) -> bool {
@@ -166,19 +126,19 @@ mod tests {
 
         // First key
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_001");
-        assert_eq!(iter.value().value, b"value_001");
+        assert_eq!(iter.key().as_slice(), b"key_001");
+        assert_eq!(iter.value(), b"value_001");
 
         // Second key
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_010");
-        assert_eq!(iter.value().value, b"value_010");
+        assert_eq!(iter.key().as_slice(), b"key_010");
+        assert_eq!(iter.value(), b"value_010");
 
         // Third key
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_020");
+        assert_eq!(iter.key().as_slice(), b"key_020");
     }
 
     #[test]
@@ -207,13 +167,13 @@ mod tests {
         // Seek to exact key
         iter.seek(b"key_020");
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_020");
-        assert_eq!(iter.value().value, b"value_020");
+        assert_eq!(iter.key().as_slice(), b"key_020");
+        assert_eq!(iter.value(), b"value_020");
 
         // Continue iterating
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_030");
+        assert_eq!(iter.key().as_slice(), b"key_030");
     }
 
     #[test]
@@ -224,7 +184,7 @@ mod tests {
         // Seek to key between existing keys (should find next key)
         iter.seek(b"key_015");
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_020"); // Next key after key_015
+        assert_eq!(iter.key().as_slice(), b"key_020"); // Next key after key_015
     }
 
     #[test]
@@ -235,7 +195,7 @@ mod tests {
         // Seek before first key
         iter.seek(b"key_000");
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_001"); // First key
+        assert_eq!(iter.key().as_slice(), b"key_001"); // First key
     }
 
     #[test]
@@ -256,7 +216,7 @@ mod tests {
         // Seek to last key
         iter.seek(b"key_100");
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_100");
+        assert_eq!(iter.key().as_slice(), b"key_100");
 
         // Next should be invalid
         iter.next();
@@ -283,7 +243,7 @@ mod tests {
         let mut iter = MemTableIterator::new(&map);
 
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"only_key");
+        assert_eq!(iter.key().as_slice(), b"only_key");
 
         iter.next();
         assert!(!iter.is_valid());
@@ -297,15 +257,15 @@ mod tests {
         let mut iter = MemTableIterator::new_from(&map, "key_020");
 
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_020");
+        assert_eq!(iter.key().as_slice(), b"key_020");
 
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_030");
+        assert_eq!(iter.key().as_slice(), b"key_030");
 
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_100");
+        assert_eq!(iter.key().as_slice(), b"key_100");
 
         iter.next();
         assert!(!iter.is_valid());
@@ -331,17 +291,17 @@ mod tests {
 
         // Should iterate over all entries, including tombstones
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_001");
-        assert!(!iter.value().is_deleted);
+        assert_eq!(iter.key().as_slice(), b"key_001");
+        assert!(!iter.value().is_empty()); // Not a tombstone
 
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_002");
-        assert!(iter.value().is_deleted); // Tombstone
+        assert_eq!(iter.key().as_slice(), b"key_002");
+        assert!(iter.value().is_empty()); // Tombstone
 
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key_003");
-        assert!(!iter.value().is_deleted);
+        assert_eq!(iter.key().as_slice(), b"key_003");
+        assert!(!iter.value().is_empty()); // Not a tombstone
     }
 }

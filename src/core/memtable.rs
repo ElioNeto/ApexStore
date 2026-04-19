@@ -88,7 +88,7 @@ impl MemTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::iterator::StorageIterator;
+    use crate::core::iterators::StorageIterator;
 
     #[test]
     fn test_memtable_iter() {
@@ -117,11 +117,11 @@ mod tests {
 
         let mut iter = memtable.iter_from("key2");
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key2");
+        assert_eq!(iter.key().as_slice(), b"key2");
 
         iter.next();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), b"key3");
+        assert_eq!(iter.key().as_slice(), b"key3");
 
         iter.next();
         assert!(!iter.is_valid());

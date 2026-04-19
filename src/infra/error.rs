@@ -106,6 +106,9 @@ pub enum LsmError {
     #[error("Invalid memtable size: {0}")]
     InvalidMemtableSize(String),
 
+    #[error("Invalid compaction config: {0}")]
+    InvalidCompactionConfig(String),
+
     #[error("Configuration validation failed: {0}")]
     ConfigValidation(String),
 }

@@ -8,6 +8,8 @@ pub struct LsmConfig {
     pub core: CoreConfig,
     #[serde(default)]
     pub storage: StorageConfig,
+    #[serde(default)]
+    pub compaction: CompactionConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +24,29 @@ pub struct StorageConfig {
     pub block_cache_size_mb: usize,
     pub sparse_index_interval: usize,
     pub bloom_false_positive_rate: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionConfig {
+    /// Number of SSTables to merge in one compaction cycle
+    #[serde(default = "default_compaction_level")]
+    pub level_size: usize,
+    /// Maximum number of SSTables allowed before triggering compaction
+    #[serde(default = "default_max_sstables")]
+    pub max_sstables: usize,
+    /// Minimum number of SSTables to compact (prevents compaction on small datasets)
+    #[serde(default = "default_min_compaction_threshold")]
+    pub min_compaction_threshold: usize,
+    /// Compaction strategy
+    #[serde(default)]
+    pub strategy: CompactionStrategy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum CompactionStrategy {
+    #[default]
+    SizeTiered,
+    Leveled,
 }
 
 impl Default for CoreConfig {
@@ -44,6 +69,29 @@ impl Default for StorageConfig {
     }
 }
 
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            level_size: 4,
+            max_sstables: 16,
+            min_compaction_threshold: 4,
+            strategy: CompactionStrategy::SizeTiered,
+        }
+    }
+}
+
+fn default_compaction_level() -> usize {
+    4
+}
+
+fn default_max_sstables() -> usize {
+    16
+}
+
+fn default_min_compaction_threshold() -> usize {
+    4
+}
+
 impl LsmConfig {
     pub fn new() -> Self {
         Self::default()
@@ -57,6 +105,7 @@ impl LsmConfig {
     pub fn validate(&self) -> Result<()> {
         self.core.validate()?;
         self.storage.validate()?;
+        self.compaction.validate()?;
         Ok(())
     }
 }
@@ -155,6 +204,71 @@ impl StorageConfig {
     }
 }
 
+impl CompactionConfig {
+    /// Validate compaction configuration parameters
+    pub fn validate(&self) -> Result<()> {
+        // Level size validation
+        if self.level_size == 0 {
+            return Err(LsmError::InvalidCompactionConfig(
+                "Compaction level size cannot be 0".to_string(),
+            ));
+        }
+
+        if self.level_size < 2 {
+            return Err(LsmError::InvalidCompactionConfig(
+                "Compaction level size too small (minimum 2)".to_string(),
+            ));
+        }
+
+        if self.level_size > 100 {
+            eprintln!(
+                "⚠️  Warning: Very large compaction level size ({}), may cause long compaction times",
+                self.level_size
+            );
+        }
+
+        // Max SSTables validation
+        if self.max_sstables == 0 {
+            return Err(LsmError::InvalidCompactionConfig(
+                "Max SSTables cannot be 0".to_string(),
+            ));
+        }
+
+        if self.max_sstables < 2 {
+            return Err(LsmError::InvalidCompactionConfig(
+                "Max SSTables too small (minimum 2)".to_string(),
+            ));
+        }
+
+        if self.max_sstables < self.level_size {
+            return Err(LsmError::InvalidCompactionConfig(
+                "Max SSTables must be >= level_size".to_string(),
+            ));
+        }
+
+        // Min compaction threshold validation
+        if self.min_compaction_threshold == 0 {
+            return Err(LsmError::InvalidCompactionConfig(
+                "Min compaction threshold cannot be 0".to_string(),
+            ));
+        }
+
+        if self.min_compaction_threshold < 2 {
+            return Err(LsmError::InvalidCompactionConfig(
+                "Min compaction threshold too small (minimum 2)".to_string(),
+            ));
+        }
+
+        if self.min_compaction_threshold > self.max_sstables {
+            return Err(LsmError::InvalidCompactionConfig(
+                "Min compaction threshold must be <= max_sstables".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 pub struct LsmConfigBuilder {
     dir_path: Option<PathBuf>,
@@ -163,6 +277,10 @@ pub struct LsmConfigBuilder {
     block_cache_size_mb: Option<usize>,
     sparse_index_interval: Option<usize>,
     bloom_false_positive_rate: Option<f64>,
+    level_size: Option<usize>,
+    max_sstables: Option<usize>,
+    min_compaction_threshold: Option<usize>,
+    strategy: Option<CompactionStrategy>,
 }
 
 impl LsmConfigBuilder {
@@ -196,6 +314,26 @@ impl LsmConfigBuilder {
         self
     }
 
+    pub fn level_size(mut self, size: usize) -> Self {
+        self.level_size = Some(size);
+        self
+    }
+
+    pub fn max_sstables(mut self, count: usize) -> Self {
+        self.max_sstables = Some(count);
+        self
+    }
+
+    pub fn min_compaction_threshold(mut self, threshold: usize) -> Self {
+        self.min_compaction_threshold = Some(threshold);
+        self
+    }
+
+    pub fn strategy(mut self, strategy: CompactionStrategy) -> Self {
+        self.strategy = Some(strategy);
+        self
+    }
+
     pub fn build(self) -> Result<LsmConfig> {
         let defaults = LsmConfig::default();
 
@@ -217,6 +355,16 @@ impl LsmConfigBuilder {
                 bloom_false_positive_rate: self
                     .bloom_false_positive_rate
                     .unwrap_or(defaults.storage.bloom_false_positive_rate),
+            },
+            compaction: CompactionConfig {
+                level_size: self.level_size.unwrap_or(defaults.compaction.level_size),
+                max_sstables: self
+                    .max_sstables
+                    .unwrap_or(defaults.compaction.max_sstables),
+                min_compaction_threshold: self
+                    .min_compaction_threshold
+                    .unwrap_or(defaults.compaction.min_compaction_threshold),
+                strategy: self.strategy.unwrap_or(defaults.compaction.strategy),
             },
         };
 
@@ -367,5 +515,73 @@ mod tests {
             .build();
 
         assert!(config.is_ok());
+    }
+
+    #[test]
+    fn test_compaction_config_default() {
+        let config = CompactionConfig::default();
+        assert_eq!(config.level_size, 4);
+        assert_eq!(config.max_sstables, 16);
+        assert_eq!(config.min_compaction_threshold, 4);
+        assert!(matches!(config.strategy, CompactionStrategy::SizeTiered));
+    }
+
+    #[test]
+    fn test_compaction_config_validation() {
+        // Valid config
+        let config = CompactionConfig {
+            level_size: 4,
+            max_sstables: 16,
+            min_compaction_threshold: 4,
+            strategy: CompactionStrategy::SizeTiered,
+        };
+        assert!(config.validate().is_ok());
+
+        // Invalid: level_size too small
+        let config = CompactionConfig {
+            level_size: 1,
+            max_sstables: 16,
+            min_compaction_threshold: 4,
+            strategy: CompactionStrategy::SizeTiered,
+        };
+        assert!(config.validate().is_err());
+
+        // Invalid: max_sstables < level_size
+        let config = CompactionConfig {
+            level_size: 8,
+            max_sstables: 4,
+            min_compaction_threshold: 4,
+            strategy: CompactionStrategy::SizeTiered,
+        };
+        assert!(config.validate().is_err());
+
+        // Invalid: min_compaction_threshold > max_sstables
+        let config = CompactionConfig {
+            level_size: 4,
+            max_sstables: 8,
+            min_compaction_threshold: 10,
+            strategy: CompactionStrategy::SizeTiered,
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_builder_compaction_config() {
+        let config = LsmConfig::builder()
+            .level_size(8)
+            .max_sstables(32)
+            .min_compaction_threshold(8)
+            .strategy(CompactionStrategy::Leveled)
+            .build();
+
+        assert!(config.is_ok());
+        let config = config.unwrap();
+        assert_eq!(config.compaction.level_size, 8);
+        assert_eq!(config.compaction.max_sstables, 32);
+        assert_eq!(config.compaction.min_compaction_threshold, 8);
+        assert!(matches!(
+            config.compaction.strategy,
+            CompactionStrategy::Leveled
+        ));
     }
 }
