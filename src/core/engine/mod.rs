@@ -244,12 +244,11 @@ impl<C: Cache> Engine<C> {
             for mem in memtables.iter().rev() {
                 for (k, v) in mem.iter() {
                     // aplicar filtros lower/upper
-                    if lower.map_or(true, |lb| k.as_slice() >= lb)
-                        && upper.map_or(true, |ub| k.as_slice() < ub)
+                    if lower.is_none_or(|lb| k.as_slice() >= lb)
+                        && upper.is_none_or(|ub| k.as_slice() < ub)
+                        && seen_keys.insert(k.clone())
                     {
-                        if seen_keys.insert(k.clone()) {
-                            results.push((k.clone(), v.clone()));
-                        }
+                        results.push((k.clone(), v.clone()));
                     }
                     if let Some(l) = limit {
                         if results.len() >= l {
@@ -266,7 +265,7 @@ impl<C: Cache> Engine<C> {
             if seen_keys.insert(k.clone()) {
                 results.push((k, v));
             }
-            if limit.map_or(false, |l| results.len() >= l) {
+            if limit.is_some_and(|l| results.len() >= l) {
                 break;
             }
         }
@@ -274,6 +273,7 @@ impl<C: Cache> Engine<C> {
         Ok(results)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn scan_range(
         &self,
         lower: Option<&str>,
@@ -296,6 +296,7 @@ impl<C: Cache> Engine<C> {
         Ok((results, next_cursor))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn search_prefix(
         &self,
         prefix: &str,

@@ -1,4 +1,3 @@
-use crate::core::engine::Compaction;
 use crate::storage::cache::Cache;
 
 pub struct VersionSet<C: Cache> {
@@ -36,8 +35,8 @@ impl<C: Cache> VersionSet<C> {
         if let Some(cf_tables) = self.tables.get(cf) {
             for table in cf_tables.iter().rev() {
                 for (k, v) in &table.data {
-                    if lower.map_or(true, |lb| k.as_slice() >= lb)
-                        && upper.map_or(true, |ub| k.as_slice() < ub)
+                    if lower.is_none_or(|lb| k.as_slice() >= lb)
+                        && upper.is_none_or(|ub| k.as_slice() < ub)
                     {
                         results.push((k.clone(), v.clone()));
                     }
