@@ -63,6 +63,19 @@ impl<C: Cache> VersionSet<C> {
         self.tables.get(cf).map_or(0, |v| v.len())
     }
 
+    pub fn table_iters(&self, cf: &str) -> Vec<crate::core::table::TableIterator<'_>> {
+        self.tables
+            .get(cf)
+            .map(|v| v.iter().rev().map(|t| t.iter()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn record_count(&self, cf: &str) -> usize {
+        self.tables
+            .get(cf)
+            .map_or(0, |v| v.iter().map(|t| t.data.len()).sum())
+    }
+
     pub fn drain_tables(&mut self, cf: &str) -> Vec<crate::core::table::Table> {
         self.tables.remove(cf).unwrap_or_default()
     }

@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use self::compaction::Compaction;
 use self::manifest::Manifest;
 use self::version_set::VersionSet;
+use crate::core::iterators::{MergeIterator, StorageIterator};
+use crate::core::key::KeySlice;
 
 pub const DEFAULT_SCAN_LIMIT: usize = 128;
 pub const MAX_SCAN_LIMIT: usize = 1024;
@@ -110,8 +112,40 @@ impl MemTable {
         }
     }
 
-    fn iter(&self) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + '_ {
-        self.data.iter().map(|(k, v)| (k.clone(), v.clone()))
+}
+
+struct InternalMemTableIterator<'a> {
+    inner: std::collections::btree_map::Iter<'a, Vec<u8>, Vec<u8>>,
+    current: Option<(&'a Vec<u8>, &'a Vec<u8>)>,
+}
+
+impl<'a> InternalMemTableIterator<'a> {
+    fn new(data: &'a std::collections::BTreeMap<Vec<u8>, Vec<u8>>) -> Self {
+        let mut inner = data.iter();
+        let current = inner.next();
+        Self { inner, current }
+    }
+}
+
+impl<'a> StorageIterator for InternalMemTableIterator<'a> {
+    type KeyType = KeySlice<'a>;
+
+    fn next(&mut self) {
+        self.current = self.inner.next();
+    }
+    fn key(&self) -> Self::KeyType {
+        KeySlice::new(self.current.unwrap().0.as_slice())
+    }
+    fn value(&self) -> &[u8] {
+        self.current.unwrap().1.as_slice()
+    }
+    fn is_valid(&self) -> bool {
+        self.current.is_some()
+    }
+    fn seek(&mut self, _key: &[u8]) {
+        while self.is_valid() && self.key().as_ref() < _key {
+            self.next();
+        }
     }
 }
 
@@ -236,38 +270,52 @@ impl<C: Cache> Engine<C> {
         upper: Option<&[u8]>,
         limit: Option<usize>,
     ) -> crate::infra::error::Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        let mut seen_keys = std::collections::HashSet::new();
-        let mut results = Vec::new();
+        let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
 
-        // 1. Memtables primeiro (mais recentes)
+        // 1. Memtables (newer first)
         if let Some(memtables) = self.memtables.get(cf) {
             for mem in memtables.iter().rev() {
-                for (k, v) in mem.iter() {
-                    // aplicar filtros lower/upper
-                    if lower.is_none_or(|lb| k.as_slice() >= lb)
-                        && upper.is_none_or(|ub| k.as_slice() < ub)
-                        && seen_keys.insert(k.clone())
-                    {
-                        results.push((k.clone(), v.clone()));
-                    }
-                    if let Some(l) = limit {
-                        if results.len() >= l {
-                            return Ok(results);
-                        }
-                    }
-                }
+                iters.push(Box::new(InternalMemTableIterator::new(&mem.data)));
             }
         }
 
-        // 2. SSTables do version_set (mais antigas)
-        let sst_results = self.version_set.scan(cf, lower, upper, limit);
-        for (k, v) in sst_results {
-            if seen_keys.insert(k.clone()) {
-                results.push((k, v));
+        // 2. SSTables (from VersionSet)
+        for sst_iter in self.version_set.table_iters(cf) {
+            iters.push(Box::new(sst_iter));
+        }
+
+        let mut merge_iter = MergeIterator::new(iters);
+
+        // Se houver search bound inferior, seek
+        if let Some(lb) = lower {
+            // Nota: Nosso MergeIterator.seek ainda não está implementado, mas para scans básicos
+            // podemos apenas skipar. No futuro, seek otimizado seria preferível.
+            while merge_iter.is_valid() && merge_iter.key().as_slice() < lb {
+                merge_iter.next();
             }
-            if limit.is_some_and(|l| results.len() >= l) {
-                break;
+        }
+
+        let mut results = Vec::new();
+        while merge_iter.is_valid() {
+            let key = merge_iter.key();
+            let key_slice: &[u8] = key.as_ref();
+
+            // Check upper bound
+            if let Some(ub) = upper {
+                if key_slice >= ub {
+                    break;
+                }
             }
+
+            // Apenas adicionar se não for tombstone (valor vazio em algumas impls, mas aqui vamos assumir todos válidos por enquanto)
+            results.push((key_slice.to_vec(), merge_iter.value().to_vec()));
+
+            if let Some(l) = limit {
+                if results.len() >= l {
+                    break;
+                }
+            }
+            merge_iter.next();
         }
 
         Ok(results)
@@ -314,16 +362,38 @@ impl<C: Cache> Engine<C> {
     }
 
     pub fn keys(&self) -> crate::infra::error::Result<Vec<Vec<u8>>> {
-        Ok(self.memtables.get("default").map_or(Vec::new(), |m| {
-            m.iter().flat_map(|mt| mt.data.keys().cloned()).collect()
-        }))
+        let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
+
+        if let Some(memtables) = self.memtables.get("default") {
+            for mem in memtables.iter().rev() {
+                iters.push(Box::new(InternalMemTableIterator::new(&mem.data)));
+            }
+        }
+
+        for sst_iter in self.version_set.table_iters("default") {
+            iters.push(Box::new(sst_iter));
+        }
+
+        let mut merge_iter = MergeIterator::new(iters);
+        let mut results = Vec::new();
+
+        while merge_iter.is_valid() && results.len() < MAX_SCAN_LIMIT {
+            results.push(merge_iter.key());
+            merge_iter.next();
+        }
+
+        Ok(results)
     }
 
     pub fn count(&self) -> crate::infra::error::Result<usize> {
-        Ok(self
+        let mem_count: usize = self
             .memtables
             .get("default")
-            .map_or(0, |m| m.iter().map(|mt| mt.data.len()).sum()))
+            .map_or(0, |m| m.iter().map(|mt| mt.data.len()).sum());
+
+        let sst_count = self.version_set.record_count("default");
+
+        Ok(mem_count + sst_count)
     }
 
     pub fn stats(&self) -> crate::infra::error::Result<LsmStats> {
