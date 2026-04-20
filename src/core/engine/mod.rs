@@ -111,7 +111,6 @@ impl MemTable {
             self.size -= old.len();
         }
     }
-
 }
 
 struct InternalMemTableIterator<'a> {
