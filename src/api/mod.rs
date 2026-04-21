@@ -1,24 +1,49 @@
-use crate::core::engine::{DEFAULT_SCAN_LIMIT, MAX_SCAN_LIMIT};
+pub mod auth;
+pub mod config;
+
+pub use self::config::ServerConfig;
 use crate::LsmEngine;
+use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
+use serde_json::json;
 
-pub struct ServerConfig;
-impl ServerConfig {
-    pub fn from_file(_path: &str) -> crate::infra::error::Result<Self> {
-        Ok(Self)
-    }
-    pub fn from_env() -> Self {
-        Self
+/// Handler for `GET /keys`.
+/// Returns a JSON object containing an array of all keys (bounded by `MAX_SCAN_LIMIT`).
+#[get("/keys")]
+async fn get_keys(engine: web::Data<LsmEngine>) -> impl Responder {
+    // `LsmEngine::keys` applies the safety bound (MAX_SCAN_LIMIT).
+    match engine.keys() {
+        Ok(keys) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "keys": keys })),
+        Err(e) => {
+            eprintln!("Failed to fetch keys: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
     }
 }
 
-pub async fn start_server(
-    _engine: LsmEngine,
-    _config: ServerConfig,
-) -> crate::infra::error::Result<()> {
-    Ok(())
+/// Register API routes.
+pub fn configure(cfg: &mut web::ServiceConfig) {
+    cfg.service(get_keys);
 }
 
-fn _check_api() {
-    let _ = DEFAULT_SCAN_LIMIT;
-    let _ = MAX_SCAN_LIMIT;
+/// Start the REST API server.
+pub async fn start_server(engine: LsmEngine, config: ServerConfig) -> std::io::Result<()> {
+    let host = config.host.clone();
+    let port = config.port;
+
+    println!("🚀 Starting server at http://{}:{}", host, port);
+
+    let engine_data = web::Data::new(engine);
+
+    HttpServer::new(move || {
+        App::new()
+            .app_data(engine_data.clone())
+            .configure(configure)
+    })
+    .bind((host, port))?
+    .run()
+    .await
 }

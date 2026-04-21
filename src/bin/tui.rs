@@ -8,7 +8,7 @@
 //!   SEARCH <q> [--prefix] | SCAN <prefix> | ALL | KEYS | COUNT
 //!   STATS [ALL] | BATCH <n> | BATCH SET <file> | DEMO | CLEAR | HELP
 
-use apexstore::{core::engine::LsmStats, infra::config::LsmConfig, LsmEngine};
+use apexstore::{LsmConfig, LsmEngine, LsmError, LsmStats};
 use chrono::Local;
 use crossterm::{
     event::{
@@ -170,11 +170,12 @@ impl App {
                 }
                 match self.engine.get(parts[1]) {
                     Ok(Some(v)) => {
+                        let value: Vec<u8> = v;
                         self.log_push(
                             format!(
                                 "\u{2713} '{}' = '{}'",
                                 parts[1],
-                                String::from_utf8_lossy(&v)
+                                String::from_utf8_lossy(&value)
                             ),
                             C_OK,
                         );
@@ -274,46 +275,54 @@ impl App {
             }
 
             // ALL ──────────────────────────────────────────────────────────────
-            "ALL" => match self.engine.scan() {
-                Ok(rows) if rows.is_empty() => self.log_push("\u{26a0}  Database is empty", C_WARN),
-                Ok(rows) => {
-                    self.log_push(format!("\u{2713} {} record(s):", rows.len()), C_OK);
-                    for (k, v) in rows.iter().take(30) {
-                        self.log_push(
-                            format!(
-                                "  {} = {}",
-                                String::from_utf8_lossy(k),
-                                String::from_utf8_lossy(v)
-                            ),
-                            C_TEXT,
-                        );
+            "ALL" => {
+                let res: Result<Vec<(Vec<u8>, Vec<u8>)>, LsmError> = self.engine.scan();
+                match res {
+                    Ok(rows) if rows.is_empty() => {
+                        self.log_push("\u{26a0}  Database is empty", C_WARN)
                     }
-                    if rows.len() > 30 {
-                        self.log_push(format!("  ... and {} more", rows.len() - 30), C_DIM);
+                    Ok(rows) => {
+                        self.log_push(format!("\u{2713} {} record(s):", rows.len()), C_OK);
+                        for (k, v) in rows.iter().take(30) {
+                            self.log_push(
+                                format!(
+                                    "  {} = {}",
+                                    String::from_utf8_lossy(k),
+                                    String::from_utf8_lossy(v)
+                                ),
+                                C_TEXT,
+                            );
+                        }
+                        if rows.len() > 30 {
+                            self.log_push(format!("  ... and {} more", rows.len() - 30), C_DIM);
+                        }
+                        self.incr_ops();
                     }
-                    self.incr_ops();
+                    Err(e) => self.log_push(format!("\u{274c} {}", e), C_ERR),
                 }
-                Err(e) => self.log_push(format!("\u{274c} {}", e), C_ERR),
-            },
+            }
 
             // KEYS ─────────────────────────────────────────────────────────────
-            "KEYS" => match self.engine.keys() {
-                Ok(keys) if keys.is_empty() => self.log_push("\u{26a0}  No keys found", C_WARN),
-                Ok(keys) => {
-                    self.log_push(format!("\u{2713} {} key(s):", keys.len()), C_OK);
-                    for (i, k) in keys.iter().enumerate().take(30) {
-                        self.log_push(
-                            format!("  {}. {}", i + 1, String::from_utf8_lossy(k)),
-                            C_TEXT,
-                        );
+            "KEYS" => {
+                let res: Result<Vec<Vec<u8>>, LsmError> = self.engine.keys();
+                match res {
+                    Ok(keys) if keys.is_empty() => self.log_push("\u{26a0}  No keys found", C_WARN),
+                    Ok(keys) => {
+                        self.log_push(format!("\u{2713} {} key(s):", keys.len()), C_OK);
+                        for (i, k) in keys.iter().enumerate().take(30) {
+                            self.log_push(
+                                format!("  {}. {}", i + 1, String::from_utf8_lossy(k)),
+                                C_TEXT,
+                            );
+                        }
+                        if keys.len() > 30 {
+                            self.log_push(format!("  ... and {} more", keys.len() - 30), C_DIM);
+                        }
+                        self.incr_ops();
                     }
-                    if keys.len() > 30 {
-                        self.log_push(format!("  ... and {} more", keys.len() - 30), C_DIM);
-                    }
-                    self.incr_ops();
+                    Err(e) => self.log_push(format!("\u{274c} {}", e), C_ERR),
                 }
-                Err(e) => self.log_push(format!("\u{274c} {}", e), C_ERR),
-            },
+            }
 
             // COUNT ────────────────────────────────────────────────────────────
             "COUNT" => match self.engine.count() {
@@ -585,9 +594,9 @@ fn main() -> io::Result<()> {
         .dir_path(PathBuf::from("./.lsm_data"))
         .memtable_max_size(64 * 1024) // 64 KB
         .build()
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(|e: LsmError| io::Error::other(e.to_string()))?;
 
-    let engine = LsmEngine::new(config).map_err(|e| io::Error::other(e.to_string()))?;
+    let engine = LsmEngine::new(config).map_err(|e: LsmError| io::Error::other(e.to_string()))?;
 
     let mut terminal = setup()?;
     let mut app = App::new(engine);
