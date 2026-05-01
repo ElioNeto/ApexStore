@@ -259,7 +259,7 @@ impl<C: Cache> Engine<C> {
     }
 
     pub fn scan(&self) -> crate::infra::error::Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        self.scan_cf("default", None, None, None)
+        self.scan_cf("default", None, None, Some(DEFAULT_SCAN_LIMIT))
     }
 
     pub fn scan_cf(
