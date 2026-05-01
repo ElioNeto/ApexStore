@@ -13,24 +13,43 @@ impl Table {
     pub fn size(&self) -> usize {
         0
     }
-    pub fn iter(&self) -> TableIterator {
-        TableIterator
+    pub fn iter(&self) -> TableIterator<'_> {
+        TableIterator::new(&self.data)
     }
 }
 
-pub struct TableIterator;
-impl crate::core::iterators::StorageIterator for TableIterator {
-    type KeyType = crate::core::key::KeySlice<'static>;
+pub struct TableIterator<'a> {
+    inner: std::collections::btree_map::Iter<'a, Vec<u8>, Vec<u8>>,
+    current: Option<(&'a Vec<u8>, &'a Vec<u8>)>,
+}
 
-    fn next(&mut self) {}
+impl<'a> TableIterator<'a> {
+    pub fn new(data: &'a std::collections::BTreeMap<Vec<u8>, Vec<u8>>) -> Self {
+        let mut inner = data.iter();
+        let current = inner.next();
+        Self { inner, current }
+    }
+}
+
+impl<'a> crate::core::iterators::StorageIterator for TableIterator<'a> {
+    type KeyType = crate::core::key::KeySlice<'a>;
+
+    fn next(&mut self) {
+        self.current = self.inner.next();
+    }
     fn key(&self) -> Self::KeyType {
-        crate::core::key::KeySlice::new(&[])
+        crate::core::key::KeySlice::new(self.current.unwrap().0.as_slice())
     }
     fn value(&self) -> &[u8] {
-        &[]
+        self.current.unwrap().1.as_slice()
     }
     fn is_valid(&self) -> bool {
-        false
+        self.current.is_some()
     }
-    fn seek(&mut self, _key: &[u8]) {}
+    fn seek(&mut self, _key: &[u8]) {
+        // Not strictly required for now, but good to have
+        while self.is_valid() && self.key().as_ref() < _key {
+            self.next();
+        }
+    }
 }

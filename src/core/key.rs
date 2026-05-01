@@ -15,6 +15,12 @@ impl<'a> KeySlice<'a> {
     }
 }
 
+impl<'a> AsRef<[u8]> for KeySlice<'a> {
+    fn as_ref(&self) -> &[u8] {
+        self.0
+    }
+}
+
 impl<'a> std::ops::Deref for KeySlice<'a> {
     type Target = [u8];
 
