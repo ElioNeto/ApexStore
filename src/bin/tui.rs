@@ -34,6 +34,8 @@ use std::{
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
+type ScanResult = Result<Vec<(Vec<u8>, Vec<u8>)>, LsmError>;
+
 // ─── Palette ──────────────────────────────────────────────────────────────────
 const C_ORANGE: Color = Color::Rgb(255, 110, 30);
 const C_AMBER: Color = Color::Rgb(255, 185, 0);
@@ -276,7 +278,7 @@ impl App {
 
             // ALL ──────────────────────────────────────────────────────────────
             "ALL" => {
-                let res: Result<Vec<(Vec<u8>, Vec<u8>)>, LsmError> = self.engine.scan();
+                let res: ScanResult = self.engine.scan();
                 match res {
                     Ok(rows) if rows.is_empty() => {
                         self.log_push("\u{26a0}  Database is empty", C_WARN)
