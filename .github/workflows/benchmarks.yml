@@ -18,10 +18,14 @@ jobs:
     name: Run Benchmarks
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -45,15 +49,75 @@ jobs:
         run: cargo build --benches --all-features
 
       - name: Run benchmarks
-        run: cargo bench --all-features -- --export-json=benchmark-results
+        run: cargo bench --all-features 2>&1 | tee bench_output.txt
         continue-on-error: true
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
-          path: benchmark-results.json
+          path: |
+            bench_output.txt
+            target/criterion
           retention-days: 30
+
+      - name: Generate benchmark summary
+        if: github.event_name != 'pull_request'
+        run: |
+          DATE=$(date -u '+%Y-%m-%d %H:%M UTC')
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          # Parse Criterion output: lines like "time: [X.XX µs X.XX µs X.XX µs]"
+          ROWS=""
+          CURRENT_BENCH=""
+          while IFS= read -r line; do
+            # Detect benchmark name (lines that don't start with whitespace and aren't empty)
+            if echo "$line" | grep -qE '^[a-zA-Z].*/{0,1}[a-zA-Z]'; then
+              CURRENT_BENCH=$(echo "$line" | sed 's|/| / |g' | xargs)
+            fi
+            # Detect timing line
+            if echo "$line" | grep -qE 'time:.*\['; then
+              # Extract the middle (median) value
+              MEDIAN=$(echo "$line" | grep -oE '\[[^]]+\]' | head -1 | sed 's/\[//' | sed 's/\]//' | awk '{print $3, $4}')
+              if [ -n "$CURRENT_BENCH" ] && [ -n "$MEDIAN" ]; then
+                ROWS="$ROWS\n| \`$CURRENT_BENCH\` | $MEDIAN |"
+              fi
+            fi
+          done < bench_output.txt
+
+          # Build the full block
+          {
+            echo "<!-- BENCHMARK_RESULTS_START -->"
+            echo "> 🤖 Auto-updated by CI on **${DATE}** — [View run](${RUN_URL})"
+            echo ""
+            if [ -n "$ROWS" ]; then
+              echo "| Benchmark | Tempo (mediana) |"
+              echo "|-----------|----------------|"
+              printf "%b" "$ROWS"
+              echo ""
+            else
+              echo "*Nenhum resultado parseado — verifique os [artefatos do run](${RUN_URL}).*"
+            fi
+            echo ""
+            echo "<!-- BENCHMARK_RESULTS_END -->"
+          } > bench_block.txt
+
+          # Inject block into README between markers
+          perl -i -0pe '
+            my $block = do { open my $f, "bench_block.txt" or die; local $/; <$f> };
+            s|<!-- BENCHMARK_RESULTS_START -->.*?<!-- BENCHMARK_RESULTS_END -->|$block|gs;
+          ' README.md
+
+      - name: Commit updated README
+        if: github.event_name != 'pull_request'
+        run: |
+          git config user.name "ElioNeto"
+          git config user.email "netoo.elio@hotmail.com"
+          git add README.md
+          git diff --staged --quiet || git commit -m "docs: update benchmark results [skip ci]"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run clippy on benchmarks
         run: cargo clippy --all-targets --all-features -- -D warnings
@@ -68,7 +132,6 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - name: Download baseline results
-        # Baseline won't exist on the first run — safe to skip
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -84,7 +147,7 @@ jobs:
 
       - name: Compare benchmarks
         run: |
-          if [ -f baseline/benchmark-results.json ] && [ -f current/benchmark-results.json ]; then
+          if [ -f baseline/bench_output.txt ] && [ -f current/bench_output.txt ]; then
             echo "Comparing benchmarks..."
             # TODO: Implement actual comparison logic with cargo-benchcmp or similar
           else
