@@ -38,79 +38,43 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 
 ## 📊 Performance Benchmarks
 
-*Measured on AMD Ryzen 9 5900X, NVMe SSD — Full benchmark suite available at [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md)*
-
 > **Run locally:** `cargo bench --all-features` → relatórios HTML em `target/criterion/`
 
 ### 🤖 Latest CI Results
 
 <!-- BENCHMARK_RESULTS_START -->
-> 🤖 Auto-updated by CI on **2026-05-02 21:31 UTC** — [View run](https://github.com/ElioNeto/ApexStore/actions/runs/25262209702)
-
-| Benchmark | Tempo (mediana) |
-|-----------|----------------|
-
-| `ycsb_type_a / 10000 time: [820.12 µs 825.29 µs 828.60 µs]` | 825.29 µs |
-| `ycsb_type_b / 10000 time: [650.31 µs 674.84 µs 687.28 µs]` | 674.84 µs |
-| `ycsb_type_c / 10000 time: [322.55 µs 324.13 µs 325.47 µs]` | 324.13 µs |
-| `ycsb_type_c / 100000 time: [583.82 µs 593.69 µs 599.62 µs]` | 593.69 µs |
-| `workload_balanced / 10000 time: [824.09 µs 834.41 µs 841.05 µs]` | 834.41 µs |
-| `workload_read_heavy / 10000` | 733.64 µs |
-| `workload_write_heavy / 10000` | 882.15 µs |
-| `read_memtable / 1000 time: [136.80 µs 138.20 µs 139.63 µs]` | 138.20 µs |
-| `read_memtable / 10000 time: [264.14 µs 266.79 µs 269.90 µs]` | 266.79 µs |
-| `read_sstable_cold / 1000 time: [139.95 µs 142.25 µs 144.12 µs]` | 142.25 µs |
-| `read_sstable_cold / 10000 time: [243.13 µs 245.65 µs 249.45 µs]` | 245.65 µs |
-| `read_sstable_warm / 1000 time: [140.52 µs 142.09 µs 143.90 µs]` | 142.09 µs |
-| `read_sstable_warm / 10000 time: [243.47 µs 247.24 µs 250.98 µs]` | 247.24 µs |
-| `bloom_filter / 10000 time: [1.9832 ms 2.0507 ms 2.1213 ms]` | 2.0507 ms |
-| `bloom_filter / 100000 time: [31.944 ms 32.218 ms 32.457 ms]` | 32.218 ms |
-| `read_latency / memtable_1k` | 106.83 µs |
-| `read_latency / sstable_cold_1k` | 145.36 µs |
-| `scan_sequential / 1000 time: [138.02 µs 139.32 µs 141.09 µs]` | 139.32 µs |
-| `scan_sequential / 10000 time: [1.7773 ms 1.7813 ms 1.7872 ms]` | 1.7813 ms |
-| `full_scan / 1000 time: [144.30 µs 145.90 µs 147.45 µs]` | 145.90 µs |
-| `full_scan / 10000 time: [2.0813 ms 2.1043 ms 2.1379 ms]` | 2.1043 ms |
-| `range_scan_100 / 100 time: [6.8891 ms 6.9473 ms 7.0535 ms]` | 6.9473 ms |
-| `range_scan_1000 / 1000 time: [7.2104 ms 7.3029 ms 7.3804 ms]` | 7.3029 ms |
-| `prefix_scan_100 / 100 time: [865.13 µs 874.68 µs 883.89 µs]` | 874.68 µs |
-| `prefix_scan_1000 / 1000 time: [1.0699 ms 1.0749 ms 1.0787 ms]` | 1.0749 ms |
-| `iteration_sorted / 1000 time: [173.25 µs 174.38 µs 175.70 µs]` | 174.38 µs |
-| `iteration_sorted / 10000 time: [2.1238 ms 2.1293 ms 2.1381 ms]` | 2.1293 ms |
-| `scan_limit_10 / 10 time: [2.5731 µs 2.5954 µs 2.6115 µs]` | 2.5954 µs |
-| `scan_limit_100 / 100 time: [23.638 µs 23.735 µs 23.848 µs]` | 23.735 µs |
-| `scan_limit_1000 / 1000 time: [235.16 µs 236.44 µs 237.84 µs]` | 236.44 µs |
-| `scan_pagination / 10 time: [862.16 µs 867.57 µs 871.45 µs]` | 867.57 µs |
-| `scan_pagination / 100 time: [75.984 ms 76.368 ms 76.748 ms]` | 76.368 ms |
-| `sstable_layer_1 / 1 time: [2.0199 ms 2.0264 ms 2.0340 ms]` | 2.0264 ms |
-| `sstable_layer_3 / 3 time: [6.4222 ms 6.4481 ms 6.4888 ms]` | 6.4481 ms |
-| `sstable_layer_10 / 10 time: [24.502 ms 24.770 ms 24.898 ms]` | 24.770 ms |
-| `concurrent_1_threads / 1 time: [2.6311 ms 2.6809 ms 2.7283 ms]` | 2.6809 ms |
-| `concurrent_2_threads / 2 time: [2.9239 ms 2.9482 ms 2.9774 ms]` | 2.9482 ms |
-| `memory_pressure / small_memtable` | 4.8870 ms |
-| `many_sstables_10 / 10 time: [230.08 µs 232.36 µs 235.38 µs]` | 232.36 µs |
-| `many_sstables_50 / 50 time: [315.37 µs 318.02 µs 320.42 µs]` | 318.02 µs |
-| `cache_thrash_16MB / 16 time: [80.146 µs 81.032 µs 83.087 µs]` | 81.032 µs |
-| `cache_thrash_64MB / 64 time: [79.431 µs 79.960 µs 80.427 µs]` | 79.960 µs |
-| `key_updates / 10k_keys time: [8.0228 ms 8.0665 ms 8.0988 ms]` | 8.0665 ms |
-| `delete_operations / 10k_keys` | 1.4302 ms |
-| `write_single / 10 time: [164.73 ns 165.08 ns 165.47 ns]` | 165.08 ns |
-| `write_single / 100 time: [165.93 ns 166.11 ns 166.26 ns]` | 166.11 ns |
-| `write_single / 1024 time: [196.22 ns 199.38 ns 202.58 ns]` | 199.38 ns |
-| `write_single / 10240 time: [795.75 ns 797.11 ns 798.39 ns]` | 797.11 ns |
-| `write_batch_1000 / 1000 time: [345.44 µs 347.41 µs 348.58 µs]` | 347.41 µs |
-| `write_batch_10000 / 10000 time: [6.5341 ms 6.5833 ms 6.6134 ms]` | 6.5833 ms |
-| `write_batch_100000 / 100000` | 199.13 ms |
-| `memtable_flush_8 / 8 time: [42.016 ms 42.794 ms 43.210 ms]` | 42.794 ms |
-| `sstable_flush / 100000 time: [197.29 ms 199.16 ms 201.05 ms]` | 199.16 ms |
-| `write_size_10_10 / 10x10 time: [164.59 ns 164.99 ns 165.29 ns]` | 164.99 ns |
-| `write_size_10_100 / 10x100` | 167.69 ns |
-| `write_size_100_100 / 100x100` | 171.60 ns |
-| `write_size_100_1000 / 100x1000` | 173.10 ns |
-| `write_size_100_10000 / 100x10000` | 173.02 ns |
+> 🤖 Auto-updated by CI — results will appear here after the next benchmark run.
 
 <!-- BENCHMARK_RESULTS_END -->
 
+### 📋 YCSB Mixed Workload — `mixed_bench`
+
+*Medido em **Intel Core i5-9300H @ 2.40GHz**, 16 GB DDR4 2667 MHz, HDD SATA 1TB (v2.1.39) — `cargo bench --bench mixed_bench -- --sample-size 10`*
+
+#### Throughput (operações/segundo)
+
+| Benchmark | Tamanho | Mediana | Throughput | Variação vs anterior |
+|-----------|---------|---------|------------|----------------------|
+| **YCSB Type A** *(50% write / 50% read)* | 10K | 952.83 µs | 1.05 Melem/s | sem mudança |
+| **YCSB Type A** *(50% write / 50% read)* | 100K | 2.706 ms | 369.6 Kelem/s | ✅ +49% throughput |
+| **YCSB Type B** *(5% write / 95% read)* | 10K | 814.90 µs | 1.23 Melem/s | ⚠️ -18.6% throughput |
+| **YCSB Type B** *(5% write / 95% read)* | 100K | 1.409 ms | 710.0 Kelem/s | ⚠️ -20.1% throughput |
+| **YCSB Type C** *(100% read)* | 10K | 334.70 µs | 2.99 Melem/s | ✅ +9.4% throughput |
+| **YCSB Type C** *(100% read)* | 100K | 745.36 µs | 1.34 Melem/s | ✅ +12.4% throughput |
+| **YCSB Type C** *(100% read)* | 1M | 1.290 ms | 775.0 Kelem/s | — *(novo)* |
+
+#### Workloads compostos
+
+| Benchmark | Tamanho | Mediana | Throughput | Variação vs anterior |
+|-----------|---------|---------|------------|----------------------|
+| **Balanced** *(mix equilibrado)* | 10K | 1.080 ms | 925.9 Kelem/s | ⚠️ -8.7% throughput |
+| **Balanced** *(mix equilibrado)* | 100K | 2.831 ms | 353.2 Kelem/s | — *(sem baseline)* |
+| **Read Heavy** *(leitura intensiva)* | 10K | 811.91 µs | 1.23 Melem/s | ✅ +15.7% throughput |
+| **Read Heavy** *(leitura intensiva)* | 100K | 1.777 ms | 562.7 Kelem/s | — *(sem baseline)* |
+| **Write Heavy** *(escrita intensiva)* | 10K | 1.187 ms | 82.3 KiB/s | ⚠️ -6.7% throughput |
+| **Write Heavy** *(escrita intensiva)* | 100K | 3.486 ms | 28.0 KiB/s | — *(sem baseline)* |
+
+> **Nota sobre hardware:** resultados acima são conservadores — medidos em HDD SATA (vs. NVMe). Em NVMe espera-se 2–4× melhor throughput em operações I/O-bound.
 
 ### 📋 Reference Benchmarks
 
