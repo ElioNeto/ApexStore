@@ -8,19 +8,6 @@
         "prune": true,
         "reserved": 12000
     },
-    "watcher": {
-        "ignore": [
-            "**/node_modules/**",
-            "**/dist/**",
-            "**/build/**",
-            "**/.next/**",
-            "**/coverage/**",
-            "**/.turbo/**",
-            "**/vendor/**",
-            "**/tmp/**",
-            "**/.git/**"
-        ]
-    },
     "permission": {
         "edit": "ask",
         "bash": "ask"
@@ -37,109 +24,6 @@
                 "GITHUB_TOKEN": "{env:GH_TOKEN}"
             },
             "enabled": true
-        }
-    },
-    "agent": {
-        "orchestrator": {
-            "description": "Seleciona issues desbloqueadas, resolve dependências e coordena implementação e validação com contexto mínimo.",
-            "mode": "primary",
-            "temperature": 0.0,
-            "max_steps": 18,
-            "prompt": ".opencode/prompts/orchestrator.md",
-            "permission": {
-                "read": "allow",
-                "list": "allow",
-                "glob": "allow",
-                "grep": "allow",
-                "edit": "deny",
-                "bash": {
-                    "*": "deny",
-                    "git status*": "allow",
-                    "git diff*": "allow",
-                    "git log*": "allow",
-                    "cat .opencode/state/*": "allow",
-                    "jq *": "allow"
-                },
-                "task": {
-                    "*": "deny",
-                    "implementer": "allow",
-                    "validator": "allow",
-                    "explore": "allow"
-                }
-            }
-        },
-        "implementer": {
-            "description": "Implementa uma issue por vez no repositório local, com saída curta e objetiva.",
-            "mode": "subagent",
-            "temperature": 0.0,
-            "max_steps": 32,
-            "prompt": ".opencode/prompts/implementer.md",
-            "permission": {
-                "read": "allow",
-                "list": "allow",
-                "glob": "allow",
-                "grep": "allow",
-                "edit": "allow",
-                "bash": {
-                    "*": "deny",
-                    "npm test*": "allow",
-                    "pnpm test*": "allow",
-                    "yarn test*": "allow",
-                    "npm run test*": "allow",
-                    "pnpm run test*": "allow",
-                    "yarn run test*": "allow",
-                    "npm run lint*": "allow",
-                    "pnpm run lint*": "allow",
-                    "yarn lint*": "allow",
-                    "npm run build*": "allow",
-                    "pnpm run build*": "allow",
-                    "yarn build*": "allow",
-                    "pytest*": "allow",
-                    "go test*": "allow",
-                    "cargo test*": "allow",
-                    "git status*": "allow",
-                    "git diff*": "allow",
-                    "git add*": "allow",
-                    "git commit*": "allow"
-                },
-                "task": {
-                    "*": "deny"
-                }
-            }
-        },
-        "validator": {
-            "description": "Valida critérios de aceite com evidência objetiva, sem editar código.",
-            "mode": "subagent",
-            "temperature": 0.0,
-            "max_steps": 18,
-            "prompt": ".opencode/prompts/validator.md",
-            "permission": {
-                "read": "allow",
-                "list": "allow",
-                "glob": "allow",
-                "grep": "allow",
-                "edit": "deny",
-                "bash": {
-                    "*": "deny",
-                    "npm test*": "allow",
-                    "pnpm test*": "allow",
-                    "yarn test*": "allow",
-                    "npm run lint*": "allow",
-                    "pnpm run lint*": "allow",
-                    "yarn lint*": "allow",
-                    "npm run build*": "allow",
-                    "pnpm run build*": "allow",
-                    "yarn build*": "allow",
-                    "pytest*": "allow",
-                    "go test*": "allow",
-                    "cargo test*": "allow",
-                    "git diff*": "allow",
-                    "git status*": "allow"
-                },
-                "task": {
-                    "*": "deny"
-                }
-            }
         }
     }
 }

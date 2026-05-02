@@ -1,0 +1,6 @@
+{
+  "_comment": "Lista de repositórios alvo para o comando update-repos. Adicione os repos que devem receber atualizações do boilerplate.",
+  "repos": [
+    "ElioNeto/exemplo-repo"
+  ]
+}
