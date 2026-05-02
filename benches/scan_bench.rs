@@ -3,6 +3,17 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use std::path::PathBuf;
 use tempfile::TempDir;
 
+fn configure_criterion() -> Criterion {
+    let mut c = Criterion::default();
+    if std::env::var("CI").is_ok() {
+        c = c
+            .sample_size(10)
+            .warm_up_time(std::time::Duration::from_secs(1))
+            .measurement_time(std::time::Duration::from_secs(3));
+    }
+    c
+}
+
 fn setup_temp_dir(name: &str) -> (TempDir, PathBuf) {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let path = temp_dir.path().join(name);
@@ -31,7 +42,12 @@ fn generate_value(index: usize, value_size: usize) -> Vec<u8> {
 }
 
 fn bench_full_scan(c: &mut Criterion) {
-    for num_keys in [1_000usize, 10_000, 100_000] {
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![1_000, 10_000]
+    } else {
+        vec![1_000, 10_000, 100_000]
+    };
+    for num_keys in num_keys_arr {
         let mut group = c.benchmark_group("full_scan");
         group.throughput(Throughput::Elements(num_keys as u64));
 
@@ -57,7 +73,7 @@ fn bench_full_scan(c: &mut Criterion) {
                 }
 
                 b.iter(|| {
-                    let results = engine.scan().unwrap();
+                    let results = engine.scan_cf("default", None, None, None).unwrap();
                     assert_eq!(results.len(), nk);
                 });
 
@@ -71,7 +87,14 @@ fn bench_full_scan(c: &mut Criterion) {
 }
 
 fn bench_range_scan(c: &mut Criterion) {
-    for scan_size in [100usize, 1_000, 10_000, 100_000] {
+    let is_ci = std::env::var("CI").is_ok();
+    let total_keys = if is_ci { 100_000usize } else { 1_000_000usize };
+    let scan_sizes: Vec<usize> = if is_ci {
+        vec![100, 1_000]
+    } else {
+        vec![100, 1_000, 10_000, 100_000]
+    };
+    for scan_size in scan_sizes {
         let mut group = c.benchmark_group(format!("range_scan_{}", scan_size));
         group.throughput(Throughput::Elements(scan_size as u64));
 
@@ -79,7 +102,6 @@ fn bench_range_scan(c: &mut Criterion) {
             BenchmarkId::from_parameter(scan_size),
             &scan_size,
             |b, &_ss| {
-                let total_keys = 1_000_000usize;
                 let (temp_dir, data_dir) = setup_temp_dir("range_scan");
                 let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
@@ -124,7 +146,14 @@ fn bench_range_scan(c: &mut Criterion) {
 }
 
 fn bench_prefix_scan(c: &mut Criterion) {
-    for prefix_size in [100usize, 1_000, 10_000] {
+    let is_ci = std::env::var("CI").is_ok();
+    let total_keys = if is_ci { 10_000usize } else { 100_000usize };
+    let prefix_sizes: Vec<usize> = if is_ci {
+        vec![100, 1_000]
+    } else {
+        vec![100, 1_000, 10_000]
+    };
+    for prefix_size in prefix_sizes {
         let mut group = c.benchmark_group(format!("prefix_scan_{}", prefix_size));
         group.throughput(Throughput::Elements(prefix_size as u64));
 
@@ -132,7 +161,6 @@ fn bench_prefix_scan(c: &mut Criterion) {
             BenchmarkId::from_parameter(prefix_size),
             &prefix_size,
             |b, &_ps| {
-                let total_keys = 100_000usize;
                 let (temp_dir, data_dir) = setup_temp_dir("prefix_scan");
                 let mut engine = apexstore::LsmEngine::new(
                     LsmConfig::builder()
@@ -168,7 +196,12 @@ fn bench_prefix_scan(c: &mut Criterion) {
 }
 
 fn bench_iteration_sorted(c: &mut Criterion) {
-    for num_keys in [1_000usize, 10_000, 100_000] {
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![1_000, 10_000]
+    } else {
+        vec![1_000, 10_000, 100_000]
+    };
+    for &num_keys in &num_keys_arr {
         let mut group = c.benchmark_group("iteration_sorted");
         group.throughput(Throughput::Elements(num_keys as u64));
 
@@ -194,7 +227,7 @@ fn bench_iteration_sorted(c: &mut Criterion) {
                 }
 
                 b.iter(|| {
-                    let results = engine.scan().unwrap();
+                    let results = engine.scan_cf("default", None, None, None).unwrap();
                     for i in 1..results.len() {
                         assert!(results[i - 1].0 <= results[i].0);
                     }
@@ -211,12 +244,18 @@ fn bench_iteration_sorted(c: &mut Criterion) {
 }
 
 fn bench_scan_with_limit(c: &mut Criterion) {
-    for limit in [10usize, 100, 1_000, 10_000] {
+    let is_ci = std::env::var("CI").is_ok();
+    let total_keys = if is_ci { 100_000usize } else { 1_000_000usize };
+    let limits: Vec<usize> = if is_ci {
+        vec![10, 100, 1_000]
+    } else {
+        vec![10, 100, 1_000, 10_000]
+    };
+    for limit in limits {
         let mut group = c.benchmark_group(format!("scan_limit_{}", limit));
         group.throughput(Throughput::Elements(limit as u64));
 
         group.bench_with_input(BenchmarkId::from_parameter(limit), &limit, |b, &_l| {
-            let total_keys = 1_000_000usize;
             let (temp_dir, data_dir) = setup_temp_dir("scan_limit");
             let mut engine = apexstore::LsmEngine::new(
                 LsmConfig::builder()
@@ -248,7 +287,14 @@ fn bench_scan_with_limit(c: &mut Criterion) {
 }
 
 fn bench_scan_pagination(c: &mut Criterion) {
-    for num_pages in [10usize, 100, 1_000] {
+    let is_ci = std::env::var("CI").is_ok();
+    let total_keys = if is_ci { 10_000usize } else { 100_000usize };
+    let num_pages_arr: Vec<usize> = if is_ci {
+        vec![10, 100]
+    } else {
+        vec![10, 100, 1_000]
+    };
+    for num_pages in num_pages_arr {
         let mut group = c.benchmark_group("scan_pagination");
         group.throughput(Throughput::Elements((num_pages * 100) as u64));
 
@@ -256,7 +302,6 @@ fn bench_scan_pagination(c: &mut Criterion) {
             BenchmarkId::from_parameter(num_pages),
             &num_pages,
             |b, &_np| {
-                let total_keys = 100_000usize;
                 let page_size = 100usize;
                 let (temp_dir, data_dir) = setup_temp_dir("scan_pagination");
                 let mut engine = apexstore::LsmEngine::new(
@@ -304,7 +349,12 @@ fn bench_scan_pagination(c: &mut Criterion) {
 }
 
 fn bench_sstable_layer_scan(c: &mut Criterion) {
-    for layer_count in [1usize, 3, 10, 30] {
+    let layer_counts: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![1, 3, 10]
+    } else {
+        vec![1, 3, 10, 30]
+    };
+    for layer_count in layer_counts {
         let mut group = c.benchmark_group(format!("sstable_layer_{}", layer_count));
 
         group.bench_with_input(
@@ -332,7 +382,7 @@ fn bench_sstable_layer_scan(c: &mut Criterion) {
                 }
 
                 b.iter(|| {
-                    let results = engine.scan().unwrap();
+                    let results = engine.scan_cf("default", None, None, None).unwrap();
                     assert!(results.len() >= keys_per_layer);
                 });
 
@@ -346,14 +396,9 @@ fn bench_sstable_layer_scan(c: &mut Criterion) {
 }
 
 criterion_group!(
-    scan_benches,
-    bench_full_scan,
-    bench_range_scan,
-    bench_prefix_scan,
-    bench_iteration_sorted,
-    bench_scan_with_limit,
-    bench_scan_pagination,
-    bench_sstable_layer_scan,
+    name = scan_benches;
+    config = configure_criterion();
+    targets = bench_full_scan, bench_range_scan, bench_prefix_scan, bench_iteration_sorted, bench_scan_with_limit, bench_scan_pagination, bench_sstable_layer_scan
 );
 
 criterion_main!(scan_benches);

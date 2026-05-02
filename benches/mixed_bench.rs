@@ -4,6 +4,17 @@ use rand::Rng;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
+fn configure_criterion() -> Criterion {
+    let mut c = Criterion::default();
+    if std::env::var("CI").is_ok() {
+        c = c
+            .sample_size(10)
+            .warm_up_time(std::time::Duration::from_secs(1))
+            .measurement_time(std::time::Duration::from_secs(3));
+    }
+    c
+}
+
 fn setup_temp_dir(name: &str) -> (TempDir, PathBuf) {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let path = temp_dir.path().join(name);
@@ -32,7 +43,12 @@ fn generate_value(index: usize, value_size: usize) -> Vec<u8> {
 
 /// Benchmark YCSB Type A: 50% read, 50% write (uniform)
 fn bench_ycsb_type_a(c: &mut Criterion) {
-    for num_keys in [10_000usize, 100_000] {
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![10_000]
+    } else {
+        vec![10_000, 100_000]
+    };
+    for num_keys in num_keys_arr {
         let mut group = c.benchmark_group("ycsb_type_a");
         group.throughput(Throughput::Elements(1000));
 
@@ -83,7 +99,12 @@ fn bench_ycsb_type_a(c: &mut Criterion) {
 
 /// Benchmark YCSB Type B: 95% read, 5% write (read-heavy)
 fn bench_ycsb_type_b(c: &mut Criterion) {
-    for num_keys in [10_000usize, 100_000] {
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![10_000]
+    } else {
+        vec![10_000, 100_000]
+    };
+    for num_keys in num_keys_arr {
         let mut group = c.benchmark_group("ycsb_type_b");
         group.throughput(Throughput::Elements(1000));
 
@@ -138,7 +159,12 @@ fn bench_ycsb_type_b(c: &mut Criterion) {
 
 /// Benchmark YCSB Type C: 100% read (read-only)
 fn bench_ycsb_type_c(c: &mut Criterion) {
-    for num_keys in [10_000usize, 100_000, 1_000_000] {
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![10_000, 100_000]
+    } else {
+        vec![10_000, 100_000, 1_000_000]
+    };
+    for num_keys in num_keys_arr {
         let mut group = c.benchmark_group("ycsb_type_c");
         group.throughput(Throughput::Elements(1000));
 
@@ -192,7 +218,12 @@ fn bench_ycsb_type_c(c: &mut Criterion) {
 
 /// Benchmark balanced workload: 50% read, 50% write
 fn bench_workload_balanced(c: &mut Criterion) {
-    for num_keys in [10_000usize, 100_000] {
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![10_000]
+    } else {
+        vec![10_000, 100_000]
+    };
+    for num_keys in num_keys_arr {
         let mut group = c.benchmark_group("workload_balanced");
         group.throughput(Throughput::Elements(1000));
 
@@ -246,7 +277,12 @@ fn bench_workload_balanced(c: &mut Criterion) {
 
 /// Benchmark read-heavy workload
 fn bench_workload_read_heavy(c: &mut Criterion) {
-    for num_keys in [10_000usize, 100_000] {
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![10_000]
+    } else {
+        vec![10_000, 100_000]
+    };
+    for num_keys in num_keys_arr {
         let mut group = c.benchmark_group("workload_read_heavy");
         group.throughput(Throughput::Elements(1000));
 
@@ -301,7 +337,12 @@ fn bench_workload_read_heavy(c: &mut Criterion) {
 
 /// Benchmark write-heavy workload
 fn bench_workload_write_heavy(c: &mut Criterion) {
-    for num_keys in [10_000usize, 100_000] {
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![10_000]
+    } else {
+        vec![10_000, 100_000]
+    };
+    for num_keys in num_keys_arr {
         let mut group = c.benchmark_group("workload_write_heavy");
         group.throughput(Throughput::Bytes(100));
 
@@ -352,13 +393,9 @@ fn bench_workload_write_heavy(c: &mut Criterion) {
 }
 
 criterion_group!(
-    mixed_benches,
-    bench_ycsb_type_a,
-    bench_ycsb_type_b,
-    bench_ycsb_type_c,
-    bench_workload_balanced,
-    bench_workload_read_heavy,
-    bench_workload_write_heavy,
+    name = mixed_benches;
+    config = configure_criterion();
+    targets = bench_ycsb_type_a, bench_ycsb_type_b, bench_ycsb_type_c, bench_workload_balanced, bench_workload_read_heavy, bench_workload_write_heavy
 );
 
 criterion_main!(mixed_benches);

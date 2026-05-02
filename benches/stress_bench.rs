@@ -3,6 +3,17 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::path::PathBuf;
 use tempfile::TempDir;
 
+fn configure_criterion() -> Criterion {
+    let mut c = Criterion::default();
+    if std::env::var("CI").is_ok() {
+        c = c
+            .sample_size(10)
+            .warm_up_time(std::time::Duration::from_secs(1))
+            .measurement_time(std::time::Duration::from_secs(3));
+    }
+    c
+}
+
 fn setup_temp_dir(name: &str) -> (TempDir, PathBuf) {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let path = temp_dir.path().join(name);
@@ -32,6 +43,9 @@ fn generate_value(index: usize, value_size: usize) -> Vec<u8> {
 
 /// Benchmark with very large dataset (1M keys)
 fn bench_large_dataset_1m(c: &mut Criterion) {
+    if std::env::var("CI").is_ok() {
+        return; // Skip in CI - too expensive
+    }
     let mut group = c.benchmark_group("large_dataset_1m");
 
     group.bench_with_input(BenchmarkId::from_parameter("1m_keys"), &(), |b, &_| {
@@ -75,12 +89,15 @@ fn bench_large_dataset_1m(c: &mut Criterion) {
 fn bench_concurrent_access(c: &mut Criterion) {
     use std::sync::{Arc, Mutex};
 
-    let thread_count = [1, 2, 4];
-
-    for &threads in &thread_count {
+    let thread_count: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![1, 2]
+    } else {
+        vec![1, 2, 4]
+    };
+    for threads in thread_count {
         let mut group = c.benchmark_group(format!("concurrent_{}_threads", threads));
 
-        group.bench_with_input(BenchmarkId::from_parameter(threads), &threads, |b, &_t| {
+        group.bench_with_input(BenchmarkId::from_parameter(threads), &threads, |b, _t| {
             let (temp_dir, data_dir) = setup_temp_dir("concurrent");
             let mut engine = apexstore::LsmEngine::new(
                 LsmConfig::builder()
@@ -172,8 +189,11 @@ fn bench_memory_pressure(c: &mut Criterion) {
 
 /// Benchmark with many SSTables (thousands of layers)
 fn bench_many_sstables(c: &mut Criterion) {
-    let sstable_counts = [10, 50, 100];
-
+    let sstable_counts: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![10, 50]
+    } else {
+        vec![10, 50, 100]
+    };
     for &sstable_count in &sstable_counts {
         let mut group = c.benchmark_group(format!("many_sstables_{}", sstable_count));
 
@@ -221,8 +241,11 @@ fn bench_many_sstables(c: &mut Criterion) {
 
 /// Benchmark cache thrashing scenario
 fn bench_cache_thrashing(c: &mut Criterion) {
-    let cache_sizes = [16, 64, 128]; // MB
-
+    let cache_sizes: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![16, 64]
+    } else {
+        vec![16, 64, 128]
+    };
     for &cache_mb in &cache_sizes {
         let mut group = c.benchmark_group(format!("cache_thrash_{}MB", cache_mb));
 
@@ -337,14 +360,9 @@ fn bench_delete_operations(c: &mut Criterion) {
 }
 
 criterion_group!(
-    stress_benches,
-    bench_large_dataset_1m,
-    bench_concurrent_access,
-    bench_memory_pressure,
-    bench_many_sstables,
-    bench_cache_thrashing,
-    bench_key_updates,
-    bench_delete_operations,
+    name = stress_benches;
+    config = configure_criterion();
+    targets = bench_large_dataset_1m, bench_concurrent_access, bench_memory_pressure, bench_many_sstables, bench_cache_thrashing, bench_key_updates, bench_delete_operations
 );
 
 criterion_main!(stress_benches);
