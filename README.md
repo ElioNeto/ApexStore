@@ -76,35 +76,6 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 
 > **Nota sobre hardware:** resultados acima são conservadores — medidos em HDD SATA (vs. NVMe). Em NVMe espera-se 2–4× melhor throughput em operações I/O-bound.
 
-### 📋 Reference Benchmarks
-
-*Baseline medido manualmente (AMD Ryzen 9 5900X, NVMe SSD, v2.1.0)*
-
-#### Throughput
-| Operation | Throughput | p50 Latency | p99 Latency |
-|-----------|------------|-------------|-------------|
-| **MemTable Writes** | 650K ops/s | 1.5 µs | 3.2 µs |
-| **WAL Async Writes** | 120K ops/s | 8.2 µs | 24.5 µs |
-| **WAL Fsync Writes** | 7.5K ops/s | 132 µs | 245 µs |
-| **Batch (1K ops)** | 850K ops/s | 1.8 µs | 4.1 µs |
-| **MemTable Reads** | 1.1M ops/s | 0.9 µs | 1.8 µs |
-| **SSTable (warm cache)** | 75K ops/s | 13.4 µs | 42.1 µs |
-| **SSTable (cold cache)** | 8.2K ops/s | 122 µs | 312 µs |
-
-#### Scan Performance
-| Operation | Throughput | p50 Latency |
-|-----------|------------|-------------|
-| **Full Scan** | 12.5M keys/sec | 0.08 µs/key |
-| **Range Scan (1K)** | 6.2M keys/sec | 0.16 µs/key |
-| **Prefix Scan** | 4.8M keys/sec | 0.21 µs/key |
-
-#### Storage Efficiency
-| Metric | Value |
-|--------|-------|
-| **LZ4 Compression Ratio** | 2.8x |
-| **Bloom Filter FP Rate** | 0.8% |
-| **Space Amplification** | 1.3x |
-
 > **Key Insights:**
 > - `WAL_SYNC_MODE=async` provides 16x throughput vs fsync (trade durability for speed)
 > - Cache hit rate > 80% when `block_cache_size_mb > 256`
