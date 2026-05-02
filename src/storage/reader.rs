@@ -6,6 +6,7 @@ use crate::storage::block::Block;
 use crate::storage::builder::{BlockMeta, MetaBlock};
 use crate::storage::cache::GlobalBlockCache;
 use bloomfilter::Bloom;
+use crc32fast::Hasher as Crc32Hasher;
 use lz4_flex::decompress_size_prepended;
 use parking_lot::Mutex;
 use std::collections::hash_map::DefaultHasher;
@@ -374,14 +375,33 @@ impl SstableReader {
     }
 
     fn read_and_decompress_block(&self, block_meta: &BlockMeta) -> Result<Vec<u8>> {
-        // Read compressed block (lock held only during I/O)
-        let compressed_block = {
+        // Read compressed block + CRC32 (lock held only during I/O)
+        let (compressed_block, stored_crc32) = {
             let mut file = self.file.lock();
             file.seek(SeekFrom::Start(block_meta.offset))?;
-            let mut compressed_block = vec![0u8; block_meta.size as usize];
+            let compressed_size = block_meta.size as usize - 4; // exclude CRC32 bytes
+            let mut compressed_block = vec![0u8; compressed_size];
             file.read_exact(&mut compressed_block)?;
-            compressed_block
+
+            // Read CRC32 (4 bytes)
+            let mut crc32_bytes = [0u8; 4];
+            file.read_exact(&mut crc32_bytes)?;
+            let stored_crc32 = u32::from_le_bytes(crc32_bytes);
+
+            (compressed_block, stored_crc32)
         };
+
+        // Verify CRC32 of compressed data
+        let mut hasher = Hasher::new();
+        hasher.update(&compressed_block);
+        let computed_crc32 = hasher.finalize();
+
+        if computed_crc32 != stored_crc32 {
+            return Err(LsmError::CorruptedData(format!(
+                "CRC32 mismatch at offset {}: expected {:08x}, got {:08x}",
+                block_meta.offset, stored_crc32, computed_crc32
+            )));
+        }
 
         // Decompress block (no lock - CPU intensive work)
         let decompressed = decompress_size_prepended(&compressed_block).map_err(|e| {
@@ -419,5 +439,77 @@ impl SstableReader {
 
         // Candidate block is idx - 1
         self.metadata.blocks.get(idx - 1).cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::log_record::LogRecord;
+    use crate::infra::config::StorageConfig;
+    use crate::storage::builder::SstableBuilder;
+    use std::io::{Seek, SeekFrom, Write};
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    fn create_test_record(key: &str, value: &[u8]) -> LogRecord {
+        LogRecord::new(key.to_string(), value.to_vec())
+    }
+
+    #[test]
+    fn test_sstable_data_corruption_detected() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("corruption_test.sst");
+        let config = StorageConfig::default();
+
+        // Build an SSTable with some data
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut builder = SstableBuilder::new(path.clone(), config.clone(), timestamp).unwrap();
+
+        for i in 0..10 {
+            let key = format!("key_{:02}", i);
+            let value = format!("value_{}", i);
+            builder
+                .add(key.as_bytes(), &create_test_record(&key, value.as_bytes()))
+                .unwrap();
+        }
+
+        let path = builder.finish().unwrap();
+
+        // Open the SSTable for reading
+        let reader = SstableReader::open(
+            path.clone(),
+            config,
+            GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Corrupt the first data block by writing junk after the magic number
+        {
+            let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            // Skip magic number (8 bytes) and corrupt some bytes in the first block
+            file.seek(SeekFrom::Start(8)).unwrap();
+            // Write garbage to corrupt the compressed data (but not the CRC32)
+            let garbage = vec![0xFF; 20];
+            file.write_all(&garbage).unwrap();
+        }
+
+        // Try to read a key that would be in the corrupted block
+        let result = reader.get("key_00");
+
+        // Should get CorruptedData error due to CRC32 mismatch
+        match result {
+            Err(LsmError::CorruptedData(msg)) => {
+                assert!(
+                    msg.contains("CRC32 mismatch"),
+                    "Expected CRC32 mismatch error, got: {}",
+                    msg
+                );
+            }
+            other => panic!("Expected CorruptedData error, got: {:?}", other),
+        }
     }
 }
