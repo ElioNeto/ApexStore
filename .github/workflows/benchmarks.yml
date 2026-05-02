@@ -42,7 +42,7 @@ jobs:
         run: cargo build --benches --release
 
       - name: Run benchmarks (CI mode)
-        run: cargo bench -- --noplot --export-json=benchmark-results
+        run: cargo bench --bench write_bench --bench read_bench --bench scan_bench --bench mixed_bench --bench stress_bench -- --noplot --output-format=terse
         env:
           CI: true
 
