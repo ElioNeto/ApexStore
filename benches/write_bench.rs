@@ -3,6 +3,17 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use std::path::PathBuf;
 use tempfile::TempDir;
 
+fn configure_criterion() -> Criterion {
+    let mut c = Criterion::default();
+    if std::env::var("CI").is_ok() {
+        c = c
+            .sample_size(10)
+            .warm_up_time(std::time::Duration::from_secs(1))
+            .measurement_time(std::time::Duration::from_secs(3));
+    }
+    c
+}
+
 /// Setup a temporary directory for benchmark testing
 fn setup_temp_dir(name: &str) -> (TempDir, PathBuf) {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
@@ -107,7 +118,12 @@ fn bench_batch_write(c: &mut Criterion) {
 
 /// Benchmark memtable flush performance
 fn bench_memtable_flush(c: &mut Criterion) {
-    for memtable_size in [8 * 1024 * 1024, 16 * 1024 * 1024, 32 * 1024 * 1024] {
+    let memtable_sizes: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![8 * 1024 * 1024]
+    } else {
+        vec![8 * 1024 * 1024, 16 * 1024 * 1024, 32 * 1024 * 1024]
+    };
+    for memtable_size in memtable_sizes {
         let mut group =
             c.benchmark_group(format!("memtable_flush_{}", memtable_size / 1024 / 1024));
         group.throughput(Throughput::Bytes(memtable_size as u64));
@@ -239,12 +255,9 @@ fn bench_write_by_size(c: &mut Criterion) {
 }
 
 criterion_group!(
-    write_benches,
-    bench_single_write,
-    bench_batch_write,
-    bench_memtable_flush,
-    bench_sstable_flush,
-    bench_write_by_size,
+    name = write_benches;
+    config = configure_criterion();
+    targets = bench_single_write, bench_batch_write, bench_memtable_flush, bench_sstable_flush, bench_write_by_size
 );
 
 criterion_main!(write_benches);

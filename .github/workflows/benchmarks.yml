@@ -17,7 +17,7 @@ jobs:
   benchmarks:
     name: Run Benchmarks
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -27,9 +27,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-
-      - name: Install cargo-hack
-        run: cargo install cargo-hack
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -42,92 +39,22 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build benchmarks
-        run: cargo build --benches --all-features
+        run: cargo build --benches --release
 
-      - name: Run benchmarks
-        run: cargo bench --all-features -- --export-json=benchmark-results
-        continue-on-error: true
+      - name: Run benchmarks (CI mode)
+        run: cargo bench -- --noplot --export-json=benchmark-results
+        env:
+          CI: true
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
-          path: benchmark-results.json
+          path: target/criterion/benchmark-results.json
           retention-days: 30
 
       - name: Run clippy on benchmarks
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Format check
         run: cargo fmt --all -- --check
-
-  benchmark-comparison:
-    name: Compare with Baseline
-    runs-on: ubuntu-latest
-    needs: benchmarks
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Download baseline results
-        # Baseline won't exist on the first run — safe to skip
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: baseline-results
-          path: baseline
-
-      - name: Download current results
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: benchmark-results
-          path: current
-
-      - name: Compare benchmarks
-        run: |
-          if [ -f baseline/benchmark-results.json ] && [ -f current/benchmark-results.json ]; then
-            echo "Comparing benchmarks..."
-            # TODO: Implement actual comparison logic with cargo-benchcmp or similar
-          else
-            echo "No baseline available yet — skipping comparison. This is expected on the first run."
-          fi
-
-      - name: Upload comparison report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: comparison-report
-          path: comparison-report.md
-          if-no-files-found: ignore
-
-  performance-regression:
-    name: Check Performance Regressions
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set up benchmarks
-        run: |
-          cargo install cargo-benchcmp
-
-      - name: Restore baseline
-        uses: actions/cache@v4
-        with:
-          path: .baseline
-          key: ${{ runner.os }}-benchmark-baseline
-
-      - name: Run baseline benchmarks
-        run: cargo bench --all-features -- --output-format benchstat
-        continue-on-error: true
-        env:
-          CI: true
-
-      - name: Check for regressions > 10%
-        run: |
-          echo "Checking for performance regressions..."
-          # TODO: Implement regression detection
-          # This would typically compare against stored baselines

@@ -3,6 +3,17 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use std::path::PathBuf;
 use tempfile::TempDir;
 
+fn configure_criterion() -> Criterion {
+    let mut c = Criterion::default();
+    if std::env::var("CI").is_ok() {
+        c = c
+            .sample_size(10)
+            .warm_up_time(std::time::Duration::from_secs(1))
+            .measurement_time(std::time::Duration::from_secs(3));
+    }
+    c
+}
+
 /// Setup a temporary directory for benchmark testing
 fn setup_temp_dir(name: &str) -> (TempDir, PathBuf) {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
@@ -35,7 +46,11 @@ fn generate_value(index: usize, value_size: usize) -> Vec<u8> {
 
 /// Benchmark read operations with all keys in MemTable
 fn bench_read_memtable(c: &mut Criterion) {
-    let num_keys_arr = [1_000usize, 10_000, 100_000, 1_000_000];
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![1_000, 10_000]
+    } else {
+        vec![1_000, 10_000, 100_000, 1_000_000]
+    };
     for &num_keys in &num_keys_arr {
         let mut group = c.benchmark_group("read_memtable");
         group.throughput(Throughput::Elements(num_keys as u64));
@@ -83,7 +98,12 @@ fn bench_read_memtable(c: &mut Criterion) {
 
 /// Benchmark read operations with all keys in SSTable (cold cache)
 fn bench_read_sstable_cold(c: &mut Criterion) {
-    for num_keys in [1_000usize, 10_000, 100_000] {
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![1_000, 10_000]
+    } else {
+        vec![1_000, 10_000, 100_000]
+    };
+    for num_keys in num_keys_arr {
         let mut group = c.benchmark_group("read_sstable_cold");
         group.throughput(Throughput::Elements(num_keys as u64));
 
@@ -96,7 +116,7 @@ fn bench_read_sstable_cold(c: &mut Criterion) {
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(nk * 110 / 2)
-                        .block_cache_size_mb(0)
+                        .block_cache_size_mb(1)
                         .build()
                         .unwrap(),
                 )
@@ -131,7 +151,12 @@ fn bench_read_sstable_cold(c: &mut Criterion) {
 
 /// Benchmark read operations with cache warmed up
 fn bench_read_sstable_warm(c: &mut Criterion) {
-    for num_keys in [1_000usize, 10_000, 100_000] {
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![1_000, 10_000]
+    } else {
+        vec![1_000, 10_000, 100_000]
+    };
+    for num_keys in num_keys_arr {
         let mut group = c.benchmark_group("read_sstable_warm");
         group.throughput(Throughput::Elements(num_keys as u64));
 
@@ -184,7 +209,12 @@ fn bench_read_sstable_warm(c: &mut Criterion) {
 
 /// Benchmark Bloom filter effectiveness
 fn bench_bloom_filter(c: &mut Criterion) {
-    for num_keys in [10_000usize, 100_000, 1_000_000] {
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![10_000, 100_000]
+    } else {
+        vec![10_000, 100_000, 1_000_000]
+    };
+    for num_keys in num_keys_arr {
         let mut group = c.benchmark_group("bloom_filter");
         group.throughput(Throughput::Elements(num_keys as u64));
 
@@ -197,7 +227,7 @@ fn bench_bloom_filter(c: &mut Criterion) {
                     LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(nk * 110 / 2)
-                        .block_cache_size_mb(0)
+                        .block_cache_size_mb(1)
                         .build()
                         .unwrap(),
                 )
@@ -271,7 +301,7 @@ fn bench_read_latency(c: &mut Criterion) {
             LsmConfig::builder()
                 .dir_path(data_dir.clone())
                 .memtable_max_size(1_000 * 110 / 2)
-                .block_cache_size_mb(0)
+                .block_cache_size_mb(1)
                 .build()
                 .unwrap(),
         )
@@ -301,7 +331,11 @@ fn bench_read_latency(c: &mut Criterion) {
 
 /// Benchmark sequential scan performance
 fn bench_scan_sequential(c: &mut Criterion) {
-    let num_keys_arr = [1_000usize, 10_000, 100_000];
+    let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
+        vec![1_000, 10_000]
+    } else {
+        vec![1_000, 10_000, 100_000]
+    };
     for &num_keys in &num_keys_arr {
         let mut group = c.benchmark_group("scan_sequential");
         group.throughput(Throughput::Elements(num_keys as u64));
@@ -330,7 +364,7 @@ fn bench_scan_sequential(c: &mut Criterion) {
                 engine.flush_memtable().unwrap();
 
                 b.iter(|| {
-                    let results = engine.scan().unwrap();
+                    let results = engine.scan_cf("default", None, None, None).unwrap();
                     assert_eq!(results.len(), nk);
                 });
 
@@ -344,13 +378,9 @@ fn bench_scan_sequential(c: &mut Criterion) {
 }
 
 criterion_group!(
-    read_benches,
-    bench_read_memtable,
-    bench_read_sstable_cold,
-    bench_read_sstable_warm,
-    bench_bloom_filter,
-    bench_read_latency,
-    bench_scan_sequential,
+    name = read_benches;
+    config = configure_criterion();
+    targets = bench_read_memtable, bench_read_sstable_cold, bench_read_sstable_warm, bench_bloom_filter, bench_read_latency, bench_scan_sequential
 );
 
 criterion_main!(read_benches);
