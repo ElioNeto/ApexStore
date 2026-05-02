@@ -13,7 +13,7 @@ use thiserror::Error;
 ///   errors converted automatically via `#[from]`.
 /// - **Storage format** (`InvalidSstableFormat`, `CorruptedData`,
 ///   `DecompressionFailed`, `WalCorruption`) — structural problems in on-disk files.
-/// - **Engine semantics** (`KeyNotFound`, `CompactionFailed`, `LockPoisoned`,
+/// - **Engine semantics** (`NotFound`, `CompactionFailed`, `LockPoisoned`,
 ///   `ConcurrentModification`) — logical errors arising from engine operations.
 /// - **Configuration** (`Invalid*`, `ConfigValidation`) — parameter
 ///   validation failures raised at startup.
@@ -22,7 +22,7 @@ use thiserror::Error;
 ///
 /// | Removed variant       | Reason |
 /// |-----------------------|--------|
-/// | `NotFound`            | Exact duplicate of `KeyNotFound` — same Display text, zero call sites |
+/// | `KeyNotFound`         | Renamed to `NotFound(String)` to include the missing key |
 /// | `InvalidSstable`      | Context-free alias for `InvalidSstableFormat(String)` — zero call sites |
 /// | `SerializationFailed(String)` | Replaced by `JsonError(#[from] serde_json::Error)` |
 /// | `DeserializationFailed(String)` | Replaced by `JsonError(#[from] serde_json::Error)` |
@@ -66,8 +66,8 @@ pub enum LsmError {
     // -------------------------------------------------------------------------
     // Engine semantics
     // -------------------------------------------------------------------------
-    #[error("Key not found")]
-    KeyNotFound,
+    #[error("Key not found: {0}")]
+    NotFound(String),
 
     #[error("Compaction failed: {0}")]
     CompactionFailed(String),
