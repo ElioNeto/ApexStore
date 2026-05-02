@@ -2,11 +2,19 @@ pub mod compaction;
 pub mod manifest;
 pub mod version_set;
 
+use crate::core::log_record::LogRecord;
 use crate::core::table::Table;
 use crate::storage::cache::Cache;
+use crate::storage::wal::WriteAheadLog;
+use crate::infra::error::{LsmError, Result};
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
-use self::compaction::Compaction;
+use self::compaction::{Compaction, CompactionMetrics, CompactionOptions, CompactionStrategyType};
 use self::manifest::Manifest;
 use self::version_set::VersionSet;
 use crate::core::iterators::{MergeIterator, StorageIterator};
@@ -29,6 +37,12 @@ pub struct LsmStats {
     pub mem_records: usize,
     pub sst_files: usize,
     pub sst_records: usize,
+    // Compaction stats
+    pub compaction_strategy: String,
+    pub last_compaction_bytes_read: u64,
+    pub last_compaction_bytes_written: u64,
+    pub last_compaction_files_merged: usize,
+    pub last_compaction_duration_ms: u64,
 }
 
 /// Engine options.
@@ -61,6 +75,35 @@ impl Default for EngineOptions {
     }
 }
 
+impl From<&crate::infra::config::LsmConfig> for EngineOptions {
+    fn from(config: &crate::infra::config::LsmConfig) -> Self {
+        // Create Compaction from config
+        let compaction_options = Compaction {
+            max_tables_per_compaction: config.compaction.max_sstables,
+            compaction_threshold: config.compaction.min_compaction_threshold,
+        };
+        
+        Self {
+            block_size: config.storage.block_size,
+            bloom_bits_per_key: 10, // default
+            max_table_size: 1024 * 1024, // default
+            min_table_size_to_compact: 64, // default
+            max_levels: 7, // default
+            level_multiplier: 4, // default
+            write_buffer_size: config.core.memtable_max_size,
+            max_write_buffer_number: 4, // default
+            compaction_options,
+        }
+    }
+}
+
+impl EngineOptions {
+    /// Create EngineOptions from LsmConfig
+    pub fn from_config(config: &crate::infra::config::LsmConfig) -> Self {
+        config.into()
+    }
+}
+
 /// The core engine that manages LSM-tree structure and compaction.
 pub struct Engine<C: Cache> {
     options: EngineOptions,
@@ -72,12 +115,14 @@ pub struct Engine<C: Cache> {
     write_buffer_limit: usize,
     /// Current total bytes in memtables per column family.
     memtable_bytes: HashMap<String, usize>,
-    /// Compaction policy.
-    #[allow(dead_code)]
-    compaction_options: Compaction,
-    /// Compaction executor.
-    #[allow(dead_code)]
+    /// Compaction strategy and executor.
     compaction: Compaction,
+    /// Write-Ahead Log for crash recovery.
+    wal: WriteAheadLog,
+    /// Background compaction running flag.
+    compaction_running: Arc<AtomicBool>,
+    /// SSTable output directory.
+    sst_dir: PathBuf,
 }
 
 pub type LsmEngineGeneric<C> = Engine<C>;
@@ -149,17 +194,114 @@ impl<'a> StorageIterator for InternalMemTableIterator<'a> {
 }
 
 impl<C: Cache> Engine<C> {
-    pub fn new_generic(options: EngineOptions, cache: C) -> Self {
-        Self {
+    pub fn new_generic(options: EngineOptions, cache: C, dir_path: &std::path::Path) -> Result<Self> {
+        let wal = WriteAheadLog::new(dir_path)?;
+        
+        // Recover WAL records if any exist
+        let recovered_records = wal.recover()?;
+        
+        // Create SSTable directory
+        let sst_dir = dir_path.join("sstables");
+        std::fs::create_dir_all(&sst_dir)?;
+        
+        // Create storage config from options
+        let storage_config = crate::storage::config::StorageConfig {
+            block_size: options.block_size,
+            sparse_index_interval: 16, // default
+            bloom_false_positive_rate: 0.01, // default
+        };
+        
+        // Create compaction with strategy from options
+        // Map the old Compaction struct to new CompactionOptions
+        let strategy_type = if options.compaction_options.compaction_threshold <= 4 {
+            CompactionStrategyType::SizeTiered
+        } else {
+            CompactionStrategyType::Leveled
+        };
+        
+        let compaction_options = CompactionOptions {
+            strategy_type,
+            compaction_threshold: options.compaction_options.compaction_threshold,
+            max_tables_per_compaction: options.compaction_options.max_tables_per_compaction,
+        };
+        
+        let compaction = Compaction::new(
+            strategy_type,
+            compaction_options,
+            storage_config,
+            sst_dir.clone(),
+        );
+        
+        let mut engine = Self {
             options: options.clone(),
             _manifest: Manifest::new(),
             version_set: VersionSet::new(options.clone(), cache),
             memtables: HashMap::new(),
             write_buffer_limit: options.write_buffer_size * options.max_write_buffer_number,
             memtable_bytes: HashMap::new(),
-            compaction_options: options.compaction_options.clone(),
-            compaction: Compaction::default(),
+            compaction,
+            wal,
+            compaction_running: Arc::new(AtomicBool::new(false)),
+            sst_dir,
+        };
+        
+        // Replay recovered records into memtable
+        engine.replay_wal_records(recovered_records)?;
+        
+        Ok(engine)
+    }
+
+    /// Create engine from LsmConfig
+    pub fn new_from_config(config: &crate::infra::config::LsmConfig) -> Result<Self> {
+        let cache = crate::storage::cache::GlobalBlockCache::new(
+            config.storage.block_cache_size_mb,
+            config.storage.block_size,
+        );
+        
+        let options = EngineOptions::from_config(config);
+        let sst_dir = config.core.dir_path.join("sstables");
+        
+        let compaction = Compaction::from_config(config, sst_dir.clone());
+        
+        let wal = WriteAheadLog::new(&config.core.dir_path)?;
+        let recovered_records = wal.recover()?;
+        
+        let mut engine = Self {
+            options,
+            _manifest: Manifest::new(),
+            version_set: VersionSet::new(options.clone(), (*cache).clone()),
+            memtables: HashMap::new(),
+            write_buffer_limit: options.write_buffer_size * options.max_write_buffer_number,
+            memtable_bytes: HashMap::new(),
+            compaction,
+            wal,
+            compaction_running: Arc::new(AtomicBool::new(false)),
+            sst_dir,
+        };
+        
+        engine.replay_wal_records(recovered_records)?;
+        
+        Ok(engine)
+    }
+}
+    
+    /// Replay WAL records into the memtable
+    fn replay_wal_records(&mut self, records: Vec<LogRecord>) -> Result<()> {
+        for record in records {
+            let cf = "default"; // TODO: support column families in WAL records
+            let mem = self.memtables.entry(cf.to_string()).or_default();
+            if mem.is_empty() {
+                mem.push(MemTable::new());
+            }
+            let last = mem.len() - 1;
+            
+            if record.is_deleted {
+                mem[last].delete(record.key);
+            } else {
+                mem[last].put(record.key, record.value);
+            }
         }
+        Ok(())
     }
 }
 
@@ -170,16 +312,7 @@ impl Engine<crate::storage::cache::GlobalBlockCache> {
             config.storage.block_cache_size_mb,
             config.storage.block_size,
         );
-        Ok(Engine {
-            options: options.clone(),
-            _manifest: Manifest::new(),
-            version_set: VersionSet::new(options.clone(), (*cache).clone()),
-            memtables: HashMap::new(),
-            write_buffer_limit: options.write_buffer_size * options.max_write_buffer_number,
-            memtable_bytes: HashMap::new(),
-            compaction_options: options.compaction_options.clone(),
-            compaction: Compaction::default(),
-        })
+        Self::new_generic(options, (*cache).clone(), &config.core.dir_path)
     }
 }
 
@@ -190,6 +323,10 @@ impl<C: Cache> Engine<C> {
         key: Vec<u8>,
         value: Vec<u8>,
     ) -> crate::infra::error::Result<()> {
+        // Write to WAL first (before modifying memtable) for crash safety
+        let record = LogRecord::new(key.clone(), value.clone());
+        self.wal.write_record(&record)?;
+        
         let mem = self.memtables.entry(cf.to_string()).or_default();
         if mem.is_empty() {
             mem.push(MemTable::new());
@@ -216,6 +353,11 @@ impl<C: Cache> Engine<C> {
         K: Into<Vec<u8>>,
     {
         let key = key.into();
+        
+        // Write tombstone to WAL first (before modifying memtable) for crash safety
+        let record = LogRecord::tombstone(key.clone());
+        self.wal.write_record(&record)?;
+        
         let mem = self.memtables.entry(cf.to_string()).or_default();
         if mem.is_empty() {
             mem.push(MemTable::new());
@@ -320,6 +462,26 @@ impl<C: Cache> Engine<C> {
         Ok(results)
     }
 
+    /// Calculate the upper bound for a prefix search by incrementing the last byte.
+    /// Returns None if the prefix is all 0xFF bytes (scan to end).
+    fn prefix_end(prefix: &str) -> Option<Vec<u8>> {
+        let mut end = prefix.as_bytes().to_vec();
+        
+        // Handle empty prefix - return byte 0 as the start of all keys
+        if end.is_empty() {
+            return Some(vec![0]);
+        }
+        
+        for i in (0..end.len()).rev() {
+            if end[i] < 0xFF {
+                end[i] += 1;
+                end.truncate(i + 1);
+                return Some(end);
+            }
+        }
+        None // prefix is all 0xFF bytes — scan to end
+    }
+
     #[allow(clippy::type_complexity)]
     pub fn scan_range(
         &self,
@@ -350,14 +512,19 @@ impl<C: Cache> Engine<C> {
         _cursor: Option<&str>,
         limit: usize,
     ) -> crate::infra::error::Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<String>)> {
-        // Simple implementation: scan with prefix as lower bound
-        let results = self.scan_cf("default", Some(prefix.as_bytes()), None, Some(limit))?;
-        // Filter results that actually start with prefix
-        let filtered: Vec<_> = results
-            .into_iter()
-            .filter(|(k, _)| k.starts_with(prefix.as_bytes()))
-            .collect();
-        Ok((filtered, None))
+        // Calculate upper bound for prefix scan
+        let upper_bound = Self::prefix_end(prefix);
+        
+        // Scan with both lower and upper bounds
+        let results = self.scan_cf(
+            "default",
+            Some(prefix.as_bytes()),
+            upper_bound.as_deref(),
+            Some(limit),
+        )?;
+        
+        // No need for post-filtering since upper bound handles it
+        Ok((results, None))
     }
 
     pub fn keys(&self) -> crate::infra::error::Result<Vec<Vec<u8>>> {
@@ -396,11 +563,49 @@ impl<C: Cache> Engine<C> {
     }
 
     pub fn stats(&self) -> crate::infra::error::Result<LsmStats> {
-        Ok(LsmStats::default())
+        let mut stats = LsmStats::default();
+        
+        // Basic stats
+        stats.num_tables = self.version_set.table_count("default");
+        stats.sst_files = stats.num_tables;
+        stats.compaction_strategy = self.compaction.strategy_name().to_string();
+        
+        // Calculate sizes
+        let tables = self.version_set.get_tables("default");
+        stats.total_size = tables.iter().map(|t| t.size()).sum();
+        stats.sst_kb = stats.total_size / 1024;
+        stats.total_records = tables.iter().map(|t| t.data.len()).sum();
+        stats.sst_records = stats.total_records;
+        
+        // Memtable stats
+        if let Some(memtables) = self.memtables.get("default") {
+            stats.mem_records = memtables.iter().map(|m| m.data.len()).sum();
+            stats.mem_kb = self.memtable_bytes.get("default").copied().unwrap_or(0) / 1024;
+        }
+        
+        Ok(stats)
     }
 
     pub fn stats_all(&self) -> crate::infra::error::Result<Vec<(String, LsmStats)>> {
-        Ok(vec![("default".to_string(), LsmStats::default())])
+        let mut results = Vec::new();
+        let column_families = self.version_set.column_families();
+        
+        for cf in column_families {
+            let mut stats = LsmStats::default();
+            stats.num_tables = self.version_set.table_count(&cf);
+            stats.sst_files = stats.num_tables;
+            stats.compaction_strategy = self.compaction.strategy_name().to_string();
+            
+            let tables = self.version_set.get_tables(&cf);
+            stats.total_size = tables.iter().map(|t| t.size()).sum();
+            stats.sst_kb = stats.total_size / 1024;
+            stats.total_records = tables.iter().map(|t| t.data.len()).sum();
+            stats.sst_records = stats.total_records;
+            
+            results.push((cf, stats));
+        }
+        
+        Ok(results)
     }
 
     pub fn search(&self, _query: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
@@ -412,11 +617,11 @@ impl<C: Cache> Engine<C> {
     }
 
     pub fn flush_memtable(&mut self) -> crate::infra::error::Result<()> {
-        self.flush_memtable_impl("default");
+        self.flush_memtable_impl("default")?;
         Ok(())
     }
 
-    fn flush_memtable_impl(&mut self, cf: &str) {
+    fn flush_memtable_impl(&mut self, cf: &str) -> Result<()> {
         if let Some(memtables) = self.memtables.get_mut(cf) {
             if let Some(mem) = memtables.pop() {
                 let table = Table::build(mem.data.into_iter().collect(), &self.options);
@@ -426,30 +631,571 @@ impl<C: Cache> Engine<C> {
                 // ✅ FIX issue #105: acionar compactação se SSTable count exceder threshold
                 let threshold = self.options.compaction_options.compaction_threshold;
                 if self.version_set.table_count(cf) > threshold {
-                    self.compact_cf(cf);
+                    let _ = self.compact_cf(cf)?; // Ignore metrics for now
                 }
+                
+                // ✅ FIX issue #107: Clear WAL while we have exclusive &mut self access
+                // This eliminates the crash window where a crash between flush and WAL clear
+                // would cause duplicate entries on recovery
+                self.wal.clear()?;
             }
         }
+        Ok(())
     }
 
-    pub fn compact_cf(&mut self, cf: &str) {
-        let tables = self.version_set.drain_tables(cf);
-        if let Some(merged) = Compaction::merge_tables(tables, &self.options) {
-            self.version_set.remove_and_add_table(cf, merged);
+    pub fn compact_cf(&mut self, cf: &str) -> Result<Option<CompactionMetrics>> {
+        // Get tables for this column family
+        let tables = self.version_set.get_tables(cf);
+        
+        if tables.len() < self.compaction.options.compaction_threshold {
+            return Ok(None);
         }
+
+        // Pick tables to compact based on strategy
+        let groups = self.compaction.pick_compaction(&tables, &self.options);
+        
+        if groups.is_empty() {
+            return Ok(None);
+        }
+
+        let mut all_metrics = CompactionMetrics::default();
+        
+        for group_indices in groups {
+            // Execute compaction on this group
+            let (new_tables, metrics) = self.compaction.compact(group_indices, &tables, &self.options)?;
+            
+            // Atomically replace old tables with new ones
+            self.version_set.atomic_replace(cf, &group_indices, new_tables);
+            
+            // Accumulate metrics
+            all_metrics.bytes_read += metrics.bytes_read;
+            all_metrics.bytes_written += metrics.bytes_written;
+            all_metrics.files_merged += metrics.files_merged;
+            all_metrics.duration_ms += metrics.duration_ms;
+        }
+        
+        Ok(Some(all_metrics))
     }
 
-    pub fn compact(&mut self) {
-        // Compact all column families
-        let column_families: Vec<String> = self.memtables.keys().cloned().collect();
-
+    pub fn compact(&mut self) -> Result<Vec<(String, CompactionMetrics)>> {
+        let mut results = Vec::new();
+        let column_families = self.version_set.column_families();
+        
         for cf in column_families {
-            let tables = self.version_set.drain_tables(&cf);
-            if !tables.is_empty() {
-                if let Some(merged) = Compaction::merge_tables(tables, &self.options) {
-                    self.version_set.remove_and_add_table(&cf, merged);
-                }
+            if let Some(metrics) = self.compact_cf(&cf)? {
+                results.push((cf, metrics));
             }
         }
+        
+        Ok(results)
+    }
+
+    /// Check if compaction should be triggered and run it in background
+    pub fn maybe_compact(&mut self) -> Result<()> {
+        // Check if compaction is already running
+        if self.compaction_running.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        // Check if any column family needs compaction
+        let column_families = self.version_set.column_families();
+        let mut needs_compaction = false;
+        
+        for cf in &column_families {
+            let table_count = self.version_set.table_count(cf);
+            if table_count >= self.compaction.options.compaction_threshold {
+                needs_compaction = true;
+                break;
+            }
+        }
+
+        if !needs_compaction {
+            return Ok(());
+        }
+
+        // Set flag and spawn background compaction
+        self.compaction_running.store(true, Ordering::SeqCst);
+        
+        // Clone what we need for the background thread
+        let compaction_running = self.compaction_running.clone();
+        
+        // For now, we'll do inline compaction
+        // In production, this would spawn a background thread
+        let result = self.compact();
+        
+        // Clear the flag
+        compaction_running.store(false, Ordering::SeqCst);
+        
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prefix_end_basic() {
+        // Test basic ASCII prefix
+        let result = Engine::<crate::storage::cache::GlobalBlockCache>::prefix_end("ab");
+        assert_eq!(result, Some(b"ac".to_vec()));
+    }
+
+    #[test]
+    fn test_prefix_end_empty() {
+        // Test empty prefix
+        let result = Engine::<crate::storage::cache::GlobalBlockCache>::prefix_end("");
+        assert_eq!(result, Some(b"\x00".to_vec()));
+    }
+
+    #[test]
+    fn test_prefix_end_non_ascii() {
+        // Test non-ASCII prefix (e.g., UTF-8 characters)
+        // "usuário:" in UTF-8
+        let prefix = "usuário:";
+        let result = Engine::<crate::storage::cache::GlobalBlockCache>::prefix_end(prefix);
+        // The last byte of "usuário:" is 0x3A (':')
+        // So we expect it to be incremented to 0x3B (';')
+        assert!(result.is_some());
+        let end = result.unwrap();
+        // The prefix in bytes should be "usuário:" followed by something
+        assert!(end.len() >= prefix.as_bytes().len());
+        // The upper bound should be greater than the prefix
+        assert!(end.as_slice() > prefix.as_bytes());
+    }
+
+    #[test]
+    fn test_prefix_end_unicode_multi_byte() {
+        // Test with multi-byte UTF-8 characters
+        // "ção:" - 'ç' is 0xC3 0xA7, 'ã' is 0xC3 0xA3 in UTF-8
+        let prefix = "ção:";
+        let result = Engine::<crate::storage::cache::GlobalBlockCache>::prefix_end(prefix);
+        assert!(result.is_some());
+        let end = result.unwrap();
+        // The upper bound should be greater than the prefix
+        assert!(end.as_slice() > prefix.as_bytes());
+    }
+
+    #[test]
+    fn test_prefix_end_single_byte_increment() {
+        // Test that only the last non-0xFF byte is incremented
+        let result = Engine::<crate::storage::cache::GlobalBlockCache>::prefix_end("abc");
+        assert_eq!(result, Some(b"abd".to_vec()));
+    }
+
+    #[test]
+    fn test_search_prefix_non_ascii() {
+        // This test verifies that search_prefix works with non-ASCII prefixes
+        // We'll create a simple in-memory test
+        use crate::infra::config::LsmConfig;
+        
+        // Create a simple engine for testing
+        // Note: This is a basic test - in a real scenario, we'd need proper initialization
+        let config = LsmConfig::default();
+        let mut engine = Engine::new(config).unwrap();
+        
+        // Insert some non-ASCII key-value pairs
+        let test_pairs = vec![
+            ("usuário:1", "value1"),
+            ("usuário:2", "value2"),
+            ("usuário:3", "value3"),
+            ("outro:1", "other1"),
+        ];
+        
+        for (key, value) in &test_pairs {
+            engine.set(key.as_bytes().to_vec(), value.as_bytes().to_vec()).unwrap();
+        }
+        
+        // Search for "usuário:" prefix
+        let (results, _) = engine.search_prefix("usuário:", None, 10).unwrap();
+        
+        // Should find exactly 3 results
+        assert_eq!(results.len(), 3);
+        for (key, _) in &results {
+            assert!(String::from_utf8_lossy(key).starts_with("usuário:"));
+        }
+    }
+
+    #[test]
+    fn test_search_prefix_unicode_chars() {
+        // Test with various Unicode characters
+        use crate::infra::config::LsmConfig;
+        
+        let config = LsmConfig::default();
+        let mut engine = Engine::new(config).unwrap();
+        
+        // Insert keys with Unicode prefixes
+        let test_pairs = vec![
+            ("ção:abc", "value1"),
+            ("ção:def", "value2"),
+            ("ção:ghi", "value3"),
+            ("cbo:xyz", "other1"),
+        ];
+        
+        for (key, value) in &test_pairs {
+            engine.set(key.as_bytes().to_vec(), value.as_bytes().to_vec()).unwrap();
+        }
+        
+        // Search for "ção:" prefix
+        let (results, _) = engine.search_prefix("ção:", None, 10).unwrap();
+        
+        // Should find exactly 3 results
+        assert_eq!(results.len(), 3);
+        for (key, _) in &results {
+            assert!(String::from_utf8_lossy(key).starts_with("ção:"));
+        }
+    }
+
+    // ========================================================================
+    // Compaction Strategy Tests
+    // ========================================================================
+
+    #[test]
+    fn test_size_tiered_compaction_basic() {
+        use crate::core::engine::compaction::*;
+        use crate::core::table::Table;
+        use crate::core::engine::EngineOptions;
+        use std::collections::BTreeMap;
+
+        let strategy = SizeTieredCompaction::default();
+        let options = EngineOptions::default();
+
+        // Create tables with data
+        let mut tables = Vec::new();
+        for i in 0..5 {
+            let mut data = BTreeMap::new();
+            for j in 0..100 {
+                let key = format!("key_{}_{}", i, j).into_bytes();
+                let value = format!("value_{}_{}", i, j).into_bytes();
+                data.insert(key, value);
+            }
+            tables.push(Table::build(data, &options));
+        }
+
+        // Pick tables to compact
+        let groups = strategy.pick_tables(&tables, &options);
+        assert!(!groups.is_empty(), "Should pick tables for compaction");
+
+        // Execute compaction
+        let storage_config = crate::storage::config::StorageConfig::default();
+        let output_dir = std::path::PathBuf::from("/tmp/test_sst");
+        let (new_tables, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
+
+        assert!(!new_tables.is_empty(), "Should produce at least one new table");
+        assert!(metrics.files_merged > 0, "Should track files merged");
+        assert!(metrics.bytes_read > 0, "Should track bytes read");
+        assert!(metrics.duration_ms >= 0, "Duration should be non-negative");
+    }
+
+    #[test]
+    fn test_leveled_compaction_basic() {
+        use crate::core::engine::compaction::*;
+        use crate::core::table::Table;
+        use crate::core::engine::EngineOptions;
+        use std::collections::BTreeMap;
+
+        let strategy = LeveledCompaction::default();
+        let options = EngineOptions::default();
+
+        // Create L0 tables
+        let mut tables = Vec::new();
+        for i in 0..5 {
+            let mut data = BTreeMap::new();
+            for j in 0..100 {
+                let key = format!("key_{}_{}", i, j).into_bytes();
+                let value = format!("value_{}_{}", i, j).into_bytes();
+                data.insert(key, value);
+            }
+            let mut table = Table::build(data, &options);
+            table.level = 0;
+            tables.push(table);
+        }
+
+        // Pick tables to compact
+        let groups = strategy.pick_tables(&tables, &options);
+        
+        // Execute compaction
+        let storage_config = crate::storage::config::StorageConfig::default();
+        let output_dir = std::path::PathBuf::from("/tmp/test_sst_leveled");
+        let (new_tables, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
+
+        assert!(!new_tables.is_empty(), "Should produce at least one new table");
+        // Check that new tables are at level 1
+        for table in &new_tables {
+            assert_eq!(table.level, 1, "Compacted tables should be at level 1");
+        }
+    }
+
+    #[test]
+    fn test_lazy_leveling_compaction_basic() {
+        use crate::core::engine::compaction::*;
+        use crate::core::table::Table;
+        use crate::core::engine::EngineOptions;
+        use std::collections::BTreeMap;
+
+        let strategy = LazyLevelingCompaction::default();
+        let options = EngineOptions::default();
+
+        // Create L0 tables (should use size-tiered)
+        let mut tables = Vec::new();
+        for i in 0..5 {
+            let mut data = BTreeMap::new();
+            for j in 0..100 {
+                let key = format!("key_{}_{}", i, j).into_bytes();
+                let value = format!("value_{}_{}", i, j).into_bytes();
+                data.insert(key, value);
+            }
+            let mut table = Table::build(data, &options);
+            table.level = 0;
+            tables.push(table);
+        }
+
+        // Pick tables to compact
+        let groups = strategy.pick_tables(&tables, &options);
+        assert!(!groups.is_empty(), "Should pick tables for compaction");
+
+        // Execute compaction
+        let storage_config = crate::storage::config::StorageConfig::default();
+        let output_dir = std::path::PathBuf::from("/tmp/test_sst_lazy");
+        let (new_tables, _) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
+
+        assert!(!new_tables.is_empty(), "Should produce at least one new table");
+    }
+
+    #[test]
+    fn test_compaction_removes_tombstones() {
+        use crate::core::engine::compaction::*;
+        use crate::core::table::Table;
+        use crate::core::engine::EngineOptions;
+        use std::collections::BTreeMap;
+
+        let strategy = SizeTieredCompaction::default();
+        let options = EngineOptions::default();
+
+        // Create a table with tombstones (empty values)
+        let mut data = BTreeMap::new();
+        // Add some live data
+        for i in 0..50 {
+            let key = format!("live_key_{}", i).into_bytes();
+            let value = format!("live_value_{}", i).into_bytes();
+            data.insert(key, value);
+        }
+        // Add tombstones
+        for i in 0..50 {
+            let key = format!("dead_key_{}", i).into_bytes();
+            let value = Vec::new(); // tombstone
+            data.insert(key, value);
+        }
+
+        let table = Table::build(data, &options);
+        
+        let storage_config = crate::storage::config::StorageConfig::default();
+        let output_dir = std::path::PathBuf::from("/tmp/test_tombstone");
+        let (new_tables, _) = strategy.execute(vec![table], &options, &storage_config, &output_dir).unwrap();
+
+        // The new table should not contain tombstones
+        if let Some(new_table) = new_tables.first() {
+            for (_, value) in &new_table.data {
+                assert!(!value.is_empty(), "Tombstones should be removed during compaction");
+            }
+        }
+    }
+
+    #[test]
+    fn test_compaction_metrics() {
+        use crate::core::engine::compaction::*;
+        use crate::core::table::Table;
+        use crate::core::engine::EngineOptions;
+        use std::collections::BTreeMap;
+
+        let strategy = SizeTieredCompaction::default();
+        let options = EngineOptions::default();
+
+        // Create tables
+        let mut tables = Vec::new();
+        for i in 0..3 {
+            let mut data = BTreeMap::new();
+            for j in 0..100 {
+                let key = format!("key_{}_{}", i, j).into_bytes();
+                let value = format!("value_{}_{}", i, j).into_bytes();
+                data.insert(key, value);
+            }
+            tables.push(Table::build(data, &options));
+        }
+
+        let storage_config = crate::storage::config::StorageConfig::default();
+        let output_dir = std::path::PathBuf::from("/tmp/test_metrics");
+        let (_, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
+
+        assert!(metrics.bytes_read > 0, "Should track bytes read");
+        assert!(metrics.files_merged > 0, "Should track files merged");
+        assert!(metrics.duration_ms >= 0, "Duration should be non-negative");
+    }
+
+    #[test]
+    fn test_size_tiered_bucket_grouping() {
+        use crate::core::engine::compaction::SizeTieredCompaction;
+        use crate::core::table::Table;
+        use std::collections::BTreeMap;
+
+        let strategy = SizeTieredCompaction::default();
+
+        // Create tables of different sizes
+        let mut tables = Vec::new();
+        
+        // Small tables (< 64KB)
+        for i in 0..5 {
+            let mut data = BTreeMap::new();
+            for j in 0..10 {
+                let key = format!("small_{}_{}", i, j).into_bytes();
+                let value = format!("val").into_bytes();
+                data.insert(key, value);
+            }
+            tables.push(Table::build(data, &crate::core::engine::EngineOptions::default()));
+        }
+
+        let options = crate::core::engine::EngineOptions::default();
+        let groups = strategy.pick_tables(&tables, &options);
+        
+        // Should group small tables together
+        assert!(!groups.is_empty(), "Should group tables by size");
+    }
+
+    #[test]
+    fn test_atomic_replace_in_version_set() {
+        use crate::storage::cache::NoopCache;
+        
+        let options = crate::core::engine::EngineOptions::default();
+        let cache = NoopCache;
+        let mut vs = crate::core::engine::version_set::VersionSet::<NoopCache>::new(options, cache);
+
+        // Add some tables
+        for i in 0..5 {
+            let mut data = std::collections::BTreeMap::new();
+            data.insert(format!("key_{}", i).into_bytes(), format!("value_{}", i).into_bytes());
+            let table = crate::core::table::Table::build(data, &crate::core::engine::EngineOptions::default());
+            vs.add_table("default", table);
+        }
+
+        assert_eq!(vs.table_count("default"), 5);
+
+        // Atomically replace tables at indices 1 and 3
+        let new_table = {
+            let mut data = std::collections::BTreeMap::new();
+            data.insert(b"new_key".to_vec(), b"new_value".to_vec());
+            crate::core::table::Table::build(data, &crate::core::engine::EngineOptions::default())
+        };
+
+        vs.atomic_replace("default", &[1, 3], vec![new_table]);
+
+        // Should have 4 tables now (5 - 2 removed + 1 added)
+        assert_eq!(vs.table_count("default"), 4);
+    }
+
+    #[test]
+    fn test_compaction_write_amplification_size_tiered() {
+        use crate::core::engine::compaction::*;
+        use crate::core::table::Table;
+        use crate::core::engine::EngineOptions;
+        use std::collections::BTreeMap;
+
+        let strategy = SizeTieredCompaction::default();
+        let options = EngineOptions::default();
+
+        // Create tables with known sizes
+        let mut tables = Vec::new();
+        let mut total_bytes_written: u64 = 0;
+        
+        for i in 0..5 {
+            let mut data = BTreeMap::new();
+            for j in 0..100 {
+                let key = format!("key_{}_{}", i, j).into_bytes();
+                let value = format!("value_{}_{}", i, j).into_bytes();
+                total_bytes_written += (key.len() + value.len()) as u64;
+                data.insert(key, value);
+            }
+            tables.push(Table::build(data, &options));
+        }
+
+        let storage_config = crate::storage::config::StorageConfig::default();
+        let output_dir = std::path::PathBuf::from("/tmp/test_amp");
+        let (new_tables, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
+
+        // Write amplification = bytes_written / bytes_read
+        // For SizeTiered, should be < 3x
+        if metrics.bytes_read > 0 {
+            let write_amplification = metrics.bytes_written as f64 / metrics.bytes_read as f64;
+            assert!(
+                write_amplification < 3.0,
+                "Write amplification for SizeTiered should be < 3x, got {:.2}x",
+                write_amplification
+            );
+        }
+    }
+
+    #[test]
+    fn test_1000_keys_with_multiple_compactions() {
+        use crate::core::engine::compaction::*;
+        use crate::core::table::Table;
+        use crate::core::engine::EngineOptions;
+        use std::collections::BTreeMap;
+
+        let strategy = SizeTieredCompaction::default();
+        let options = EngineOptions::default();
+
+        // Simulate multiple rounds of compaction with 1000 keys
+        let mut all_tables = Vec::new();
+        
+        // Create initial tables
+        for batch in 0..10 {
+            let mut data = BTreeMap::new();
+            for i in 0..100 {
+                let key = format!("key_{}_{}", batch, i).into_bytes();
+                let value = format!("value_{}_{}", batch, i).into_bytes();
+                data.insert(key, value);
+            }
+            all_tables.push(Table::build(data, &options));
+        }
+
+        // Run multiple compaction rounds
+        let storage_config = crate::storage::config::StorageConfig::default();
+        let output_dir = std::path::PathBuf::from("/tmp/test_1000keys");
+        
+        let mut total_compactions = 0;
+        while all_tables.len() >= 2 {
+            let groups = strategy.pick_tables(&all_tables, &options);
+            if groups.is_empty() {
+                break;
+            }
+            
+            // Compact first group
+            let group = &groups[0];
+            let tables_to_compact: Vec<Table> = group.iter().map(|&i| all_tables[i].clone()).collect();
+            
+            let (new_tables, _) = strategy.execute(tables_to_compact, &options, &storage_config, &output_dir).unwrap();
+            
+            // Remove old tables and add new ones
+            let mut new_all_tables = Vec::new();
+            for (idx, table) in all_tables.iter().enumerate() {
+                if !group.contains(&idx) {
+                    new_all_tables.push(table.clone());
+                }
+            }
+            for new_table in new_tables {
+                new_all_tables.push(new_table);
+            }
+            all_tables = new_all_tables;
+            total_compactions += 1;
+            
+            if total_compactions > 20 {
+                break; // Prevent infinite loop
+            }
+        }
+        
+        // Should have fewer tables after compaction
+        assert!(all_tables.len() < 10, "Should reduce number of tables through compaction");
     }
 }

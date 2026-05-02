@@ -1,0 +1,47 @@
+{
+  "task": "Resolve open issues recursively by priority and dependencies: #108 (high, CRC32), #107 (high, WAL crash window), #92 (medium, LsmError cleanup), #109 (medium, search_prefix non-ASCII), #93 (medium, encapsulate Engine), #47 (medium, compaction strategies)",
+  "todos": [
+    {
+      "id": "todo-108",
+      "title": "Fix CRC32 corruption test - add CRC32 validation to SSTable blocks",
+      "required": true,
+      "files": ["src/storage/builder.rs", "src/storage/reader.rs", "src/storage/wal.rs"],
+      "evidence": ["crc32fast::Hasher", "write_all(&crc32.to_le_bytes())", "LsmError::CorruptedData"]
+    },
+    {
+      "id": "todo-107",
+      "title": "Fix WAL clear() crash window - integrate WAL into Engine",
+      "required": true,
+      "files": ["src/core/engine/mod.rs", "src/core/log_record.rs"],
+      "evidence": ["wal: WriteAheadLog", "self.wal.write_record()", "self.wal.clear()", "replay_wal_records"]
+    },
+    {
+      "id": "todo-92",
+      "title": "Clean up duplicate LsmError variants",
+      "required": true,
+      "files": ["src/infra/error.rs"],
+      "evidence": ["NotFound(String)", "JsonError", "CorruptedData"]
+    },
+    {
+      "id": "todo-109",
+      "title": "Fix search_prefix for non-ASCII keys",
+      "required": true,
+      "files": ["src/core/engine/mod.rs"],
+      "evidence": ["prefix_end()", "scan_cf with upper bound", "test_prefix_end_non_ascii"]
+    },
+    {
+      "id": "todo-93",
+      "title": "Encapsulate LsmEngine internals - remove pub(crate) fields",
+      "required": true,
+      "files": ["src/core/engine/mod.rs"],
+      "evidence": ["options:", "version_set:", "memtables:", "compaction:", "wal:"]
+    },
+    {
+      "id": "todo-47",
+      "title": "Implement Compaction Strategies (Leveled, Tiered, Size-Tiered)",
+      "required": true,
+      "files": ["src/core/engine/compaction.rs", "src/core/engine/mod.rs", "src/core/engine/version_set.rs", "src/core/table.rs"],
+      "evidence": ["CompactionStrategy trait", "SizeTieredCompaction", "LeveledCompaction", "LazyLevelingCompaction", "atomic_replace"]
+    }
+  ]
+}

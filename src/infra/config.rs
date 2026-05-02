@@ -47,6 +47,7 @@ pub enum CompactionStrategy {
     #[default]
     SizeTiered,
     Leveled,
+    LazyLeveling,
 }
 
 impl Default for CoreConfig {

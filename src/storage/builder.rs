@@ -201,8 +201,8 @@ impl SstableBuilder {
 mod tests {
     use super::*;
 
-    fn create_test_record(key: &str, value: &[u8]) -> LogRecord {
-        LogRecord::new(key.to_string(), value.to_vec())
+    fn create_test_record(key: &[u8], value: &[u8]) -> LogRecord {
+        LogRecord::new(key.to_vec(), value.to_vec())
     }
 
     #[test]
@@ -214,13 +214,13 @@ mod tests {
         let mut builder = SstableBuilder::new(path.clone(), config, 123).unwrap();
 
         builder
-            .add(b"key1", &create_test_record("key1", b"value1"))
+            .add(b"key1", &create_test_record(b"key1", b"value1"))
             .unwrap();
         builder
-            .add(b"key2", &create_test_record("key2", b"value2"))
+            .add(b"key2", &create_test_record(b"key2", b"value2"))
             .unwrap();
         builder
-            .add(b"key3", &create_test_record("key3", b"value3"))
+            .add(b"key3", &create_test_record(b"key3", b"value3"))
             .unwrap();
 
         let result_path = builder.finish().unwrap();
@@ -243,7 +243,7 @@ mod tests {
             let key = format!("key_{:03}", i);
             let value = vec![b'x'; 20];
             builder
-                .add(key.as_bytes(), &create_test_record(&key, &value))
+                .add(key.as_bytes(), &create_test_record(key.as_bytes(), &value))
                 .unwrap();
         }
 
@@ -273,7 +273,7 @@ mod tests {
 
         let large_value = vec![b'x'; 1000];
         builder
-            .add(b"large_key", &create_test_record("large_key", &large_value))
+            .add(b"large_key", &create_test_record(b"large_key", &large_value))
             .unwrap();
 
         let result = builder.finish();

@@ -104,8 +104,8 @@ impl SstableReader {
     ///
     /// This method is lock-free and very fast. It should be called before `get()`
     /// to avoid unnecessary I/O for keys that definitely don't exist.
-    pub fn might_contain(&self, key: &str) -> bool {
-        self.bloom_filter.check(key.as_bytes())
+    pub fn might_contain(&self, key: &[u8]) -> bool {
+        self.bloom_filter.check(key)
     }
 
     /// Retrieve a value by key using sparse index and Bloom filter
@@ -113,14 +113,14 @@ impl SstableReader {
     /// # Thread Safety
     /// This method can be safely called concurrently from multiple threads.
     /// Locks are held only during cache access and file I/O.
-    pub fn get(&self, key: &str) -> Result<Option<LogRecord>> {
+    pub fn get(&self, key: &[u8]) -> Result<Option<LogRecord>> {
         // Fast rejection using Bloom filter (no lock needed)
         if !self.might_contain(key) {
             return Ok(None);
         }
 
         // Read block by offset (no lock needed - immutable metadata)
-        let block_meta = match self.read_block_by_key(key.as_bytes()) {
+        let block_meta = match self.read_block_by_key(key) {
             Some(meta) => meta,
             None => return Ok(None),
         };
@@ -132,7 +132,7 @@ impl SstableReader {
         let block = Block::decode(&block_data)?;
 
         // Linear scan within the block to find the key (no lock needed)
-        Self::search_in_block(&block, key.as_bytes())
+        Self::search_in_block(&block, key)
     }
 
     /// Search for a key within a decoded block
@@ -210,8 +210,8 @@ impl SstableReader {
     /// This method can be safely called concurrently from multiple threads.
     pub fn scan_range(
         &self,
-        start: Option<&str>,
-        end: Option<&str>,
+        start: Option<&[u8]>,
+        end: Option<&[u8]>,
     ) -> Result<Vec<(Vec<u8>, LogRecord)>> {
         let mut records = Vec::new();
 
@@ -221,7 +221,7 @@ impl SstableReader {
             // and then step back by 1 to get the block that could contain start_key.
             let idx = self.metadata.blocks.partition_point(|block| {
                 // Use bytes comparison to avoid String allocation
-                block.first_key.as_slice() <= start_key.as_bytes()
+                block.first_key.as_slice() <= start_key
             });
             if idx == 0 {
                 0
@@ -238,7 +238,7 @@ impl SstableReader {
             // Check if we've passed the end key
             if let Some(end_key) = end {
                 // If the block's first key is >= end, we're done with this SSTable
-                if block_meta.first_key.as_slice() >= end_key.as_bytes() {
+                if block_meta.first_key.as_slice() >= end_key {
                     break;
                 }
             }
@@ -265,14 +265,14 @@ impl SstableReader {
 
                 // Check start filter (exclusive start for pagination)
                 if let Some(start_key) = start {
-                    if key.as_slice() <= start_key.as_bytes() {
+                    if key.as_slice() <= start_key {
                         continue;
                     }
                 }
 
                 // Check end filter
                 if let Some(end_key) = end {
-                    if key.as_slice() >= end_key.as_bytes() {
+                    if key.as_slice() >= end_key {
                         // Keys in a block are sorted, so we can break early
                         break;
                     }
@@ -451,8 +451,8 @@ mod tests {
     use std::io::{Seek, SeekFrom, Write};
     use tempfile::tempdir;
 
-    fn create_test_record(key: &str, value: &[u8]) -> LogRecord {
-        LogRecord::new(key.to_string(), value.to_vec())
+    fn create_test_record(key: &[u8], value: &[u8]) -> LogRecord {
+        LogRecord::new(key.to_vec(), value.to_vec())
     }
 
     #[test]
@@ -472,7 +472,7 @@ mod tests {
             let key = format!("key_{:02}", i);
             let value = format!("value_{}", i);
             builder
-                .add(key.as_bytes(), &create_test_record(&key, value.as_bytes()))
+                .add(key.as_bytes(), &create_test_record(key.as_bytes(), value.as_bytes()))
                 .unwrap();
         }
 
@@ -496,7 +496,7 @@ mod tests {
         }
 
         // Try to read a key that would be in the corrupted block
-        let result = reader.get("key_00");
+        let result = reader.get(b"key_00");
 
         // Should get CorruptedData error due to CRC32 mismatch
         match result {

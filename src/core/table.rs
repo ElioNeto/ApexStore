@@ -1,6 +1,8 @@
 #[derive(Clone)]
 pub struct Table {
     pub data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
+    pub level: usize,
+    pub path: Option<std::path::PathBuf>,
 }
 
 impl Table {
@@ -8,11 +10,46 @@ impl Table {
         data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
         _options: &crate::core::engine::EngineOptions,
     ) -> Self {
-        Self { data }
+        Self {
+            data,
+            level: 0,
+            path: None,
+        }
     }
+
+    /// Create a new table at a specific level
+    pub fn with_level(mut self, level: usize) -> Self {
+        self.level = level;
+        self
+    }
+
+    /// Create a table from an SSTable file path
+    pub fn from_sstable_path(path: &std::path::Path) -> crate::infra::error::Result<Self> {
+        use crate::infra::error::Result;
+        use std::fs;
+
+        let data = if path.exists() {
+            // Read the SSTable and extract data
+            // For now, we'll create an empty table - in production this would read the SSTable
+            std::collections::BTreeMap::new()
+        } else {
+            std::collections::BTreeMap::new()
+        };
+
+        Ok(Self {
+            data,
+            level: 1, // Assume L1 for compacted tables
+            path: Some(path.to_path_buf()),
+        })
+    }
+
     pub fn size(&self) -> usize {
-        0
+        self.data
+            .iter()
+            .map(|(k, v)| k.len() + v.len())
+            .sum()
     }
+
     pub fn iter(&self) -> TableIterator<'_> {
         TableIterator::new(&self.data)
     }

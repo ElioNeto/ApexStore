@@ -216,7 +216,7 @@ mod tests {
     fn test_wal_write_and_read_round_trip() {
         let (_temp_dir, wal) = create_test_wal();
 
-        let record = LogRecord::new("test_key".to_string(), b"test_value".to_vec());
+        let record = LogRecord::new(b"test_key".to_vec(), b"test_value".to_vec());
         wal.write_record(&record).unwrap();
 
         let records = wal.recover().unwrap();
@@ -228,7 +228,7 @@ mod tests {
     fn test_wal_crc32_corruption_detection() {
         let (temp_dir, wal) = create_test_wal();
 
-        let record = LogRecord::new("test_key".to_string(), b"test_value".to_vec());
+        let record = LogRecord::new(b"test_key".to_vec(), b"test_value".to_vec());
         wal.write_record(&record).unwrap();
 
         // Corrupt the WAL file by flipping a bit in the payload
@@ -263,7 +263,7 @@ mod tests {
         let (temp_dir, wal) = create_test_wal();
 
         // Write a record first
-        let record = LogRecord::new("test_key".to_string(), b"test_value".to_vec());
+        let record = LogRecord::new(b"test_key".to_vec(), b"test_value".to_vec());
         wal.write_record(&record).unwrap();
 
         // Truncate the checksum from the WAL file
@@ -292,7 +292,7 @@ mod tests {
         let (temp_dir, wal) = create_test_wal();
 
         // Write a record first
-        let record = LogRecord::new("test_key".to_string(), b"this_is_a_larger_value".to_vec());
+        let record = LogRecord::new(b"test_key".to_vec(), b"this_is_a_larger_value".to_vec());
         wal.write_record(&record).unwrap();
 
         // Truncate part of the payload (remove bytes from the middle, before checksum)
@@ -329,9 +329,9 @@ mod tests {
         let (_temp_dir, wal) = create_test_wal();
 
         let records = vec![
-            LogRecord::new("key1".to_string(), b"value1".to_vec()),
-            LogRecord::new("key2".to_string(), b"value2".to_vec()),
-            LogRecord::tombstone("key3".to_string()),
+            LogRecord::new(b"key1".to_vec(), b"value1".to_vec()),
+            LogRecord::new(b"key2".to_vec(), b"value2".to_vec()),
+            LogRecord::tombstone(b"key3".to_vec()),
         ];
 
         for record in &records {

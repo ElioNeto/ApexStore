@@ -7,6 +7,33 @@ pub trait Cache: Clone + Send + Sync + 'static {}
 impl Cache for Arc<GlobalBlockCache> {}
 impl Cache for GlobalBlockCache {}
 
+/// A no-op cache for testing purposes
+#[derive(Clone, Debug)]
+pub struct NoopCache;
+
+impl Cache for NoopCache {}
+
+impl NoopCache {
+    pub fn new() -> Self {
+        Self
+    }
+    
+    pub fn get(&self, _table_id: u64, _block_idx: usize) -> Option<Vec<u8>> {
+        None
+    }
+    
+    pub fn put(&self, _table_id: u64, _block_idx: usize, _data: Vec<u8>) {
+        // No-op
+    }
+    
+    pub fn stats(&self) -> CacheStats {
+        CacheStats {
+            len: 0,
+            cap: 0,
+        }
+    }
+}
+
 type BlockId = (u64, usize);
 
 #[derive(Clone, Debug)]

@@ -3,14 +3,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LogRecord {
-    pub key: String,
+    pub key: Vec<u8>,
     pub value: Vec<u8>,
     pub timestamp: u128,
     pub is_deleted: bool,
 }
 
 impl LogRecord {
-    pub fn new(key: String, value: Vec<u8>) -> Self {
+    pub fn new(key: Vec<u8>, value: Vec<u8>) -> Self {
         Self {
             key,
             value,
@@ -22,7 +22,7 @@ impl LogRecord {
         }
     }
 
-    pub fn tombstone(key: String) -> Self {
+    pub fn tombstone(key: Vec<u8>) -> Self {
         Self {
             key,
             value: Vec::new(),

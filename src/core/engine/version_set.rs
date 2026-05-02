@@ -86,4 +86,42 @@ impl<C: Cache> VersionSet<C> {
         entry.clear();
         entry.push(new_table);
     }
+
+    /// Get all tables for a column family (without draining)
+    pub fn get_tables(&self, cf: &str) -> Vec<crate::core::table::Table> {
+        self.tables
+            .get(cf)
+            .map_or_else(Vec::new, |v| v.clone())
+    }
+
+    /// Atomically replace specific tables with new ones
+    pub fn atomic_replace(
+        &mut self,
+        cf: &str,
+        indices: &[usize],
+        new_tables: Vec<crate::core::table::Table>,
+    ) {
+        if let Some(tables) = self.tables.get_mut(cf) {
+            // Sort indices in descending order to remove from end without invalidating indices
+            let mut sorted_indices: Vec<usize> = indices.to_vec();
+            sorted_indices.sort_unstable_by(|a, b| b.cmp(a));
+            
+            // Remove old tables
+            for &idx in &sorted_indices {
+                if idx < tables.len() {
+                    tables.remove(idx);
+                }
+            }
+            
+            // Add new tables
+            for new_table in new_tables {
+                tables.push(new_table);
+            }
+        }
+    }
+
+    /// Get list of all column families
+    pub fn column_families(&self) -> Vec<String> {
+        self.tables.keys().cloned().collect()
+    }
 }
