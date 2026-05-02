@@ -38,9 +38,21 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 
 ## 📊 Performance Benchmarks
 
-*Measured on AMD Ryzen 9 5900X, NVMe SSD (v2.1.0) — Full benchmark suite available at [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md)*
+*Measured on AMD Ryzen 9 5900X, NVMe SSD — Full benchmark suite available at [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md)*
 
-### Throughput Benchmarks
+> **Run locally:** `cargo bench --all-features` → relatórios HTML em `target/criterion/`
+
+### 🤖 Latest CI Results
+
+<!-- BENCHMARK_RESULTS_START -->
+*Os resultados serão atualizados automaticamente pelo CI a cada push em `main`.*
+<!-- BENCHMARK_RESULTS_END -->
+
+### 📋 Reference Benchmarks
+
+*Baseline medido manualmente (AMD Ryzen 9 5900X, NVMe SSD, v2.1.0)*
+
+#### Throughput
 | Operation | Throughput | p50 Latency | p99 Latency |
 |-----------|------------|-------------|-------------|
 | **MemTable Writes** | 650K ops/s | 1.5 µs | 3.2 µs |
@@ -51,14 +63,14 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 | **SSTable (warm cache)** | 75K ops/s | 13.4 µs | 42.1 µs |
 | **SSTable (cold cache)** | 8.2K ops/s | 122 µs | 312 µs |
 
-### Scan Performance
+#### Scan Performance
 | Operation | Throughput | p50 Latency |
 |-----------|------------|-------------|
 | **Full Scan** | 12.5M keys/sec | 0.08 µs/key |
 | **Range Scan (1K)** | 6.2M keys/sec | 0.16 µs/key |
 | **Prefix Scan** | 4.8M keys/sec | 0.21 µs/key |
 
-### Storage Efficiency
+#### Storage Efficiency
 | Metric | Value |
 |--------|-------|
 | **LZ4 Compression Ratio** | 2.8x |
@@ -70,8 +82,6 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 > - Cache hit rate > 80% when `block_cache_size_mb > 256`
 > - Bloom filter rejects 99.2% of non-existent key lookups
 > - Optimal `memtable_max_size` is 16-32MB for write-heavy workloads
->
-> **Full Benchmark Results:** Run `cargo bench --all-features` to generate HTML reports in `target/criterion/`
 
 ## ✨ Key Features
 
