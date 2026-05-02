@@ -4,6 +4,7 @@ use crate::infra::config::StorageConfig;
 use crate::infra::error::{LsmError, Result};
 use crate::storage::block::Block;
 use bloomfilter::Bloom;
+use crc32fast::Hasher as Crc32Hasher;
 use lz4_flex::compress_prepend_size;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -103,19 +104,24 @@ impl SstableBuilder {
         let uncompressed_size = encoded.len() as u32;
 
         let compressed = compress_prepend_size(&encoded);
-        let compressed_size = compressed.len() as u32;
+
+        // Calculate CRC32 of the compressed data
+        let mut hasher = Crc32Hasher::new();
+        hasher.update(&compressed);
+        let crc32 = hasher.finalize();
 
         self.writer.write_all(&compressed)?;
+        self.writer.write_all(&crc32.to_le_bytes())?;
 
         let block_meta = BlockMeta {
             first_key,
             offset: self.current_offset,
-            size: compressed_size,
+            size: (compressed.len() as u32) + 4, // includes CRC32 bytes
             uncompressed_size,
         };
 
         self.block_metas.push(block_meta);
-        self.current_offset += compressed_size as u64;
+        self.current_offset += (compressed.len() as u64) + 4;
 
         self.current_block = Block::from_config(&self.config);
 

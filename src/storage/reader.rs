@@ -449,7 +449,6 @@ mod tests {
     use crate::infra::config::StorageConfig;
     use crate::storage::builder::SstableBuilder;
     use std::io::{Seek, SeekFrom, Write};
-    use std::sync::Arc;
     use tempfile::tempdir;
 
     fn create_test_record(key: &str, value: &[u8]) -> LogRecord {
@@ -490,7 +489,6 @@ mod tests {
         // Corrupt the first data block by writing junk after the magic number
         {
             let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
-            // Skip magic number (8 bytes) and corrupt some bytes in the first block
             file.seek(SeekFrom::Start(8)).unwrap();
             // Write garbage to corrupt the compressed data (but not the CRC32)
             let garbage = vec![0xFF; 20];
