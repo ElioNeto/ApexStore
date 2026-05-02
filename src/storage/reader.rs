@@ -392,7 +392,7 @@ impl SstableReader {
         };
 
         // Verify CRC32 of compressed data
-        let mut hasher = Hasher::new();
+        let mut hasher = Crc32Hasher::new();
         hasher.update(&compressed_block);
         let computed_crc32 = hasher.finalize();
 
