@@ -44,7 +44,10 @@ jobs:
         run: cargo build --benches --release
 
       - name: Run benchmarks (CI mode)
-        run: cargo bench --bench write_bench --bench read_bench --bench scan_bench --bench mixed_bench --bench stress_bench -- --noplot
+        run: |
+          cargo bench --bench write_bench --bench read_bench --bench scan_bench --bench mixed_bench --bench stress_bench -- --noplot 2>&1 | tee bench_output.txt
+          exit ${PIPESTATUS[0]}
+        continue-on-error: true
         env:
           CI: true
 
@@ -52,7 +55,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
-          path: target/criterion/benchmark-results.json
+          path: |
+            bench_output.txt
+            target/criterion
           retention-days: 30
 
       - name: Generate benchmark summary
@@ -60,6 +65,23 @@ jobs:
         run: |
           DATE=$(date -u '+%Y-%m-%d %H:%M UTC')
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          # Guard: abort gracefully if bench_output.txt is missing or empty
+          if [ ! -s bench_output.txt ]; then
+            echo "⚠️  bench_output.txt ausente ou vazio — o benchmark pode ter travado ou falhado."
+            {
+              echo "<!-- BENCHMARK_RESULTS_START -->"
+              echo "> ⚠️ CI em **${DATE}** — benchmark não produziu resultados. [Ver run](${RUN_URL})"
+              echo ""
+              echo "<!-- BENCHMARK_RESULTS_END -->"
+            } > bench_block.txt
+
+            perl -i -0pe '
+              my $block = do { open my $f, "bench_block.txt" or die; local $/; <$f> };
+              s|<!-- BENCHMARK_RESULTS_START -->.*?<!-- BENCHMARK_RESULTS_END -->|$block|gs;
+            ' README.md
+            exit 0
+          fi
 
           # Parse Criterion output: lines like "time: [X.XX µs X.XX µs X.XX µs]"
           ROWS=""
