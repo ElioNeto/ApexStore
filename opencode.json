@@ -2,7 +2,25 @@
     "$schema": "https://opencode.ai/config.json",
     "default_agent": "orchestrator",
     "shell": "/bin/bash",
-    "snapshot": true,
+    "snapshot": false,
+    "compaction": {
+        "auto": true,
+        "prune": true,
+        "reserved": 12000
+    },
+    "watcher": {
+        "ignore": [
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/build/**",
+            "**/.next/**",
+            "**/coverage/**",
+            "**/.turbo/**",
+            "**/vendor/**",
+            "**/tmp/**",
+            "**/.git/**"
+        ]
+    },
     "permission": {
         "edit": "ask",
         "bash": "ask"
@@ -23,19 +41,24 @@
     },
     "agent": {
         "orchestrator": {
-            "description": "Seleciona issues, resolve dependências, coordena implementação e validação.",
+            "description": "Seleciona issues desbloqueadas, resolve dependências e coordena implementação e validação com contexto mínimo.",
             "mode": "primary",
-            "temperature": 0.1,
-            "max_steps": 40,
+            "temperature": 0.0,
+            "max_steps": 18,
             "prompt": ".opencode/prompts/orchestrator.md",
             "permission": {
                 "read": "allow",
+                "list": "allow",
+                "glob": "allow",
+                "grep": "allow",
                 "edit": "deny",
                 "bash": {
                     "*": "deny",
                     "git status*": "allow",
                     "git diff*": "allow",
-                    "git log*": "allow"
+                    "git log*": "allow",
+                    "cat .opencode/state/*": "allow",
+                    "jq *": "allow"
                 },
                 "task": {
                     "*": "deny",
@@ -46,22 +69,31 @@
             }
         },
         "implementer": {
-            "description": "Implementa uma issue por vez no repositório local.",
+            "description": "Implementa uma issue por vez no repositório local, com saída curta e objetiva.",
             "mode": "subagent",
-            "temperature": 0.1,
-            "max_steps": 60,
+            "temperature": 0.0,
+            "max_steps": 32,
             "prompt": ".opencode/prompts/implementer.md",
             "permission": {
                 "read": "allow",
+                "list": "allow",
+                "glob": "allow",
+                "grep": "allow",
                 "edit": "allow",
                 "bash": {
                     "*": "deny",
                     "npm test*": "allow",
                     "pnpm test*": "allow",
                     "yarn test*": "allow",
-                    "npm run*": "allow",
-                    "pnpm run*": "allow",
-                    "yarn run*": "allow",
+                    "npm run test*": "allow",
+                    "pnpm run test*": "allow",
+                    "yarn run test*": "allow",
+                    "npm run lint*": "allow",
+                    "pnpm run lint*": "allow",
+                    "yarn lint*": "allow",
+                    "npm run build*": "allow",
+                    "pnpm run build*": "allow",
+                    "yarn build*": "allow",
                     "pytest*": "allow",
                     "go test*": "allow",
                     "cargo test*": "allow",
@@ -76,13 +108,16 @@
             }
         },
         "validator": {
-            "description": "Valida critérios de aceite e evidências objetivas sem editar código.",
+            "description": "Valida critérios de aceite com evidência objetiva, sem editar código.",
             "mode": "subagent",
             "temperature": 0.0,
-            "max_steps": 30,
+            "max_steps": 18,
             "prompt": ".opencode/prompts/validator.md",
             "permission": {
                 "read": "allow",
+                "list": "allow",
+                "glob": "allow",
+                "grep": "allow",
                 "edit": "deny",
                 "bash": {
                     "*": "deny",
@@ -92,6 +127,9 @@
                     "npm run lint*": "allow",
                     "pnpm run lint*": "allow",
                     "yarn lint*": "allow",
+                    "npm run build*": "allow",
+                    "pnpm run build*": "allow",
+                    "yarn build*": "allow",
                     "pytest*": "allow",
                     "go test*": "allow",
                     "cargo test*": "allow",
