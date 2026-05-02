@@ -1,5 +1,5 @@
 ---
-description: Verifica TODOs e executa a pipeline local para fechamento da task
+description: Verifica TODOs e executa a pipeline local para fechamento da task.
 ---
 
 Execute a validação de entrega desta tarefa.
@@ -13,16 +13,16 @@ Execute a validação de entrega desta tarefa.
 Com base na saída acima, responda obrigatoriamente com:
 
 ```
-STATUS GERAL: [SUCCESS | FAILED]
+STATUS: SUCCESS|FAILED
 
 TODOs:
 - [x] id: título
 - [ ] id: título (pendente: motivo)
 
 JOBS:
-- <job>: [SUCCESS | FAILED | SKIPPED] — motivo se falhou
+- <job>: SUCCESS|FAILED|SKIPPED — motivo se falhou
 
-PRÓXIMO PASSO: [FINALIZAR | patch necessário]
+NEXT: FINALIZAR|<patch necessário>
 ```
 
 Argumentos extras: $ARGUMENTS
