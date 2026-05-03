@@ -4,7 +4,7 @@ use crate::core::key::KeySlice;
 use crate::core::log_record::LogRecord;
 use crate::core::table::Table;
 use crate::infra::config::StorageConfig;
-use crate::infra::error::{LsmError, Result};
+use crate::infra::error::Result;
 use crate::storage::builder::SstableBuilder;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -144,7 +144,7 @@ impl CompactionStrategy for SizeTieredCompaction {
 
             // Skip tombstones (empty values) during compaction
             if !value.is_empty() {
-                let key_vec: Vec<u8> = key.as_ref().to_vec();
+                let key_vec: Vec<u8> = key.as_slice().to_vec();
                 let record = LogRecord::new(key_vec, value.to_vec());
                 builder.add(key.as_ref(), &record)?;
                 record_count += 1;
@@ -278,7 +278,7 @@ impl CompactionStrategy for LeveledCompaction {
 
             // Skip tombstones during compaction
             if !value.is_empty() {
-                let key_vec: Vec<u8> = key.as_ref().to_vec();
+                let key_vec: Vec<u8> = key.as_slice().to_vec();
                 let record = LogRecord::new(key_vec, value.to_vec());
                 builder.add(key.as_ref(), &record)?;
                 record_count += 1;
@@ -446,6 +446,13 @@ pub struct Compaction {
     output_dir: PathBuf,
 }
 
+impl Compaction {
+    /// Get reference to compaction options
+    pub fn options(&self) -> &CompactionOptions {
+        &self.options
+    }
+}
+
 impl Clone for Compaction {
     fn clone(&self) -> Self {
         // Note: Cloning will use default strategy since we can't clone dyn trait objects
@@ -497,13 +504,13 @@ impl Compaction {
     }
 
     pub fn from_config(config: &crate::infra::config::LsmConfig, output_dir: PathBuf) -> Self {
-        let strategy_type: CompactionStrategyType = config.compaction.strategy.into();
+        let strategy_type: CompactionStrategyType = config.compaction.strategy.clone().into();
         let options = CompactionOptions {
             strategy_type,
             compaction_threshold: config.compaction.min_compaction_threshold,
             max_tables_per_compaction: config.compaction.max_sstables,
         };
-        let storage_config = StorageConfig {
+        let storage_config = crate::infra::config::StorageConfig {
             block_size: config.storage.block_size,
             block_cache_size_mb: config.storage.block_cache_size_mb,
             sparse_index_interval: config.storage.sparse_index_interval,
@@ -521,17 +528,17 @@ impl Compaction {
     /// Execute compaction on the given tables
     pub fn compact(
         &self,
-        table_indices: Vec<usize>,
+        table_indices: &[usize],
         all_tables: &[Table],
         options: &EngineOptions,
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
         let tables: Vec<Table> = table_indices
-            .into_iter()
-            .map(|i| all_tables[i].clone())
+            .iter()
+            .map(|i| all_tables[*i].clone())
             .collect();
 
         self.strategy
-            .execute(tables, options, &self.storage_config, &self.output_dir)
+            .execute(&tables, options, &self.storage_config, &self.output_dir)
     }
 
     /// Get the strategy name

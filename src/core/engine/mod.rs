@@ -6,13 +6,11 @@ use crate::core::log_record::LogRecord;
 use crate::core::table::Table;
 use crate::storage::cache::Cache;
 use crate::storage::wal::WriteAheadLog;
-use crate::infra::error::{LsmError, Result};
+use crate::infra::error::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
 
 use self::compaction::{Compaction, CompactionMetrics, CompactionOptions, CompactionStrategyType};
 use self::manifest::Manifest;
@@ -79,7 +77,7 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
     fn from(config: &crate::infra::config::LsmConfig) -> Self {
         // Create CompactionOptions from config
         let compaction_options = CompactionOptions {
-            strategy_type: config.compaction.strategy.into(),
+            strategy_type: config.compaction.strategy.clone().into(),
             compaction_threshold: config.compaction.min_compaction_threshold,
             max_tables_per_compaction: config.compaction.max_sstables,
         };
@@ -97,7 +95,8 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
         }
     }
 }
-
+    }
+}
 
 impl EngineOptions {
     /// Create EngineOptions from LsmConfig
@@ -283,9 +282,9 @@ impl<C: Cache> Engine<C> {
         // Create storage config from options (using infra::config::StorageConfig)
         let storage_config = crate::infra::config::StorageConfig {
             block_size: options.block_size,
-            block_cache_size_mb: 64, // default
-            sparse_index_interval: 16, // default
-            bloom_false_positive_rate: 0.01, // default
+            block_cache_size_mb: 64,
+            sparse_index_interval: 16,
+            bloom_false_positive_rate: 0.01,
         };
         
         // Create compaction with strategy from options
@@ -327,40 +326,6 @@ impl<C: Cache> Engine<C> {
         Ok(engine)
     }
 
-    /// Create engine from LsmConfig
-    pub fn new_from_config(config: &crate::infra::config::LsmConfig) -> Result<Self> {
-        let cache = crate::storage::cache::GlobalBlockCache::new(
-            config.storage.block_cache_size_mb,
-            config.storage.block_size,
-        );
-        
-        let options = EngineOptions::from_config(config);
-        let sst_dir = config.core.dir_path.join("sstables");
-        
-        let compaction = Compaction::from_config(config, sst_dir.clone());
-        
-        let wal = WriteAheadLog::new(&config.core.dir_path)?;
-        let recovered_records = wal.recover()?;
-        
-        let mut engine = Self {
-            options,
-            _manifest: Manifest::new(),
-            version_set: VersionSet::new(options.clone(), (*cache).clone()),
-            memtables: HashMap::new(),
-            write_buffer_limit: options.write_buffer_size * options.max_write_buffer_number,
-            memtable_bytes: HashMap::new(),
-            compaction,
-            wal,
-            compaction_running: Arc::new(AtomicBool::new(false)),
-            sst_dir,
-        };
-        
-        engine.replay_wal_records(recovered_records)?;
-        
-        Ok(engine)
-    }
-    
-    /// Replay WAL records into the memtable
     fn replay_wal_records(&mut self, records: Vec<LogRecord>) -> Result<()> {
         for record in records {
             let cf = "default"; // TODO: support column families in WAL records
@@ -382,7 +347,7 @@ impl<C: Cache> Engine<C> {
 
 impl Engine<crate::storage::cache::GlobalBlockCache> {
     pub fn new(config: crate::infra::config::LsmConfig) -> crate::infra::error::Result<Self> {
-        let options = EngineOptions::default();
+        let options = EngineOptions::from_config(&config);
         let cache = crate::storage::cache::GlobalBlockCache::new(
             config.storage.block_cache_size_mb,
             config.storage.block_size,
@@ -392,6 +357,34 @@ impl Engine<crate::storage::cache::GlobalBlockCache> {
 }
 
 impl<C: Cache> Engine<C> {
+    /// Create engine from LsmConfig with a generic cache
+    pub fn new_from_config(config: &crate::infra::config::LsmConfig, cache: C) -> Result<Self> {
+        let options = EngineOptions::from_config(config);
+        let sst_dir = config.core.dir_path.join("sstables");
+        
+        let compaction = Compaction::from_config(config, sst_dir.clone());
+        
+        let wal = WriteAheadLog::new(&config.core.dir_path)?;
+        let recovered_records = wal.recover()?;
+        
+        let mut engine = Self {
+            options: options.clone(),
+            _manifest: Manifest::new(),
+            version_set: VersionSet::new(options.clone(), cache),
+            memtables: HashMap::new(),
+            write_buffer_limit: options.write_buffer_size * options.max_write_buffer_number,
+            memtable_bytes: HashMap::new(),
+            compaction,
+            wal,
+            compaction_running: Arc::new(AtomicBool::new(false)),
+            sst_dir,
+        };
+        
+        engine.replay_wal_records(recovered_records)?;
+        
+        Ok(engine)
+    }
+    
     pub fn put_cf(
         &mut self,
         cf: &str,
@@ -722,7 +715,7 @@ impl<C: Cache> Engine<C> {
         // Get tables for this column family
         let tables = self.version_set.get_tables(cf);
         
-        if tables.len() < self.compaction.options.compaction_threshold {
+        if tables.len() < self.compaction.options().compaction_threshold {
             return Ok(None);
         }
 
@@ -737,7 +730,7 @@ impl<C: Cache> Engine<C> {
         
         for group_indices in groups {
             // Execute compaction on this group
-            let (new_tables, metrics) = self.compaction.compact(group_indices, &tables, &self.options)?;
+            let (new_tables, metrics) = self.compaction.compact(&group_indices, &tables, &self.options)?;
             
             // Atomically replace old tables with new ones
             self.version_set.atomic_replace(cf, &group_indices, new_tables);
@@ -778,7 +771,7 @@ impl<C: Cache> Engine<C> {
         
         for cf in &column_families {
             let table_count = self.version_set.table_count(cf);
-            if table_count >= self.compaction.options.compaction_threshold {
+            if table_count >= self.compaction.options().compaction_threshold {
                 needs_compaction = true;
                 break;
             }
@@ -955,7 +948,7 @@ mod tests {
         assert!(!groups.is_empty(), "Should pick tables for compaction");
 
         // Execute compaction
-        let storage_config = crate::storage::config::StorageConfig::default();
+        let storage_config = crate::infra::config::StorageConfig::default();
         let output_dir = std::path::PathBuf::from("/tmp/test_sst");
         let (new_tables, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
 
@@ -993,9 +986,9 @@ mod tests {
         let groups = strategy.pick_tables(&tables, &options);
         
         // Execute compaction
-        let storage_config = crate::storage::config::StorageConfig::default();
+        let storage_config = crate::infra::config::StorageConfig::default();
         let output_dir = std::path::PathBuf::from("/tmp/test_sst_leveled");
-        let (new_tables, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
+        let (new_tables, _metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
 
         assert!(!new_tables.is_empty(), "Should produce at least one new table");
         // Check that new tables are at level 1
@@ -1033,7 +1026,7 @@ mod tests {
         assert!(!groups.is_empty(), "Should pick tables for compaction");
 
         // Execute compaction
-        let storage_config = crate::storage::config::StorageConfig::default();
+        let storage_config = crate::infra::config::StorageConfig::default();
         let output_dir = std::path::PathBuf::from("/tmp/test_sst_lazy");
         let (new_tables, _) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
 
@@ -1067,7 +1060,7 @@ mod tests {
 
         let table = Table::build(data, &options);
         
-        let storage_config = crate::storage::config::StorageConfig::default();
+        let storage_config = crate::infra::config::StorageConfig::default();
         let output_dir = std::path::PathBuf::from("/tmp/test_tombstone");
         let (new_tables, _) = strategy.execute(vec![table], &options, &storage_config, &output_dir).unwrap();
 
@@ -1101,7 +1094,7 @@ mod tests {
             tables.push(Table::build(data, &options));
         }
 
-        let storage_config = crate::storage::config::StorageConfig::default();
+        let storage_config = crate::infra::config::StorageConfig::default();
         let output_dir = std::path::PathBuf::from("/tmp/test_metrics");
         let (_, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
 
@@ -1195,7 +1188,7 @@ mod tests {
             tables.push(Table::build(data, &options));
         }
 
-        let storage_config = crate::storage::config::StorageConfig::default();
+        let storage_config = crate::infra::config::StorageConfig::default();
         let output_dir = std::path::PathBuf::from("/tmp/test_amp");
         let (new_tables, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
 
@@ -1236,7 +1229,7 @@ mod tests {
         }
 
         // Run multiple compaction rounds
-        let storage_config = crate::storage::config::StorageConfig::default();
+        let storage_config = crate::infra::config::StorageConfig::default();
         let output_dir = std::path::PathBuf::from("/tmp/test_1000keys");
         
         let mut total_compactions = 0;

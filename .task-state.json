@@ -1,9 +1,60 @@
 {
-  "total": 6,
-  "by_priority": {
-    "critical": 2,
-    "high": 2,
-    "medium": 1,
-    "low": 1
-  }
+  "todos": [
+    {
+      "id": 1,
+      "title": "Execute `cargo build` and resolve all compilation errors",
+      "file": "src/**/*.rs, Cargo.toml, Cargo.lock",
+      "dep": [],
+      "status": "done"
+    },
+    {
+      "id": 2,
+      "title": "Execute `cargo clippy -- -D warnings` and fix all lint errors/warnings",
+      "file": "src/**/*.rs",
+      "dep": [1],
+      "status": "pending"
+    },
+    {
+      "id": 3,
+      "title": "Audit production code for `unwrap()` usage, replace with proper error handling (exclude tests/benchmarks)",
+      "file": "src/**/*.rs (non-test/benchmark)",
+      "dep": [2],
+      "status": "pending"
+    },
+    {
+      "id": 4,
+      "title": "Execute `cargo test --all-features` and fix all failing unit, integration, and benchmark tests",
+      "file": "src/**/*.rs, tests/**/*.rs, benches/**/*.rs",
+      "dep": [1],
+      "status": "pending"
+    },
+    {
+      "id": 5,
+      "title": "Verify crash recovery tests (WAL truncation, SSTable corruption) pass",
+      "file": "tests/**/*.rs",
+      "dep": [4],
+      "status": "pending"
+    },
+    {
+      "id": 6,
+      "title": "Execute `cargo audit` and resolve critical/high unrecognized vulnerabilities",
+      "file": "Cargo.toml, Cargo.lock",
+      "dep": [1],
+      "status": "pending"
+    },
+    {
+      "id": 7,
+      "title": "Execute `workflow-agent` to validate all non-secret CI jobs in ci.yml, fix failures",
+      "file": "scripts/workflow-agent.ts, .github/workflows/ci.yml",
+      "dep": [1, 2, 3, 4, 5, 6],
+      "status": "pending"
+    },
+    {
+      "id": 8,
+      "title": "Verify module-specific lint and tests pass (post-#93 refactor)",
+      "file": "src/**/*.rs (modules from #93)",
+      "dep": [2, 4],
+      "status": "pending"
+    }
+  ]
 }

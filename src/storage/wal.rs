@@ -72,7 +72,7 @@ impl WriteAheadLog {
         writer.flush()?;
         writer.get_ref().sync_all()?;
 
-        debug!("WAL persisted: key={}, ts={}", record.key, record.timestamp);
+        debug!("WAL persisted: key={:?}, ts={}", record.key, record.timestamp);
         Ok(())
     }
 
