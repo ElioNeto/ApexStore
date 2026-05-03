@@ -70,7 +70,7 @@ impl<I: StorageIterator> MergeIterator<I> {
                 if key == *cur {
                     // Same key as current, but from an older iterator (higher index)
                     // Pop it, advance it, and re-push if valid.
-                    let mut entry = self.heap.pop().unwrap();
+                    let mut entry = self.heap.pop().expect("Heap has top element per peek()");
                     entry.iter.next();
                     if entry.iter.is_valid() {
                         self.heap.push(entry);
@@ -99,11 +99,11 @@ impl<I: StorageIterator> StorageIterator for MergeIterator<I> {
     }
 
     fn key(&self) -> Self::KeyType {
-        self.heap.peek().unwrap().iter.key().as_ref().to_vec()
+        self.heap.peek().expect("MergeIterator is invalid when calling key()").iter.key().as_ref().to_vec()
     }
 
     fn value(&self) -> &[u8] {
-        self.heap.peek().unwrap().iter.value()
+        self.heap.peek().expect("MergeIterator is invalid when calling value()").iter.value()
     }
 
     fn is_valid(&self) -> bool {

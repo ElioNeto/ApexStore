@@ -115,7 +115,7 @@ mod tests {
         memtable.insert(LogRecord::new(b"key2".to_vec(), b"value2".to_vec()));
         memtable.insert(LogRecord::new(b"key3".to_vec(), b"value3".to_vec()));
 
-        let mut iter = memtable.iter_from("key2");
+        let mut iter = memtable.iter_from(b"key2");
         assert!(iter.is_valid());
         assert_eq!(iter.key().as_slice(), b"key2");
 

@@ -111,7 +111,7 @@ npm run dev
 
 - **Commits**: Conventional Commits (`feat`, `fix`, `chore`, `docs`, `refactor`)
 - **Branches**: `feat/<slug>`, `fix/<slug>`, `chore/<slug>`
-- **Naming**: camelCase para variáveis/funções, PascalCase para classes/tipos
+- **Naming**: snake_case para variáveis/funções, PascalCase para tipos/structs/enums
 - **Testes**: arquivos `*.test.ts` ao lado do módulo testado
 - **Estrutura de pastas**: descreva aqui
 

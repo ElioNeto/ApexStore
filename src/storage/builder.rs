@@ -161,8 +161,8 @@ impl SstableBuilder {
         let meta_block = MetaBlock {
             blocks: self.block_metas,
             bloom_filter_data: bloom_bytes,
-            min_key: self.first_key.unwrap(),
-            max_key: self.last_key.unwrap(),
+            min_key: self.first_key.ok_or_else(|| LsmError::InvalidSstableFormat("No records in SSTable, cannot determine min key".to_string()))?,
+            max_key: self.last_key.ok_or_else(|| LsmError::InvalidSstableFormat("No records in SSTable, cannot determine max key".to_string()))?,
             record_count: self.record_count,
             timestamp: self.timestamp,
         };

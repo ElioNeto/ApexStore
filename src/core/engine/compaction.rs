@@ -37,6 +37,83 @@ pub trait CompactionStrategy: Send + Sync {
     fn name(&self) -> &'static str;
 }
 
+/// Shared helper for compaction execution logic
+fn execute_compaction(
+    tables: &[Table],
+    storage_config: &StorageConfig,
+    output_dir: &PathBuf,
+    output_prefix: &str,
+    level: Option<usize>,
+) -> Result<(Vec<Table>, CompactionMetrics)> {
+    let start_time = SystemTime::now();
+    let mut metrics = CompactionMetrics::default();
+    metrics.files_merged = tables.len();
+
+    if tables.is_empty() {
+        return Ok((Vec::new(), metrics));
+    }
+
+    // Calculate bytes read
+    for table in tables {
+        metrics.bytes_read += table.size() as u64;
+    }
+
+    // Merge tables using MergeIterator
+    let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
+    for table in tables {
+        iters.push(Box::new(table.iter()));
+    }
+
+    let mut merge_iter = MergeIterator::new(iters);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)?
+        .as_nanos();
+
+    // Create output SSTable
+    let output_path = output_dir.join(format!("{}_{}.sst", output_prefix, timestamp));
+    let mut builder = SstableBuilder::new(output_path.clone(), storage_config.clone(), timestamp)?;
+
+    let mut record_count = 0u64;
+    while merge_iter.is_valid() {
+        let key = merge_iter.key();
+        let value = merge_iter.value();
+
+        // Skip tombstones (empty values) during compaction
+        if !value.is_empty() {
+            let key_vec: Vec<u8> = key.as_slice().to_vec();
+            let record = LogRecord::new(key_vec, value.to_vec());
+            builder.add(key.as_ref(), &record)?;
+            record_count += 1;
+        }
+
+        merge_iter.next();
+    }
+
+    if record_count == 0 {
+        // All data was tombstones, no output
+        return Ok((Vec::new(), metrics));
+    }
+
+    let result_path = builder.finish()?;
+    metrics.bytes_written = std::fs::metadata(&result_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    // Create new Table from the SSTable
+    let mut new_table = Table::from_sstable_path(&result_path)?;
+    if let Some(lvl) = level {
+        new_table.level = lvl;
+    }
+
+    // Update duration
+    metrics.duration_ms = SystemTime::now()
+        .duration_since(start_time)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    Ok((vec![new_table], metrics))
+}
+
 /// Size-Tiered Compaction Strategy
 ///
 /// Groups tables by size into buckets. When a bucket reaches a threshold,
@@ -108,72 +185,7 @@ impl CompactionStrategy for SizeTieredCompaction {
         storage_config: &StorageConfig,
         output_dir: &PathBuf,
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
-        let start_time = SystemTime::now();
-        let mut metrics = CompactionMetrics::default();
-        metrics.files_merged = tables.len();
-
-        if tables.is_empty() {
-            return Ok((Vec::new(), metrics));
-        }
-
-        // Calculate bytes read
-        for table in &tables {
-            metrics.bytes_read += Self::get_table_size(table) as u64;
-        }
-
-        // Merge tables using MergeIterator
-        let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
-        for table in &tables {
-            iters.push(Box::new(table.iter()));
-        }
-
-        let mut merge_iter = MergeIterator::new(iters);
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-
-        // Create output SSTable
-        let output_path = output_dir.join(format!("sst_{}.sst", timestamp));
-        let mut builder = SstableBuilder::new(output_path.clone(), storage_config.clone(), timestamp)?;
-
-        let mut record_count = 0u64;
-        while merge_iter.is_valid() {
-            let key = merge_iter.key();
-            let value = merge_iter.value();
-
-            // Skip tombstones (empty values) during compaction
-            if !value.is_empty() {
-                let key_vec: Vec<u8> = key.as_slice().to_vec();
-                let record = LogRecord::new(key_vec, value.to_vec());
-                builder.add(key.as_ref(), &record)?;
-                record_count += 1;
-            }
-
-            merge_iter.next();
-        }
-
-        if record_count == 0 {
-            // All data was tombstones, no output
-            return Ok((Vec::new(), metrics));
-        }
-
-        let result_path = builder.finish()?;
-        metrics.bytes_written = std::fs::metadata(&result_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
-
-        // Create new Table from the SSTable
-        // For now, we'll read it back - in production this would be more efficient
-        let new_table = Table::from_sstable_path(&result_path)?;
-
-        // Update duration
-        metrics.duration_ms = SystemTime::now()
-            .duration_since(start_time)
-            .unwrap_or_default()
-            .as_millis() as u64;
-
-        Ok((vec![new_table], metrics))
+        execute_compaction(&tables, storage_config, output_dir, "sst", None)
     }
 
     fn name(&self) -> &'static str {
@@ -242,71 +254,7 @@ impl CompactionStrategy for LeveledCompaction {
         storage_config: &StorageConfig,
         output_dir: &PathBuf,
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
-        let start_time = SystemTime::now();
-        let mut metrics = CompactionMetrics::default();
-        metrics.files_merged = tables.len();
-
-        if tables.is_empty() {
-            return Ok((Vec::new(), metrics));
-        }
-
-        // Calculate bytes read
-        for table in &tables {
-            metrics.bytes_read += Self::get_table_size(table) as u64;
-        }
-
-        // Merge tables using MergeIterator
-        let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
-        for table in &tables {
-            iters.push(Box::new(table.iter()));
-        }
-
-        let mut merge_iter = MergeIterator::new(iters);
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-
-        // Create output SSTable at L1 (or next level)
-        let output_path = output_dir.join(format!("sst_L1_{}.sst", timestamp));
-        let mut builder = SstableBuilder::new(output_path.clone(), storage_config.clone(), timestamp)?;
-
-        let mut record_count = 0u64;
-        while merge_iter.is_valid() {
-            let key = merge_iter.key();
-            let value = merge_iter.value();
-
-            // Skip tombstones during compaction
-            if !value.is_empty() {
-                let key_vec: Vec<u8> = key.as_slice().to_vec();
-                let record = LogRecord::new(key_vec, value.to_vec());
-                builder.add(key.as_ref(), &record)?;
-                record_count += 1;
-            }
-
-            merge_iter.next();
-        }
-
-        if record_count == 0 {
-            return Ok((Vec::new(), metrics));
-        }
-
-        let result_path = builder.finish()?;
-        metrics.bytes_written = std::fs::metadata(&result_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
-
-        // Create new Table from the SSTable at level 1
-        let mut new_table = Table::from_sstable_path(&result_path)?;
-        new_table.level = 1; // Promote to L1
-
-        // Update duration
-        metrics.duration_ms = SystemTime::now()
-            .duration_since(start_time)
-            .unwrap_or_default()
-            .as_millis() as u64;
-
-        Ok((vec![new_table], metrics))
+        execute_compaction(&tables, storage_config, output_dir, "sst_L1", Some(1))
     }
 
     fn name(&self) -> &'static str {
@@ -538,7 +486,7 @@ impl Compaction {
             .collect();
 
         self.strategy
-            .execute(&tables, options, &self.storage_config, &self.output_dir)
+            .execute(tables, options, &self.storage_config, &self.output_dir)
     }
 
     /// Get the strategy name

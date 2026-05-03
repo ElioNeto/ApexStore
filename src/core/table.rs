@@ -75,10 +75,16 @@ impl<'a> crate::core::iterators::StorageIterator for TableIterator<'a> {
         self.current = self.inner.next();
     }
     fn key(&self) -> Self::KeyType {
-        crate::core::key::KeySlice::new(self.current.unwrap().0.as_slice())
+        match self.current {
+            Some((k, _)) => crate::core::key::KeySlice::new(k.as_slice()),
+            None => panic!("current must be Some when key() is called"),
+        }
     }
     fn value(&self) -> &[u8] {
-        self.current.unwrap().1.as_slice()
+        match self.current {
+            Some((_, v)) => v.as_slice(),
+            None => panic!("current must be Some when value() is called"),
+        }
     }
     fn is_valid(&self) -> bool {
         self.current.is_some()

@@ -12,28 +12,28 @@
       "title": "Execute `cargo clippy -- -D warnings` and fix all lint errors/warnings",
       "file": "src/**/*.rs",
       "dep": [1],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 3,
       "title": "Audit production code for `unwrap()` usage, replace with proper error handling (exclude tests/benchmarks)",
       "file": "src/**/*.rs (non-test/benchmark)",
       "dep": [2],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 4,
       "title": "Execute `cargo test --all-features` and fix all failing unit, integration, and benchmark tests",
       "file": "src/**/*.rs, tests/**/*.rs, benches/**/*.rs",
       "dep": [1],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 5,
       "title": "Verify crash recovery tests (WAL truncation, SSTable corruption) pass",
       "file": "tests/**/*.rs",
       "dep": [4],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": 6,

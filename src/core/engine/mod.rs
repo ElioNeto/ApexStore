@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use self::compaction::{Compaction, CompactionMetrics, CompactionOptions, CompactionStrategyType};
+use self::compaction::{Compaction, CompactionMetrics, CompactionOptions, CompactionStrategy, CompactionStrategyType};
 use self::manifest::Manifest;
 use self::version_set::VersionSet;
 use crate::core::iterators::{MergeIterator, StorageIterator};
@@ -93,8 +93,6 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             max_write_buffer_number: 4, // default
             compaction_options,
         }
-    }
-}
     }
 }
 
@@ -179,10 +177,16 @@ impl<'a> StorageIterator for InternalMemTableIterator<'a> {
         self.current = self.inner.next();
     }
     fn key(&self) -> Self::KeyType {
-        KeySlice::new(self.current.unwrap().0.as_slice())
+        match self.current {
+            Some((k, _)) => KeySlice::new(k.as_slice()),
+            None => panic!("InternalMemTableIterator is invalid when calling key()"),
+        }
     }
     fn value(&self) -> &[u8] {
-        self.current.unwrap().1.as_slice()
+        match self.current {
+            Some((_, v)) => v.as_slice(),
+            None => panic!("InternalMemTableIterator is invalid when calling value()"),
+        }
     }
     fn is_valid(&self) -> bool {
         self.current.is_some()
@@ -328,7 +332,7 @@ impl<C: Cache> Engine<C> {
 
     fn replay_wal_records(&mut self, records: Vec<LogRecord>) -> Result<()> {
         for record in records {
-            let cf = "default"; // TODO: support column families in WAL records
+            let cf = "default";
             let mem = self.memtables.entry(cf.to_string()).or_default();
             if mem.is_empty() {
                 mem.push(MemTable::new());
@@ -566,7 +570,10 @@ impl<C: Cache> Engine<C> {
 
         let results = self.scan_cf("default", l_bytes.as_deref(), u_bytes, Some(limit))?;
         let next_cursor = if results.len() >= limit && !results.is_empty() {
-            Some(String::from_utf8_lossy(&results.last().unwrap().0).to_string())
+            match results.last() {
+                Some(last) => Some(String::from_utf8_lossy(&last.0).to_string()),
+                None => None,
+            }
         } else {
             None
         };
@@ -676,14 +683,6 @@ impl<C: Cache> Engine<C> {
         Ok(results)
     }
 
-    pub fn search(&self, _query: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
-        Vec::new()
-    }
-
-    pub fn search_prefix_legacy(&self, _prefix: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
-        Vec::new()
-    }
-
     pub fn flush_memtable(&mut self) -> crate::infra::error::Result<()> {
         self.flush_memtable_impl("default")?;
         Ok(())
@@ -694,7 +693,10 @@ impl<C: Cache> Engine<C> {
             if let Some(mem) = memtables.pop() {
                 let table = Table::build(mem.data.into_iter().collect(), &self.options);
                 self.version_set.add_table(cf, table);
-                *self.memtable_bytes.get_mut(cf).unwrap() = 0;
+                let bytes = self.memtable_bytes.get_mut(cf).ok_or_else(|| {
+                    crate::infra::error::Error::msg(format!("Column family {} not found in memtable_bytes", cf))
+                })?;
+                *bytes = 0;
 
                 // ✅ FIX issue #105: acionar compactação se SSTable count exceder threshold
                 let threshold = self.options.compaction_options.compaction_threshold;
@@ -804,6 +806,7 @@ impl<C: Cache> Engine<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn test_prefix_end_basic() {
@@ -856,13 +859,14 @@ mod tests {
 
     #[test]
     fn test_search_prefix_non_ascii() {
-        // This test verifies that search_prefix works with non-ASCII prefixes
-        // We'll create a simple in-memory test
         use crate::infra::config::LsmConfig;
+        use tempfile::tempdir;
         
-        // Create a simple engine for testing
-        // Note: This is a basic test - in a real scenario, we'd need proper initialization
-        let config = LsmConfig::default();
+        // Create temp directory for engine storage
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+        
         let mut engine = Engine::new(config).unwrap();
         
         // Insert some non-ASCII key-value pairs
@@ -889,10 +893,14 @@ mod tests {
 
     #[test]
     fn test_search_prefix_unicode_chars() {
-        // Test with various Unicode characters
         use crate::infra::config::LsmConfig;
+        use tempfile::tempdir;
         
-        let config = LsmConfig::default();
+        // Create temp directory for engine storage
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+        
         let mut engine = Engine::new(config).unwrap();
         
         // Insert keys with Unicode prefixes
@@ -949,7 +957,8 @@ mod tests {
 
         // Execute compaction
         let storage_config = crate::infra::config::StorageConfig::default();
-        let output_dir = std::path::PathBuf::from("/tmp/test_sst");
+        let dir = tempdir().unwrap();
+        let output_dir = dir.path().to_path_buf();
         let (new_tables, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
 
         assert!(!new_tables.is_empty(), "Should produce at least one new table");
@@ -987,7 +996,8 @@ mod tests {
         
         // Execute compaction
         let storage_config = crate::infra::config::StorageConfig::default();
-        let output_dir = std::path::PathBuf::from("/tmp/test_sst_leveled");
+        let dir = tempdir().unwrap();
+        let output_dir = dir.path().to_path_buf();
         let (new_tables, _metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
 
         assert!(!new_tables.is_empty(), "Should produce at least one new table");
@@ -1027,7 +1037,8 @@ mod tests {
 
         // Execute compaction
         let storage_config = crate::infra::config::StorageConfig::default();
-        let output_dir = std::path::PathBuf::from("/tmp/test_sst_lazy");
+        let dir = tempdir().unwrap();
+        let output_dir = dir.path().to_path_buf();
         let (new_tables, _) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
 
         assert!(!new_tables.is_empty(), "Should produce at least one new table");
@@ -1061,7 +1072,8 @@ mod tests {
         let table = Table::build(data, &options);
         
         let storage_config = crate::infra::config::StorageConfig::default();
-        let output_dir = std::path::PathBuf::from("/tmp/test_tombstone");
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().to_path_buf();
         let (new_tables, _) = strategy.execute(vec![table], &options, &storage_config, &output_dir).unwrap();
 
         // The new table should not contain tombstones
@@ -1095,7 +1107,8 @@ mod tests {
         }
 
         let storage_config = crate::infra::config::StorageConfig::default();
-        let output_dir = std::path::PathBuf::from("/tmp/test_metrics");
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().to_path_buf();
         let (_, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
 
         assert!(metrics.bytes_read > 0, "Should track bytes read");
@@ -1189,7 +1202,8 @@ mod tests {
         }
 
         let storage_config = crate::infra::config::StorageConfig::default();
-        let output_dir = std::path::PathBuf::from("/tmp/test_amp");
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().to_path_buf();
         let (new_tables, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
 
         // Write amplification = bytes_written / bytes_read
@@ -1230,7 +1244,8 @@ mod tests {
 
         // Run multiple compaction rounds
         let storage_config = crate::infra::config::StorageConfig::default();
-        let output_dir = std::path::PathBuf::from("/tmp/test_1000keys");
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().to_path_buf();
         
         let mut total_compactions = 0;
         while all_tables.len() >= 2 {
