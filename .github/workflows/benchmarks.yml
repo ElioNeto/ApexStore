@@ -66,16 +66,13 @@ jobs:
           DATE=$(date -u '+%Y-%m-%d %H:%M UTC')
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          # Guard: abort gracefully if bench_output.txt is missing or empty
           if [ ! -s bench_output.txt ]; then
-            echo "⚠️  bench_output.txt ausente ou vazio — o benchmark pode ter travado ou falhado."
             {
               echo "<!-- BENCHMARK_RESULTS_START -->"
-              echo "> ⚠️ CI em **${DATE}** — benchmark não produziu resultados. [Ver run](${RUN_URL})"
+              echo "> \u26a0\ufe0f CI on **${DATE}** \u2014 benchmark produced no results. [View run](${RUN_URL})"
               echo ""
               echo "<!-- BENCHMARK_RESULTS_END -->"
             } > bench_block.txt
-
             perl -i -0pe '
               my $block = do { open my $f, "bench_block.txt" or die; local $/; <$f> };
               s|<!-- BENCHMARK_RESULTS_START -->.*?<!-- BENCHMARK_RESULTS_END -->|$block|gs;
@@ -83,56 +80,128 @@ jobs:
             exit 0
           fi
 
-          # Parse using Perl: handles multi-line Criterion output correctly.
-          # Criterion format:
-          #   Line 1 (name line):   "bench_name/param        time:   [low median high]"
-          #   OR split across two lines:
-          #   Line 1: "bench_name/param"
-          #   Line 2: "                        time:   [low median high]"
-          # Strategy: collect name from lines that look like bench names (no leading space,
-          # contain word chars + optional /param), then extract median from the time: [...] line.
-          ROWS=$(perl -ne '
-            # Match standalone benchmark name line (no leading whitespace, ends with word/number)
-            if (/^([a-zA-Z]\S+(?:\/\S+)?)\s*$/) {
-              $name = $1;
-            }
-            # Match inline: "bench_name/param   time:   [low median high]"
-            elsif (/^([a-zA-Z]\S+(?:\/\S+)?)\s+time:\s+\[([^\]]+)\]/) {
-              $name = $1;
-              my @vals = split(/\s+/, $2);
-              # median is index 2 (0=low_val, 1=low_unit, 2=med_val, 3=med_unit)
-              my $median = "$vals[2] $vals[3]";
-              $median =~ s/^\s+|\s+$//g;
-              print "| `$name` | $median |\n";
-              $name = "";
-            }
-            # Match timing on its own line (after name was set)
-            elsif ($name && /^\s+time:\s+\[([^\]]+)\]/) {
-              my @vals = split(/\s+/, $1);
-              my $median = "$vals[2] $vals[3]";
-              $median =~ s/^\s+|\s+$//g;
-              print "| `$name` | $median |\n";
-              $name = "";
-            }
-          ' bench_output.txt)
+          python3 - <<'PYEOF'
+import re, sys
 
-          # Build the full block
+# ---------------------------------------------------------------------------
+# 1. Parse bench_output.txt  (Criterion format)
+# ---------------------------------------------------------------------------
+results = []  # list of (name, median_str)
+name = None
+with open("bench_output.txt") as f:
+    for line in f:
+        # Standalone name line (no leading whitespace)
+        m = re.match(r'^([A-Za-z]\S+(?:/\S+)?)\s*$', line)
+        if m:
+            name = m.group(1)
+            continue
+        # time: [low median high]  — inline or indented
+        m = re.search(r'time:\s+\[([^\]]+)\]', line)
+        if m:
+            if not name:
+                nm = re.match(r'^([A-Za-z]\S+(?:/\S+)?)\s+time:', line)
+                if nm:
+                    name = nm.group(1)
+            if name:
+                parts = m.group(1).split()
+                # parts: [low_val, low_unit, med_val, med_unit, high_val, high_unit]
+                median = f"{parts[2]}\u202f{parts[3]}" if len(parts) >= 4 else parts[0]
+                results.append((name, median))
+            name = None
+
+# ---------------------------------------------------------------------------
+# 2. Categorise by benchmark name prefix
+# ---------------------------------------------------------------------------
+CATEGORIES = [
+    ("\ud83d\udcdd Write",          ["write_single", "write_batch", "write_size", "write_heavy",
+                               "memtable_flush", "sstable_flush", "key_updates",
+                               "delete_operations"]),
+    ("\ud83d\udcda Read",           ["read_memtable", "read_sstable", "read_latency"]),
+    ("\ud83d\udd0d Scan",           ["scan_sequential", "full_scan", "scan_limit", "scan_pagination",
+                               "range_scan", "prefix_scan", "iteration_sorted"]),
+    ("\ud83c\udf10 YCSB",           ["ycsb_type"]),
+    ("\u26a1 Mixed Workload",  ["workload_balanced", "workload_read_heavy", "workload_write_heavy"]),
+    ("\ud83c\udfd7\ufe0f  SSTable",        ["sstable_layer", "many_sstables"]),
+    ("\ud83e\uddf5 Bloom Filter",  ["bloom_filter"]),
+    ("\ud83d\udcbe Cache",          ["cache_thrash"]),
+    ("\ud83e\uddf5 Concurrency",   ["concurrent"]),
+    ("\ud83d� Memory",        ["memory_pressure"]),
+]
+
+def categorise(name):
+    lower = name.lower()
+    for label, prefixes in CATEGORIES:
+        if any(lower.startswith(p) for p in prefixes):
+            return label
+    return "\u2699\ufe0f Other"
+
+# ---------------------------------------------------------------------------
+# 3. Convert median string to nanoseconds for tier colouring
+# ---------------------------------------------------------------------------
+UNIT_NS = {
+    "ns": 1, "\u00b5s": 1_000, "us": 1_000,
+    "ms": 1_000_000, "s": 1_000_000_000,
+}
+
+def to_ns(median):
+    m = re.match(r'([\d.]+)\s*(\S+)', median)
+    if not m:
+        return None
+    val, unit = float(m.group(1)), m.group(2).strip()
+    return val * UNIT_NS.get(unit, 1)
+
+def tier(median):
+    ns = to_ns(median)
+    if ns is None:
+        return ""
+    if ns < 10_000:        return "\ud83d\udfe2"   # < 10 \u00b5s  \u2014 green
+    if ns < 1_000_000:     return "\ud83d\udfe1"   # < 1 ms   \u2014 yellow
+    if ns < 100_000_000:   return "\ud83d\udfe0"   # < 100 ms \u2014 orange
+    return "\ud83d\udd34"                           # >= 100 ms \u2014 red
+
+# ---------------------------------------------------------------------------
+# 4. Group results
+# ---------------------------------------------------------------------------
+from collections import defaultdict
+groups = defaultdict(list)
+for name, median in results:
+    groups[categorise(name)].append((name, median))
+
+# ---------------------------------------------------------------------------
+# 5. Build Markdown block
+# ---------------------------------------------------------------------------
+lines = []
+cat_order = [label for label, _ in CATEGORIES] + ["\u2699\ufe0f Other"]
+for cat in cat_order:
+    if cat not in groups:
+        continue
+    lines.append(f"")
+    lines.append(f"**{cat}**")
+    lines.append("")
+    lines.append("| Benchmark | Median | Perf |")
+    lines.append("|-----------|--------|------|")  
+    for bname, median in groups[cat]:
+        lines.append(f"| `{bname}` | {median} | {tier(median)} |")
+
+with open("bench_table.txt", "w") as f:
+    f.write("\n".join(lines))
+PYEOF
+
+          TABLE=$(cat bench_table.txt)
+
           {
             echo "<!-- BENCHMARK_RESULTS_START -->"
-            echo "> 🤖 Auto-updated by CI on **${DATE}** — [View run](${RUN_URL})"
+            echo "> \ud83e\udd16 Auto-updated by CI on **${DATE}** \u2014 [View run](${RUN_URL})"
             echo ""
-            if [ -n "$ROWS" ]; then
-              echo "| Benchmark | Mediana |"
-              echo "|-----------|--------|"
-              echo "$ROWS"
+            if [ -n "$TABLE" ]; then
+              echo "$TABLE"
             else
-              echo "*Nenhum resultado parseado — verifique os [artefatos do run](${RUN_URL}).*"
+              echo "*No results parsed \u2014 check the [run artifacts](${RUN_URL}).*"
             fi
             echo ""
             echo "<!-- BENCHMARK_RESULTS_END -->"
           } > bench_block.txt
 
-          # Inject block into README between markers
           perl -i -0pe '
             my $block = do { open my $f, "bench_block.txt" or die; local $/; <$f> };
             s|<!-- BENCHMARK_RESULTS_START -->.*?<!-- BENCHMARK_RESULTS_END -->|$block|gs;
