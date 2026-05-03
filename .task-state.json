@@ -1,47 +1,59 @@
 {
-  "task": "Resolve open issues recursively by priority and dependencies: #108 (high, CRC32), #107 (high, WAL crash window), #92 (medium, LsmError cleanup), #109 (medium, search_prefix non-ASCII), #93 (medium, encapsulate Engine), #47 (medium, compaction strategies)",
-  "todos": [
+  "issues": [
     {
-      "id": "todo-108",
-      "title": "Fix CRC32 corruption test - add CRC32 validation to SSTable blocks",
-      "required": true,
-      "files": ["src/storage/builder.rs", "src/storage/reader.rs", "src/storage/wal.rs"],
-      "evidence": ["crc32fast::Hasher", "write_all(&crc32.to_le_bytes())", "LsmError::CorruptedData"]
+      "number": 93,
+      "priority": "medium",
+      "title": "[REFACTOR] Encapsulate LsmEngine internals — remove pub(crate) field exposure",
+      "status": "open",
+      "depends_on": [],
+      "blocks": [47],
+      "acceptance_summary": [
+        "Todos os modificadores `pub(crate)` removidos dos campos de `LsmEngine`",
+        "Acessores `pub(crate) fn config(&self) -> &LsmConfig` e similares adicionados onde necessário",
+        "Todos os erros de compilação originados do acesso direto a campos corrigidos",
+        "`tests/` e `examples/` continuam compilando via API pública apenas",
+        "Lint e testes do módulo passam"
+      ],
+      "fetched_body": false
     },
     {
-      "id": "todo-107",
-      "title": "Fix WAL clear() crash window - integrate WAL into Engine",
-      "required": true,
-      "files": ["src/core/engine/mod.rs", "src/core/log_record.rs"],
-      "evidence": ["wal: WriteAheadLog", "self.wal.write_record()", "self.wal.clear()", "replay_wal_records"]
+      "number": 92,
+      "priority": "medium",
+      "title": "[REFACTOR] Clean up duplicate/redundant variants in LsmError enum",
+      "status": "open",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "`KeyNotFound` e `NotFound` consolidados em uma única variante `NotFound(String)` com a chave para debug",
+        "`SerializationFailed` e `DeserializationFailed` removidos; `CorruptedData` usado para casos manuais",
+        "Todos os match arms em `engine.rs`, `api/mod.rs`, `cli/` e `tests/` atualizados",
+        "Nenhum conflito de impl `From` após remoção das variantes duplicadas",
+        "Lint e testes do módulo passam"
+      ],
+      "fetched_body": false
     },
     {
-      "id": "todo-92",
-      "title": "Clean up duplicate LsmError variants",
-      "required": true,
-      "files": ["src/infra/error.rs"],
-      "evidence": ["NotFound(String)", "JsonError", "CorruptedData"]
-    },
-    {
-      "id": "todo-109",
-      "title": "Fix search_prefix for non-ASCII keys",
-      "required": true,
-      "files": ["src/core/engine/mod.rs"],
-      "evidence": ["prefix_end()", "scan_cf with upper bound", "test_prefix_end_non_ascii"]
-    },
-    {
-      "id": "todo-93",
-      "title": "Encapsulate LsmEngine internals - remove pub(crate) fields",
-      "required": true,
-      "files": ["src/core/engine/mod.rs"],
-      "evidence": ["options:", "version_set:", "memtables:", "compaction:", "wal:"]
-    },
-    {
-      "id": "todo-47",
-      "title": "Implement Compaction Strategies (Leveled, Tiered, Size-Tiered)",
-      "required": true,
-      "files": ["src/core/engine/compaction.rs", "src/core/engine/mod.rs", "src/core/engine/version_set.rs", "src/core/table.rs"],
-      "evidence": ["CompactionStrategy trait", "SizeTieredCompaction", "LeveledCompaction", "LazyLevelingCompaction", "atomic_replace"]
+      "number": 47,
+      "priority": "medium",
+      "title": "[FEATURE] Implement Compaction Strategies (Leveled, Tiered, Size-Tiered)",
+      "status": "open",
+      "depends_on": [93, 107],
+      "blocks": [],
+      "acceptance_summary": [
+        "Trait `CompactionStrategy` definida com interface para `SizeTiered`, `Leveled` e `LazyLeveling`",
+        "`CompactionExecutor` usa `MergeIterator` para mesclar SSTables e escreve novo SSTable atomicamente",
+        "Background scheduler dispara compaction quando threshold de L0 ou tamanho de nível é atingido",
+        "Tombstones são removidos durante compaction",
+        "Substituição de SSTables é atômica (remove antigos, adiciona novo sem janela de inconsistência)"
+      ],
+      "fetched_body": false
     }
-  ]
+  ],
+  "total": 3,
+  "by_priority": {
+    "critical": 0,
+    "high": 0,
+    "medium": 3,
+    "low": 0
+  }
 }

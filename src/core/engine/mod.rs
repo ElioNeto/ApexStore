@@ -56,7 +56,7 @@ pub struct EngineOptions {
     pub level_multiplier: usize,
     pub write_buffer_size: usize,
     pub max_write_buffer_number: usize,
-    pub compaction_options: Compaction,
+    pub compaction_options: CompactionOptions,
 }
 
 impl Default for EngineOptions {
@@ -70,17 +70,18 @@ impl Default for EngineOptions {
             level_multiplier: 4,
             write_buffer_size: 64 * 1024,
             max_write_buffer_number: 4,
-            compaction_options: Compaction::default(),
+            compaction_options: CompactionOptions::default(),
         }
     }
 }
 
 impl From<&crate::infra::config::LsmConfig> for EngineOptions {
     fn from(config: &crate::infra::config::LsmConfig) -> Self {
-        // Create Compaction from config
-        let compaction_options = Compaction {
-            max_tables_per_compaction: config.compaction.max_sstables,
+        // Create CompactionOptions from config
+        let compaction_options = CompactionOptions {
+            strategy_type: config.compaction.strategy.into(),
             compaction_threshold: config.compaction.min_compaction_threshold,
+            max_tables_per_compaction: config.compaction.max_sstables,
         };
         
         Self {
@@ -96,6 +97,7 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
         }
     }
 }
+
 
 impl EngineOptions {
     /// Create EngineOptions from LsmConfig
@@ -194,6 +196,80 @@ impl<'a> StorageIterator for InternalMemTableIterator<'a> {
 }
 
 impl<C: Cache> Engine<C> {
+    // ========== pub(crate) accessors for internal crate use ==========
+    
+    /// Returns the engine options.
+    pub(crate) fn options(&self) -> &EngineOptions {
+        &self.options
+    }
+    
+    /// Returns the version set.
+    pub(crate) fn version_set(&self) -> &VersionSet<C> {
+        &self.version_set
+    }
+    
+    /// Returns mutable reference to version set.
+    pub(crate) fn version_set_mut(&mut self) -> &mut VersionSet<C> {
+        &mut self.version_set
+    }
+    
+    /// Returns the memtables map.
+    pub(crate) fn memtables(&self) -> &std::collections::HashMap<String, Vec<MemTable>> {
+        &self.memtables
+    }
+    
+    /// Returns mutable reference to memtables map.
+    pub(crate) fn memtables_mut(&mut self) -> &mut std::collections::HashMap<String, Vec<MemTable>> {
+        &mut self.memtables
+    }
+    
+    /// Returns the write buffer limit.
+    pub(crate) fn write_buffer_limit(&self) -> usize {
+        self.write_buffer_limit
+    }
+    
+    /// Returns the memtable bytes map.
+    pub(crate) fn memtable_bytes(&self) -> &std::collections::HashMap<String, usize> {
+        &self.memtable_bytes
+    }
+    
+    /// Returns mutable reference to memtable bytes map.
+    pub(crate) fn memtable_bytes_mut(&mut self) -> &mut std::collections::HashMap<String, usize> {
+        &mut self.memtable_bytes
+    }
+    
+    /// Returns the compaction strategy.
+    pub(crate) fn compaction(&self) -> &Compaction {
+        &self.compaction
+    }
+    
+    /// Returns mutable reference to compaction strategy.
+    pub(crate) fn compaction_mut(&mut self) -> &mut Compaction {
+        &mut self.compaction
+    }
+    
+    /// Returns the WAL.
+    pub(crate) fn wal(&self) -> &WriteAheadLog {
+        &self.wal
+    }
+    
+    /// Returns mutable reference to WAL.
+    pub(crate) fn wal_mut(&mut self) -> &mut WriteAheadLog {
+        &mut self.wal
+    }
+    
+    /// Returns the compaction running flag.
+    pub(crate) fn compaction_running(&self) -> &Arc<AtomicBool> {
+        &self.compaction_running
+    }
+    
+    /// Returns the SSTable directory path.
+    pub(crate) fn sst_dir(&self) -> &PathBuf {
+        &self.sst_dir
+    }
+    
+    // ========== End accessors ==========
+    
     pub fn new_generic(options: EngineOptions, cache: C, dir_path: &std::path::Path) -> Result<Self> {
         let wal = WriteAheadLog::new(dir_path)?;
         
@@ -204,15 +280,15 @@ impl<C: Cache> Engine<C> {
         let sst_dir = dir_path.join("sstables");
         std::fs::create_dir_all(&sst_dir)?;
         
-        // Create storage config from options
-        let storage_config = crate::storage::config::StorageConfig {
+        // Create storage config from options (using infra::config::StorageConfig)
+        let storage_config = crate::infra::config::StorageConfig {
             block_size: options.block_size,
+            block_cache_size_mb: 64, // default
             sparse_index_interval: 16, // default
             bloom_false_positive_rate: 0.01, // default
         };
         
         // Create compaction with strategy from options
-        // Map the old Compaction struct to new CompactionOptions
         let strategy_type = if options.compaction_options.compaction_threshold <= 4 {
             CompactionStrategyType::SizeTiered
         } else {
@@ -283,7 +359,6 @@ impl<C: Cache> Engine<C> {
         
         Ok(engine)
     }
-}
     
     /// Replay WAL records into the memtable
     fn replay_wal_records(&mut self, records: Vec<LogRecord>) -> Result<()> {

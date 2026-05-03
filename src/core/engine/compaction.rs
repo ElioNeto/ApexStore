@@ -1,11 +1,11 @@
 use crate::core::engine::EngineOptions;
 use crate::core::iterators::{MergeIterator, StorageIterator};
 use crate::core::key::KeySlice;
+use crate::core::log_record::LogRecord;
 use crate::core::table::Table;
+use crate::infra::config::StorageConfig;
 use crate::infra::error::{LsmError, Result};
 use crate::storage::builder::SstableBuilder;
-use crate::storage::config::StorageConfig;
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -104,7 +104,7 @@ impl CompactionStrategy for SizeTieredCompaction {
     fn execute(
         &self,
         tables: Vec<Table>,
-        options: &EngineOptions,
+        _options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &PathBuf,
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
@@ -144,8 +144,8 @@ impl CompactionStrategy for SizeTieredCompaction {
 
             // Skip tombstones (empty values) during compaction
             if !value.is_empty() {
-                use crate::core::log_record::LogRecord;
-                let record = LogRecord::new(key.as_ref().to_vec(), value.to_vec());
+                let key_vec: Vec<u8> = key.as_ref().to_vec();
+                let record = LogRecord::new(key_vec, value.to_vec());
                 builder.add(key.as_ref(), &record)?;
                 record_count += 1;
             }
@@ -218,7 +218,7 @@ impl LeveledCompaction {
 }
 
 impl CompactionStrategy for LeveledCompaction {
-    fn pick_tables(&self, tables: &[Table], options: &EngineOptions) -> Vec<Vec<usize>> {
+    fn pick_tables(&self, tables: &[Table], _options: &EngineOptions) -> Vec<Vec<usize>> {
         // Simplified: pick L0 tables that exceed threshold
         let l0_tables: Vec<usize> = tables
             .iter()
@@ -227,7 +227,8 @@ impl CompactionStrategy for LeveledCompaction {
             .map(|(i, _)| i)
             .collect();
 
-        if l0_tables.len() >= options.compaction_options.compaction_threshold {
+        // Use self.level_multiplier to determine threshold
+        if l0_tables.len() >= self.level_multiplier {
             vec![l0_tables]
         } else {
             Vec::new()
@@ -237,7 +238,7 @@ impl CompactionStrategy for LeveledCompaction {
     fn execute(
         &self,
         tables: Vec<Table>,
-        options: &EngineOptions,
+        _options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &PathBuf,
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
@@ -277,8 +278,8 @@ impl CompactionStrategy for LeveledCompaction {
 
             // Skip tombstones during compaction
             if !value.is_empty() {
-                use crate::core::log_record::LogRecord;
-                let record = LogRecord::new(key.as_ref().to_vec(), value.to_vec());
+                let key_vec: Vec<u8> = key.as_ref().to_vec();
+                let record = LogRecord::new(key_vec, value.to_vec());
                 builder.add(key.as_ref(), &record)?;
                 record_count += 1;
             }
@@ -332,7 +333,7 @@ impl Default for LazyLevelingCompaction {
 }
 
 impl CompactionStrategy for LazyLevelingCompaction {
-    fn pick_tables(&self, tables: &[Table], options: &EngineOptions) -> Vec<Vec<usize>> {
+    fn pick_tables(&self, tables: &[Table], _options: &EngineOptions) -> Vec<Vec<usize>> {
         // L0 uses size-tiered, lower levels use leveled
         let l0_tables: Vec<usize> = tables
             .iter()
@@ -364,14 +365,14 @@ impl CompactionStrategy for LazyLevelingCompaction {
                 .collect()
         } else {
             // Use leveled for lower levels
-            self.leveled.pick_tables(tables, options)
+            self.leveled.pick_tables(tables, _options)
         }
     }
 
     fn execute(
         &self,
         tables: Vec<Table>,
-        options: &EngineOptions,
+        _options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &PathBuf,
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
@@ -379,9 +380,9 @@ impl CompactionStrategy for LazyLevelingCompaction {
         let has_l0 = tables.iter().any(|t| t.level == 0);
         
         if has_l0 {
-            self.size_tiered.execute(tables, options, storage_config, output_dir)
+            self.size_tiered.execute(tables, _options, storage_config, output_dir)
         } else {
-            self.leveled.execute(tables, options, storage_config, output_dir)
+            self.leveled.execute(tables, _options, storage_config, output_dir)
         }
     }
 
@@ -445,6 +446,35 @@ pub struct Compaction {
     output_dir: PathBuf,
 }
 
+impl Clone for Compaction {
+    fn clone(&self) -> Self {
+        // Note: Cloning will use default strategy since we can't clone dyn trait objects
+        // In practice, Compaction is created via new() or from_config()
+        let strategy: Box<dyn CompactionStrategy> = match self.options.strategy_type {
+            CompactionStrategyType::SizeTiered => Box::new(SizeTieredCompaction::default()),
+            CompactionStrategyType::Leveled => Box::new(LeveledCompaction::default()),
+            CompactionStrategyType::LazyLeveling => Box::new(LazyLevelingCompaction::default()),
+        };
+        
+        Self {
+            strategy,
+            options: self.options.clone(),
+            storage_config: self.storage_config.clone(),
+            output_dir: self.output_dir.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for Compaction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Compaction")
+            .field("strategy", &self.strategy.name())
+            .field("options", &self.options)
+            .field("output_dir", &self.output_dir)
+            .finish()
+    }
+}
+
 impl Compaction {
     pub fn new(
         strategy_type: CompactionStrategyType,
@@ -473,8 +503,9 @@ impl Compaction {
             compaction_threshold: config.compaction.min_compaction_threshold,
             max_tables_per_compaction: config.compaction.max_sstables,
         };
-        let storage_config = crate::storage::config::StorageConfig {
+        let storage_config = StorageConfig {
             block_size: config.storage.block_size,
+            block_cache_size_mb: config.storage.block_cache_size_mb,
             sparse_index_interval: config.storage.sparse_index_interval,
             bloom_false_positive_rate: config.storage.bloom_false_positive_rate,
         };
