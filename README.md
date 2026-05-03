@@ -43,70 +43,71 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 ### 🤖 Latest CI Results
 
 <!-- BENCHMARK_RESULTS_START -->
-> 🤖 Auto-updated by CI on **2026-05-02 23:29 UTC** — [View run](https://github.com/ElioNeto/ApexStore/actions/runs/25264382717)
+> 🤖 Auto-updated by CI on **2026-05-03 05:30 UTC** — [View run](https://github.com/ElioNeto/ApexStore/actions/runs/25270770936)
 
 | Benchmark | Mediana |
 |-----------|--------|
-| `ycsb_type_a/10000` | 826.87 µs |
-| `ycsb_type_b/10000` | 682.30 µs |
-| `ycsb_type_c/10000` | 321.74 µs |
-| `ycsb_type_c/100000` | 646.98 µs |
-| `workload_balanced/10000` | 828.40 µs |
-| `workload_read_heavy/10000` | 727.06 µs |
-| `workload_write_heavy/10000` | 866.45 µs |
-| `read_memtable/1000` | 139.51 µs |
-| `read_memtable/10000` | 265.64 µs |
-| `read_sstable_cold/1000` | 138.67 µs |
-| `read_sstable_cold/10000` | 240.64 µs |
-| `read_sstable_warm/1000` | 139.11 µs |
-| `read_sstable_warm/10000` | 244.84 µs |
-| `bloom_filter/10000` | 2.0032 ms |
-| `bloom_filter/100000` | 32.084 ms |
-| `read_latency/memtable_1k` | 113.85 µs |
-| `read_latency/sstable_cold_1k` | 139.80 µs |
-| `scan_sequential/1000` | 142.54 µs |
-| `scan_sequential/10000` | 1.7846 ms |
-| `full_scan/1000` | 118.90 µs |
-| `full_scan/10000` | 1.8254 ms |
-| `range_scan_100/100` | 5.5456 ms |
-| `range_scan_1000/1000` | 5.7343 ms |
-| `prefix_scan_100/100` | 673.51 µs |
-| `prefix_scan_1000/1000` | 867.22 µs |
-| `iteration_sorted/1000` | 143.65 µs |
-| `iteration_sorted/10000` | 1.8747 ms |
-| `scan_limit_10/10` | 2.1874 µs |
-| `scan_limit_100/100` | 20.877 µs |
-| `scan_limit_1000/1000` | 208.61 µs |
-| `scan_pagination/10` | 687.63 µs |
-| `scan_pagination/100` | 59.490 ms |
-| `sstable_layer_1/1` | 1.7258 ms |
-| `sstable_layer_3/3` | 5.5915 ms |
-| `sstable_layer_10/10` | 22.584 ms |
-| `concurrent_1_threads/1` | 2.6613 ms |
-| `concurrent_2_threads/2` | 2.9220 ms |
-| `memory_pressure/small_memtable` | 5.1167 ms |
-| `many_sstables_10/10` | 236.26 µs |
-| `many_sstables_50/50` | 330.63 µs |
-| `cache_thrash_16MB/16` | 94.434 µs |
-| `cache_thrash_64MB/64` | 94.789 µs |
-| `key_updates/10k_keys` | 7.8715 ms |
-| `delete_operations/10k_keys` | 1.4128 ms |
-| `write_single/10` | 164.36 ns |
-| `write_single/100` | 167.44 ns |
-| `write_single/1024` | 194.96 ns |
-| `write_single/10240` | 825.79 ns |
-| `write_batch_1000/1000` | 343.07 µs |
-| `write_batch_10000/10000` | 6.5177 ms |
-| `write_batch_100000/100000` | 202.24 ms |
-| `memtable_flush_8/8` | 42.972 ms |
-| `sstable_flush/100000` | 200.40 ms |
-| `write_size_10_10/10x10` | 163.51 ns |
-| `write_size_10_100/10x100` | 168.24 ns |
-| `write_size_100_100/100x100` | 174.24 ns |
-| `write_size_100_1000/100x1000` | 173.36 ns |
-| `write_size_100_10000/100x10000` | 172.51 ns |
+| `ycsb_type_a/10000` | 776.35 µs |
+| `ycsb_type_b/10000` | 597.19 µs |
+| `ycsb_type_c/10000` | 276.81 µs |
+| `ycsb_type_c/100000` | 716.71 µs |
+| `workload_balanced/10000` | 801.05 µs |
+| `workload_read_heavy/10000` | 642.13 µs |
+| `workload_write_heavy/10000` | 935.34 µs |
+| `read_memtable/1000` | 122.58 µs |
+| `read_memtable/10000` | 230.84 µs |
+| `read_sstable_cold/1000` | 120.83 µs |
+| `read_sstable_cold/10000` | 199.12 µs |
+| `read_sstable_warm/1000` | 122.82 µs |
+| `read_sstable_warm/10000` | 195.41 µs |
+| `bloom_filter/10000` | 1.5381 ms |
+| `bloom_filter/100000` | 24.488 ms |
+| `read_latency/memtable_1k` | 107.26 µs |
+| `read_latency/sstable_cold_1k` | 125.07 µs |
+| `scan_sequential/1000` | 152.67 µs |
+| `scan_sequential/10000` | 1.9343 ms |
+| `full_scan/1000` | 108.04 µs |
+| `full_scan/10000` | 1.9741 ms |
+| `range_scan_100/100` | 5.3591 ms |
+| `range_scan_1000/1000` | 6.1135 ms |
+| `prefix_scan_100/100` | 637.36 µs |
+| `prefix_scan_1000/1000` | 832.30 µs |
+| `iteration_sorted/1000` | 157.63 µs |
+| `iteration_sorted/10000` | 2.0589 ms |
+| `scan_limit_10/10` | 2.1481 µs |
+| `scan_limit_100/100` | 22.109 µs |
+| `scan_limit_1000/1000` | 225.99 µs |
+| `scan_pagination/10` | 659.75 µs |
+| `scan_pagination/100` | 56.551 ms |
+| `sstable_layer_1/1` | 1.9520 ms |
+| `sstable_layer_3/3` | 6.9577 ms |
+| `sstable_layer_10/10` | 26.481 ms |
+| `concurrent_1_threads/1` | 2.3025 ms |
+| `concurrent_2_threads/2` | 2.5820 ms |
+| `memory_pressure/small_memtable` | 4.5357 ms |
+| `many_sstables_10/10` | 185.20 µs |
+| `many_sstables_50/50` | 286.95 µs |
+| `cache_thrash_16MB/16` | 58.401 µs |
+| `cache_thrash_64MB/64` | 58.083 µs |
+| `key_updates/10k_keys` | 7.3207 ms |
+| `delete_operations/10k_keys` | 1.2488 ms |
+| `write_single/10` | 144.17 ns |
+| `write_single/100` | 145.54 ns |
+| `write_single/1024` | 171.96 ns |
+| `write_single/10240` | 791.05 ns |
+| `write_batch_1000/1000` | 301.97 µs |
+| `write_batch_10000/10000` | 6.0232 ms |
+| `write_batch_100000/100000` | 197.20 ms |
+| `memtable_flush_8/8` | 41.334 ms |
+| `sstable_flush/100000` | 190.44 ms |
+| `write_size_10_10/10x10` | 142.92 ns |
+| `write_size_10_100/10x100` | 145.74 ns |
+| `write_size_100_100/100x100` | 149.43 ns |
+| `write_size_100_1000/100x1000` | 150.24 ns |
+| `write_size_100_10000/100x10000` | 149.90 ns |
 
 <!-- BENCHMARK_RESULTS_END -->
+
 
 
 
