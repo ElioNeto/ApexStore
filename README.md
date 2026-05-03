@@ -23,7 +23,7 @@
 
 ## 🎯 Overview
 
-ApexStore is a modern, Rust-based storage engine designed for write-heavy workloads. It combines the durability of write-ahead logging (WAL) with the efficiency of **Log-Structured Merge-Tree (LSM-Tree)** architecture. 
+ApexStore is a modern, Rust-based storage engine designed for write-heavy workloads. It combines the durability of write-ahead logging (WAL) with the efficiency of **Log-Structured Merge-Tree (LSM-Tree)** architecture.
 
 Built from the ground up using **SOLID principles**, it provides a production-grade storage solution that is easy to reason about, test, and maintain, while delivering the performance expected from a systems-level language.
 
@@ -38,14 +38,14 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 
 ## 📊 Performance Benchmarks
 
-> **Run locally:** `cargo bench --all-features` → relatórios HTML em `target/criterion/`
+> **Run locally:** `cargo bench --all-features` → HTML reports at `target/criterion/`
 
 ### 🤖 Latest CI Results
 
 <!-- BENCHMARK_RESULTS_START -->
 > 🤖 Auto-updated by CI on **2026-05-03 05:30 UTC** — [View run](https://github.com/ElioNeto/ApexStore/actions/runs/25270770936)
 
-| Benchmark | Mediana |
+| Benchmark | Median |
 |-----------|--------|
 | `ycsb_type_a/10000` | 776.35 µs |
 | `ycsb_type_b/10000` | 597.19 µs |
@@ -108,37 +108,34 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 
 <!-- BENCHMARK_RESULTS_END -->
 
-
-
-
 ### 📋 YCSB Mixed Workload — `mixed_bench`
 
-*Medido em **Intel Core i5-9300H @ 2.40GHz**, 16 GB DDR4 2667 MHz, HDD SATA 1TB (v2.1.39) — `cargo bench --bench mixed_bench -- --sample-size 10`*
+*Measured on **Intel Core i5-9300H @ 2.40GHz**, 16 GB DDR4 2667 MHz, HDD SATA 1TB (v2.1.39) — `cargo bench --bench mixed_bench -- --sample-size 10`*
 
-#### Throughput (operações/segundo)
+#### Throughput (operations/second)
 
-| Benchmark | Tamanho | Mediana | Throughput | Variação vs anterior |
-|-----------|---------|---------|------------|----------------------|
-| **YCSB Type A** *(50% write / 50% read)* | 10K | 952.83 µs | 1.05 Melem/s | sem mudança |
-| **YCSB Type A** *(50% write / 50% read)* | 100K | 2.706 ms | 369.6 Kelem/s | ✅ +49% throughput |
-| **YCSB Type B** *(5% write / 95% read)* | 10K | 814.90 µs | 1.23 Melem/s | ⚠️ -18.6% throughput |
-| **YCSB Type B** *(5% write / 95% read)* | 100K | 1.409 ms | 710.0 Kelem/s | ⚠️ -20.1% throughput |
-| **YCSB Type C** *(100% read)* | 10K | 334.70 µs | 2.99 Melem/s | ✅ +9.4% throughput |
-| **YCSB Type C** *(100% read)* | 100K | 745.36 µs | 1.34 Melem/s | ✅ +12.4% throughput |
-| **YCSB Type C** *(100% read)* | 1M | 1.290 ms | 775.0 Kelem/s | — *(novo)* |
+| Benchmark | Size | Median | Throughput | Change vs previous |
+|-----------|------|--------|------------|---------------------|
+| **YCSB Type A** *(50% write / 50% read)* | 10K | 952.83 µs | 1.05 Mops/s | no change |
+| **YCSB Type A** *(50% write / 50% read)* | 100K | 2.706 ms | 369.6 Kops/s | ✅ +49% throughput |
+| **YCSB Type B** *(5% write / 95% read)* | 10K | 814.90 µs | 1.23 Mops/s | ⚠️ -18.6% throughput |
+| **YCSB Type B** *(5% write / 95% read)* | 100K | 1.409 ms | 710.0 Kops/s | ⚠️ -20.1% throughput |
+| **YCSB Type C** *(100% read)* | 10K | 334.70 µs | 2.99 Mops/s | ✅ +9.4% throughput |
+| **YCSB Type C** *(100% read)* | 100K | 745.36 µs | 1.34 Mops/s | ✅ +12.4% throughput |
+| **YCSB Type C** *(100% read)* | 1M | 1.290 ms | 775.0 Kops/s | — *(new)* |
 
-#### Workloads compostos
+#### Composite Workloads
 
-| Benchmark | Tamanho | Mediana | Throughput | Variação vs anterior |
-|-----------|---------|---------|------------|----------------------|
-| **Balanced** *(mix equilibrado)* | 10K | 1.080 ms | 925.9 Kelem/s | ⚠️ -8.7% throughput |
-| **Balanced** *(mix equilibrado)* | 100K | 2.831 ms | 353.2 Kelem/s | — *(sem baseline)* |
-| **Read Heavy** *(leitura intensiva)* | 10K | 811.91 µs | 1.23 Melem/s | ✅ +15.7% throughput |
-| **Read Heavy** *(leitura intensiva)* | 100K | 1.777 ms | 562.7 Kelem/s | — *(sem baseline)* |
-| **Write Heavy** *(escrita intensiva)* | 10K | 1.187 ms | 82.3 KiB/s | ⚠️ -6.7% throughput |
-| **Write Heavy** *(escrita intensiva)* | 100K | 3.486 ms | 28.0 KiB/s | — *(sem baseline)* |
+| Benchmark | Size | Median | Throughput | Change vs previous |
+|-----------|------|--------|------------|---------------------|
+| **Balanced** *(mixed workload)* | 10K | 1.080 ms | 925.9 Kops/s | ⚠️ -8.7% throughput |
+| **Balanced** *(mixed workload)* | 100K | 2.831 ms | 353.2 Kops/s | — *(no baseline)* |
+| **Read Heavy** *(read-intensive)* | 10K | 811.91 µs | 1.23 Mops/s | ✅ +15.7% throughput |
+| **Read Heavy** *(read-intensive)* | 100K | 1.777 ms | 562.7 Kops/s | — *(no baseline)* |
+| **Write Heavy** *(write-intensive)* | 10K | 1.187 ms | 82.3 KiB/s | ⚠️ -6.7% throughput |
+| **Write Heavy** *(write-intensive)* | 100K | 3.486 ms | 28.0 KiB/s | — *(no baseline)* |
 
-> **Nota sobre hardware:** resultados acima são conservadores — medidos em HDD SATA (vs. NVMe). Em NVMe espera-se 2–4× melhor throughput em operações I/O-bound.
+> **Hardware note:** results above are conservative — measured on HDD SATA (vs. NVMe). On NVMe, expect 2–4× better throughput for I/O-bound operations.
 
 > **Key Insights:**
 > - `WAL_SYNC_MODE=async` provides 16x throughput vs fsync (trade durability for speed)
@@ -272,9 +269,9 @@ ApexStore/
 ## 🧪 Testing & Quality
 
 ```bash
-cargo test                 # Run all tests
+cargo test                  # Run all tests
 cargo clippy -- -D warnings # Linting
-cargo fmt                  # Formatting
+cargo fmt                   # Formatting
 ```
 
 ## 🚀 CI/CD & Development Workflow
