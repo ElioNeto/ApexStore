@@ -1,4 +1,4 @@
-<p align="center">
+ <p align="center">
   <img src="docs/assets/logo.png" width="180" alt="ApexStore Logo">
 </p>
 
