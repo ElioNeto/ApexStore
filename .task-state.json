@@ -1,8 +1,16 @@
-[
-  {"content": "Execute cargo build, fix any compilation errors to ensure build passes without errors", "status": "done", "priority": "high"},
-  {"content": "Audit all production Rust source files to remove unwrap() calls, replacing with ? or explicit error handling (exclude test and benchmark files)", "status": "done", "priority": "high"},
-  {"content": "Run cargo clippy -- -D warnings, fix all reported warnings to ensure no warnings are emitted", "status": "pending", "priority": "high"},
-  {"content": "Run cargo test --all-features, fix any test failures to ensure all tests pass including integration tests and crash recovery tests (WAL truncation, SSTable corruption)", "status": "pending", "priority": "high"},
-  {"content": "Run cargo audit, update dependencies or mitigate any critical or high unrecognized vulnerabilities", "status": "pending", "priority": "high"},
-  {"content": "Execute scripts/workflow-agent.ts to validate all ci.yml jobs that do not require external secrets, fix any job failures", "status": "pending", "priority": "high"}
-]
+{
+  "issue": 123,
+  "title": "[FEAT] Background compaction real — maybe_compact é síncrono e bloqueia escritas",
+  "branch": "feat/123-background-compaction",
+  "todos": [
+    {"id":1,"title":"Create EngineCore<C> struct","description":"Extract all mutable fields from Engine<C> into a new struct EngineCore<C>: memtables, memtable_bytes, version_set, compaction, wal","files":["src/core/engine/mod.rs"],"depends_on":[],"status":"done"},
+    {"id":2,"title":"Wrap EngineCore in Arc<Mutex<>>","description":"Change Engine<C> to hold `core: Arc<Mutex<EngineCore<C>>>` and `compaction_running: Arc<AtomicBool>`. Add `use std::sync::{Arc, Mutex, atomic::AtomicBool};`. Remove old fields from Engine.","files":["src/core/engine/mod.rs"],"depends_on":[1],"status":"done"},
+    {"id":3,"title":"Add close() and Drop with JoinHandle","description":"Add `compaction_thread: Mutex<Option<JoinHandle<()>>>` field to Engine. Implement `close()` method that sets compaction_running=false and joins thread. Add Drop that calls close(). Import JoinHandle.","files":["src/core/engine/mod.rs"],"depends_on":[2],"status":"done"},
+    {"id":4,"title":"Refactor new_generic and write methods","description":"Refactor new_generic to construct EngineCore and wrap in Arc<Mutex>. Refactor put_cf, delete_cf, flush_memtable_impl to lock core with `let mut core = self.core.lock().unwrap();`","files":["src/core/engine/mod.rs"],"depends_on":[2],"status":"done"},
+    {"id":5,"title":"Refactor read methods","description":"Refactor get_cf, scan_cf, scan_range, search_prefix, keys, count, stats, stats_all to lock core internally","files":["src/core/engine/mod.rs"],"depends_on":[2],"status":"done"},
+    {"id":6,"title":"Refactor compact/compact_cf/maybe_compact","description":"Refactor compact and compact_cf to work via locked core. Change maybe_compact to spawn thread: `std::thread::spawn(move || { ... })`","files":["src/core/engine/mod.rs"],"depends_on":[4],"status":"done"},
+    {"id":7,"title":"Error handling in compaction thread","description":"In the spawned compaction thread, wrap core in `catch_unwind` or use `tracing::error!` for errors. No unwrap() in compaction thread. Log errors with tracing::error!","files":["src/core/engine/mod.rs"],"depends_on":[6],"status":"done"},
+    {"id":8,"title":"Add tests","description":"Add 2 tests: (1) test_500_writes_during_compaction writes 500 keys while compaction runs, no Err returns. (2) test_shutdown_with_compaction_in_progress starts compaction, immediately drops engine, no panic.","files":["src/core/engine/mod.rs"],"depends_on":[7],"status":"done"},
+    {"id":9,"title":"Final validation","description":"Run cargo test --all-features, cargo clippy -- -D warnings, fix issues. Update .task-state.json all done.","files":[],"depends_on":[8],"status":"done"}
+  ]
+}
