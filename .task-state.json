@@ -1,60 +1,8 @@
-{
-  "todos": [
-    {
-      "id": 1,
-      "title": "Execute `cargo build` and resolve all compilation errors",
-      "file": "src/**/*.rs, Cargo.toml, Cargo.lock",
-      "dep": [],
-      "status": "done"
-    },
-    {
-      "id": 2,
-      "title": "Execute `cargo clippy -- -D warnings` and fix all lint errors/warnings",
-      "file": "src/**/*.rs",
-      "dep": [1],
-      "status": "done"
-    },
-    {
-      "id": 3,
-      "title": "Audit production code for `unwrap()` usage, replace with proper error handling (exclude tests/benchmarks)",
-      "file": "src/**/*.rs (non-test/benchmark)",
-      "dep": [2],
-      "status": "done"
-    },
-    {
-      "id": 4,
-      "title": "Execute `cargo test --all-features` and fix all failing unit, integration, and benchmark tests",
-      "file": "src/**/*.rs, tests/**/*.rs, benches/**/*.rs",
-      "dep": [1],
-      "status": "done"
-    },
-    {
-      "id": 5,
-      "title": "Verify crash recovery tests (WAL truncation, SSTable corruption) pass",
-      "file": "tests/**/*.rs",
-      "dep": [4],
-      "status": "done"
-    },
-    {
-      "id": 6,
-      "title": "Execute `cargo audit` and resolve critical/high unrecognized vulnerabilities",
-      "file": "Cargo.toml, Cargo.lock",
-      "dep": [1],
-      "status": "pending"
-    },
-    {
-      "id": 7,
-      "title": "Execute `workflow-agent` to validate all non-secret CI jobs in ci.yml, fix failures",
-      "file": "scripts/workflow-agent.ts, .github/workflows/ci.yml",
-      "dep": [1, 2, 3, 4, 5, 6],
-      "status": "pending"
-    },
-    {
-      "id": 8,
-      "title": "Verify module-specific lint and tests pass (post-#93 refactor)",
-      "file": "src/**/*.rs (modules from #93)",
-      "dep": [2, 4],
-      "status": "pending"
-    }
-  ]
-}
+[
+  {"content": "Execute cargo build, fix any compilation errors to ensure build passes without errors", "status": "done", "priority": "high"},
+  {"content": "Audit all production Rust source files to remove unwrap() calls, replacing with ? or explicit error handling (exclude test and benchmark files)", "status": "done", "priority": "high"},
+  {"content": "Run cargo clippy -- -D warnings, fix all reported warnings to ensure no warnings are emitted", "status": "pending", "priority": "high"},
+  {"content": "Run cargo test --all-features, fix any test failures to ensure all tests pass including integration tests and crash recovery tests (WAL truncation, SSTable corruption)", "status": "pending", "priority": "high"},
+  {"content": "Run cargo audit, update dependencies or mitigate any critical or high unrecognized vulnerabilities", "status": "pending", "priority": "high"},
+  {"content": "Execute scripts/workflow-agent.ts to validate all ci.yml jobs that do not require external secrets, fix any job failures", "status": "pending", "priority": "high"}
+]

@@ -25,12 +25,9 @@ impl Table {
 
     /// Create a table from an SSTable file path
     pub fn from_sstable_path(path: &std::path::Path) -> crate::infra::error::Result<Self> {
-        use crate::infra::error::Result;
-        use std::fs;
-
+        // Read the SSTable and extract data
+        // For now, we'll create an empty table - in production this would read the SSTable
         let data = if path.exists() {
-            // Read the SSTable and extract data
-            // For now, we'll create an empty table - in production this would read the SSTable
             std::collections::BTreeMap::new()
         } else {
             std::collections::BTreeMap::new()

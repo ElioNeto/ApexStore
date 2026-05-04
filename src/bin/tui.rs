@@ -215,10 +215,13 @@ impl App {
                 let query = parts[1];
                 let prefix_mode = parts.len() > 2 && parts[2] == "--prefix";
                 let rows = if prefix_mode {
-                    #[allow(deprecated)]
-                    self.engine.search_prefix_legacy(query)
+                    self.engine.search_prefix(query, None, 100)
+                        .map(|(rows, _)| rows)
+                        .unwrap_or_else(|_| Vec::new())
                 } else {
-                    self.engine.search(query)
+                    // Use scan with the query as a prefix
+                    self.engine.scan_cf("default", Some(query.as_bytes()), None, Some(100))
+                        .unwrap_or_else(|_| Vec::new())
                 };
                 if rows.is_empty() {
                     self.log_push("\u{26a0}  No records found", C_WARN);
@@ -247,8 +250,9 @@ impl App {
                     self.log_push("\u{274c} Usage: SCAN <prefix>", C_ERR);
                     return;
                 }
-                #[allow(deprecated)]
-                let rows = self.engine.search_prefix_legacy(parts[1]);
+                let rows = self.engine.search_prefix(parts[1], None, 100)
+                    .map(|(rows, _)| rows)
+                    .unwrap_or_else(|_| Vec::new());
                 if rows.is_empty() {
                     self.log_push(
                         format!("\u{26a0}  No records with prefix '{}'", parts[1]),
