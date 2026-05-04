@@ -43,118 +43,119 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 ### 🤖 Latest CI Results
 
 <!-- BENCHMARK_RESULTS_START -->
-> \U0001f916 Auto-updated by CI on **2026-05-03 10:55 UTC** — [View run](https://github.com/ElioNeto/ApexStore/actions/runs/25277050616)
+> \U0001f916 Auto-updated by CI on **2026-05-04 05:46 UTC** — [View run](https://github.com/ElioNeto/ApexStore/actions/runs/25302925962)
 
 
 **📝 Write**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `key_updates/10k_keys` | 7.9271 ms | 🟠 |
-| `delete_operations/10k_keys` | 1.4167 ms | 🟠 |
-| `write_single/10` | 163.67 ns | 🟢 |
-| `write_single/100` | 165.23 ns | 🟢 |
-| `write_single/1024` | 193.75 ns | 🟢 |
-| `write_single/10240` | 825.88 ns | 🟢 |
-| `write_batch_1000/1000` | 349.36 µs | 🟡 |
-| `write_batch_10000/10000` | 6.6851 ms | 🟠 |
-| `write_batch_100000/100000` | 197.78 ms | 🔴 |
-| `memtable_flush_8/8` | 42.744 ms | 🟠 |
-| `sstable_flush/100000` | 195.76 ms | 🔴 |
-| `write_size_10_10/10x10` | 162.47 ns | 🟢 |
-| `write_size_10_100/10x100` | 166.38 ns | 🟢 |
-| `write_size_100_100/100x100` | 171.91 ns | 🟢 |
-| `write_size_100_1000/100x1000` | 173.27 ns | 🟢 |
-| `write_size_100_10000/100x10000` | 173.90 ns | 🟢 |
+| `key_updates/10k_keys` | 8.1936 ms | 🟠 |
+| `delete_operations/10k_keys` | 1.4240 ms | 🟠 |
+| `write_single/10` | 165.93 ns | 🟢 |
+| `write_single/100` | 168.01 ns | 🟢 |
+| `write_single/1024` | 195.13 ns | 🟢 |
+| `write_single/10240` | 869.25 ns | 🟢 |
+| `write_batch_1000/1000` | 342.57 µs | 🟡 |
+| `write_batch_10000/10000` | 6.4344 ms | 🟠 |
+| `write_batch_100000/100000` | 200.92 ms | 🔴 |
+| `memtable_flush_8/8` | 46.177 ms | 🟠 |
+| `sstable_flush/100000` | 210.45 ms | 🔴 |
+| `write_size_10_10/10x10` | 163.08 ns | 🟢 |
+| `write_size_10_100/10x100` | 168.16 ns | 🟢 |
+| `write_size_100_100/100x100` | 174.44 ns | 🟢 |
+| `write_size_100_1000/100x1000` | 175.92 ns | 🟢 |
+| `write_size_100_10000/100x10000` | 175.24 ns | 🟢 |
 
 **📚 Read**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `read_memtable/1000` | 140.69 µs | 🟡 |
-| `read_memtable/10000` | 268.95 µs | 🟡 |
-| `read_sstable_cold/1000` | 141.60 µs | 🟡 |
-| `read_sstable_cold/10000` | 242.45 µs | 🟡 |
-| `read_sstable_warm/1000` | 140.84 µs | 🟡 |
-| `read_sstable_warm/10000` | 245.62 µs | 🟡 |
-| `read_latency/memtable_1k` | 113.64 µs | 🟡 |
-| `read_latency/sstable_cold_1k` | 142.11 µs | 🟡 |
+| `read_memtable/1000` | 138.16 µs | 🟡 |
+| `read_memtable/10000` | 267.06 µs | 🟡 |
+| `read_sstable_cold/1000` | 142.09 µs | 🟡 |
+| `read_sstable_cold/10000` | 244.00 µs | 🟡 |
+| `read_sstable_warm/1000` | 144.94 µs | 🟡 |
+| `read_sstable_warm/10000` | 245.83 µs | 🟡 |
+| `read_latency/memtable_1k` | 110.92 µs | 🟡 |
+| `read_latency/sstable_cold_1k` | 149.13 µs | 🟡 |
 
 **🔍 Scan**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `scan_sequential/1000` | 142.68 µs | 🟡 |
-| `scan_sequential/10000` | 1.7862 ms | 🟠 |
-| `full_scan/1000` | 119.25 µs | 🟡 |
-| `full_scan/10000` | 1.8443 ms | 🟠 |
-| `range_scan_100/100` | 5.4828 ms | 🟠 |
-| `range_scan_1000/1000` | 5.7221 ms | 🟠 |
-| `prefix_scan_100/100` | 690.19 µs | 🟡 |
-| `prefix_scan_1000/1000` | 857.23 µs | 🟡 |
-| `iteration_sorted/1000` | 146.39 µs | 🟡 |
-| `iteration_sorted/10000` | 1.8767 ms | 🟠 |
-| `scan_limit_10/10` | 2.1927 µs | 🟢 |
-| `scan_limit_100/100` | 20.588 µs | 🟡 |
-| `scan_limit_1000/1000` | 206.27 µs | 🟡 |
-| `scan_pagination/10` | 681.54 µs | 🟡 |
-| `scan_pagination/100` | 59.108 ms | 🟠 |
+| `scan_sequential/1000` | 123.81 µs | 🟡 |
+| `scan_sequential/10000` | 1.7933 ms | 🟠 |
+| `full_scan/1000` | 118.82 µs | 🟡 |
+| `full_scan/10000` | 1.8613 ms | 🟠 |
+| `range_scan_100/100` | 5.5047 ms | 🟠 |
+| `range_scan_1000/1000` | 5.7271 ms | 🟠 |
+| `prefix_scan_100/100` | 679.11 µs | 🟡 |
+| `prefix_scan_1000/1000` | 864.66 µs | 🟡 |
+| `iteration_sorted/1000` | 145.23 µs | 🟡 |
+| `iteration_sorted/10000` | 1.8686 ms | 🟠 |
+| `scan_limit_10/10` | 2.2128 µs | 🟢 |
+| `scan_limit_100/100` | 21.047 µs | 🟡 |
+| `scan_limit_1000/1000` | 212.04 µs | 🟡 |
+| `scan_pagination/10` | 708.49 µs | 🟡 |
+| `scan_pagination/100` | 60.948 ms | 🟠 |
 
 **🌐 YCSB**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `ycsb_type_a/10000` | 825.22 µs | 🟡 |
-| `ycsb_type_b/10000` | 679.56 µs | 🟡 |
-| `ycsb_type_c/10000` | 324.20 µs | 🟡 |
-| `ycsb_type_c/100000` | 569.66 µs | 🟡 |
+| `ycsb_type_a/10000` | 856.60 µs | 🟡 |
+| `ycsb_type_b/10000` | 678.32 µs | 🟡 |
+| `ycsb_type_c/10000` | 323.65 µs | 🟡 |
+| `ycsb_type_c/100000` | 590.88 µs | 🟡 |
 
 **⚡ Mixed Workload**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `workload_balanced/10000` | 829.04 µs | 🟡 |
-| `workload_read_heavy/10000` | 728.83 µs | 🟡 |
-| `workload_write_heavy/10000` | 858.06 µs | 🟡 |
+| `workload_balanced/10000` | 825.02 µs | 🟡 |
+| `workload_read_heavy/10000` | 717.13 µs | 🟡 |
+| `workload_write_heavy/10000` | 848.45 µs | 🟡 |
 
 **🏗️ SSTable**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `sstable_layer_1/1` | 1.7318 ms | 🟠 |
-| `sstable_layer_3/3` | 5.5430 ms | 🟠 |
-| `sstable_layer_10/10` | 22.282 ms | 🟠 |
-| `many_sstables_10/10` | 227.21 µs | 🟡 |
-| `many_sstables_50/50` | 320.21 µs | 🟡 |
+| `sstable_layer_1/1` | 1.7232 ms | 🟠 |
+| `sstable_layer_3/3` | 6.0696 ms | 🟠 |
+| `sstable_layer_10/10` | 24.040 ms | 🟠 |
+| `many_sstables_10/10` | 230.57 µs | 🟡 |
+| `many_sstables_50/50` | 324.64 µs | 🟡 |
 
 **🧵 Bloom Filter**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `bloom_filter/10000` | 2.0605 ms | 🟠 |
-| `bloom_filter/100000` | 32.317 ms | 🟠 |
+| `bloom_filter/10000` | 2.0726 ms | 🟠 |
+| `bloom_filter/100000` | 32.390 ms | 🟠 |
 
 **💾 Cache**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `cache_thrash_16MB/16` | 82.503 µs | 🟡 |
-| `cache_thrash_64MB/64` | 78.079 µs | 🟡 |
+| `cache_thrash_16MB/16` | 91.223 µs | 🟡 |
+| `cache_thrash_64MB/64` | 91.398 µs | 🟡 |
 
 **🧵 Concurrency**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `concurrent_1_threads/1` | 2.6408 ms | 🟠 |
-| `concurrent_2_threads/2` | 2.9277 ms | 🟠 |
+| `concurrent_1_threads/1` | 2.9863 ms | 🟠 |
+| `concurrent_2_threads/2` | 2.9153 ms | 🟠 |
 
 **💡 Memory**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `memory_pressure/small_memtable` | 4.9195 ms | 🟠 |
+| `memory_pressure/small_memtable` | 8.4938 ms | 🟠 |
 
 <!-- BENCHMARK_RESULTS_END -->
+
 
 
 
