@@ -111,7 +111,7 @@ impl App {
 
     fn tick(&mut self) {
         self.uptime = self.start.elapsed().as_secs();
-        self.stats = self.engine.stats().ok();
+        self.stats = self.engine.stats("default").ok();
 
         let elapsed = self.ops_last_sample.elapsed().as_secs_f64();
         if elapsed >= 0.25 {
@@ -349,44 +349,43 @@ impl App {
                                 "\u{2500}\u{2500}\u{2500} Detailed Statistics \u{2500}\u{2500}\u{2500}".to_string(),
                                 C_ORANGE,
                             );
-                            for (_name, s) in &entries {
-                                self.log_push(
-                                    format!("  MemTable records : {}", s.mem_records),
-                                    C_TEXT,
-                                );
-                                self.log_push(
-                                    format!(
-                                        "  MemTable size    : {} KB / {} KB",
-                                        s.mem_kb, s.memtable_max_size
-                                    ),
-                                    C_TEXT,
-                                );
-                                self.log_push(
-                                    format!("  SSTable files    : {}", s.sst_files),
-                                    C_TEXT,
-                                );
-                                self.log_push(
-                                    format!("  SSTable records  : {}", s.sst_records),
-                                    C_TEXT,
-                                );
-                                self.log_push(
-                                    format!("  SSTable size     : {} KB", s.sst_kb),
-                                    C_TEXT,
-                                );
-                                self.log_push(
-                                    format!("  WAL size         : {} KB", s.wal_kb),
-                                    C_TEXT,
-                                );
-                                self.log_push(
-                                    format!("  Total records    : {}", s.total_records),
-                                    C_TEXT,
-                                );
-                            }
+                            let s = entries;
+                            self.log_push(
+                                format!("  MemTable records : {}", s.mem_records),
+                                C_TEXT,
+                            );
+                            self.log_push(
+                                format!(
+                                    "  MemTable size    : {} KB / {} KB",
+                                    s.mem_kb, s.memtable_max_size
+                                ),
+                                C_TEXT,
+                            );
+                            self.log_push(
+                                format!("  SSTable files    : {}", s.sst_files),
+                                C_TEXT,
+                            );
+                            self.log_push(
+                                format!("  SSTable records  : {}", s.sst_records),
+                                C_TEXT,
+                            );
+                            self.log_push(
+                                format!("  SSTable size     : {} KB", s.sst_kb),
+                                C_TEXT,
+                            );
+                            self.log_push(
+                                format!("  WAL size         : {} KB", s.wal_kb),
+                                C_TEXT,
+                            );
+                            self.log_push(
+                                format!("  Total records    : {}", s.total_records),
+                                C_TEXT,
+                            );
                         }
                         Err(e) => self.log_push(format!("\u{274c} {}", e), C_ERR),
                     }
                 } else {
-                    match self.engine.stats() {
+                    match self.engine.stats("default") {
                         Ok(s) => {
                             self.log_push(format!("  Total records: {}", s.total_records), C_TEXT);
                             self.log_push(format!("  Num tables:    {}", s.num_tables), C_TEXT);
@@ -602,7 +601,7 @@ fn main() -> io::Result<()> {
         .build()
         .map_err(|e: LsmError| io::Error::other(e.to_string()))?;
 
-    let engine = LsmEngine::new(config).map_err(|e: LsmError| io::Error::other(e.to_string()))?;
+    let engine = LsmEngine::new_from_config(&config, apexstore::storage::cache::GlobalBlockCache::new(64, 4096)).map_err(|e: LsmError| io::Error::other(e.to_string()))?;
 
     let mut terminal = setup()?;
     let mut app = App::new(engine);

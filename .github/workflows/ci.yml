@@ -1,0 +1,14 @@
+# DEPRECATED: This file duplicates pr-validation.yml.
+# All CI validation happens in pr-validation.yml.
+# Keeping this file empty to avoid conflicts - remove after confirming
+# the replacement workflow is active.
+name: PR Validation (deprecated)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "ci.yml is deprecated. Use pr-validation.yml instead."

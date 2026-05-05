@@ -198,6 +198,13 @@ impl WriteAheadLog {
 
         Ok(())
     }
+
+    /// Return the current size of the WAL file in bytes.
+    pub fn size(&self) -> Result<u64> {
+        std::fs::metadata(&self.path)
+            .map(|m| m.len())
+            .map_err(|e| crate::infra::error::LsmError::Io(e))
+    }
 }
 
 #[cfg(test)]
@@ -322,6 +329,32 @@ mod tests {
             }
             _ => panic!("Expected CorruptedData error"),
         }
+    }
+
+    #[test]
+    fn test_wal_backward_compat_no_cf() {
+        // Test that a LogRecord without column_family (simulating old WAL format)
+        // deserializes correctly and maps to "default" CF.
+        let (_temp_dir, wal) = create_test_wal();
+
+        // Create a record using the constructor — column_family is None
+        let record = LogRecord::new(b"test_key".to_vec(), b"test_value".to_vec());
+        assert!(record.column_family.is_none());
+
+        // Write it to WAL (serialized without CF field)
+        wal.write_record(&record).unwrap();
+
+        // Recover it back
+        let recovered = wal.recover().unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0], record);
+
+        // Verify column_family is None (old-format record)
+        assert!(recovered[0].column_family.is_none());
+
+        // Verify it maps to "default" via unwrap_or
+        let cf = recovered[0].column_family.as_deref().unwrap_or("default");
+        assert_eq!(cf, "default");
     }
 
     #[test]

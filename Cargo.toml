@@ -103,5 +103,13 @@ harness = false
 name = "stress_bench"
 harness = false
 
+[[bench]]
+name = "write_amplification"
+harness = false
+
+[[bench]]
+name = "latency_bench"
+harness = false
+
 [profile.bench]
 inherits = "release"

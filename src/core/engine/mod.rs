@@ -4,7 +4,7 @@ pub mod version_set;
 
 use crate::core::log_record::LogRecord;
 use crate::core::table::Table;
-use crate::storage::cache::Cache;
+use crate::storage::cache::{Cache, GlobalBlockCache};
 use crate::storage::wal::WriteAheadLog;
 use crate::infra::error::Result;
 use std::collections::HashMap;
@@ -55,6 +55,7 @@ pub struct EngineOptions {
     pub level_multiplier: usize,
     pub write_buffer_size: usize,
     pub max_write_buffer_number: usize,
+    pub block_cache_size_mb: usize,
     pub compaction_options: CompactionOptions,
 }
 
@@ -69,6 +70,7 @@ impl Default for EngineOptions {
             level_multiplier: 4,
             write_buffer_size: 64 * 1024,
             max_write_buffer_number: 4,
+            block_cache_size_mb: 64,
             compaction_options: CompactionOptions::default(),
         }
     }
@@ -91,6 +93,7 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             level_multiplier: 4,
             write_buffer_size: config.core.memtable_max_size,
             max_write_buffer_number: 4,
+            block_cache_size_mb: config.storage.block_cache_size_mb,
             compaction_options,
         }
     }
@@ -237,7 +240,7 @@ impl<C: Cache> Engine<C> {
         // Create storage config from options
         let storage_config = crate::infra::config::StorageConfig {
             block_size: options.block_size,
-            block_cache_size_mb: 64,
+            block_cache_size_mb: options.block_cache_size_mb,
             sparse_index_interval: 16,
             bloom_false_positive_rate: 0.01,
         };
@@ -266,10 +269,23 @@ impl<C: Cache> Engine<C> {
         let recovered_records = wal.recover()?;
         
         // Build EngineCore with all mutable state
+        // Clone cache for type inspection before moving into VersionSet
+        let cache_clone = cache.clone();
+        let mut version_set = VersionSet::new(options.clone(), cache);
+        // If the generic cache is an Arc<GlobalBlockCache>, wire it into VersionSet
+        // for bloom filter passthrough in get().
+        {
+            use std::any::Any;
+            let cache_any: &dyn Any = &cache_clone;
+            if let Some(arc_cache) = cache_any.downcast_ref::<Arc<GlobalBlockCache>>() {
+                version_set.set_block_cache((*arc_cache).clone());
+            }
+        }
+
         let mut core = EngineCore {
             memtables: HashMap::new(),
             memtable_bytes: HashMap::new(),
-            version_set: VersionSet::new(options.clone(), cache),
+            version_set,
             compaction,
             wal,
         };
@@ -406,7 +422,9 @@ impl<C: Cache> Engine<C> {
         K: AsRef<[u8]>,
     {
         let key = key.as_ref();
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock().map_err(|_e| {
+            crate::infra::error::LsmError::LockPoisoned("engine core in get_cf")
+        })?;
         if let Some(memtables) = core.memtables.get(cf) {
             for mem in memtables.iter().rev() {
                 if let Some(v) = mem.data.get(key) {
@@ -435,7 +453,9 @@ impl<C: Cache> Engine<C> {
         upper: Option<&[u8]>,
         limit: Option<usize>,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock().map_err(|_| {
+            crate::infra::error::LsmError::LockPoisoned("engine core in scan_cf")
+        })?;
         let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
         
         // 1. Memtables (newer first)
@@ -445,8 +465,8 @@ impl<C: Cache> Engine<C> {
             }
         }
         
-        // 2. SSTables (from VersionSet)
-        for sst_iter in core.version_set.table_iters(cf) {
+        // 2. SSTables (from VersionSet) — skip non-intersecting ranges
+        for sst_iter in core.version_set.table_iters_in_range(cf, lower, upper) {
             iters.push(Box::new(sst_iter));
         }
         
@@ -591,6 +611,14 @@ impl<C: Cache> Engine<C> {
     
     /// Flush the oldest memtable for the given column family.
     /// Returns true if compaction should be triggered after the lock is released.
+    /// Flush the current memtable to an SSTable.
+    /// Public wrapper used by benchmarks and tests.
+    pub fn flush_memtable(&self) -> Result<()> {
+        let mut core = self.core.lock().unwrap();
+        self.flush_memtable_impl("default", &mut core)?;
+        Ok(())
+    }
+
     fn flush_memtable_impl(&self, cf: &str, core: &mut EngineCore<C>) -> Result<bool> {
         if let Some(memtables) = core.memtables.get_mut(cf) {
             if let Some(mem) = memtables.pop() {

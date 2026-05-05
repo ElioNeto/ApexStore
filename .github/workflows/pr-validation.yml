@@ -1,4 +1,4 @@
-name: PR Validation
+name: CI / PR Validation
 
 on:
   pull_request:
@@ -15,6 +15,7 @@ jobs:
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
+    container: rust:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -26,6 +27,7 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    container: rust:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -48,6 +50,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    container: rust:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -58,6 +61,7 @@ jobs:
   build_and_docs:
     name: Build and Docs
     runs-on: ubuntu-latest
+    container: rust:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

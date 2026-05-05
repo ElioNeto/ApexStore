@@ -1,8 +1,23 @@
 use crate::storage::cache::Cache;
+use crate::storage::cache::GlobalBlockCache;
+use std::sync::Arc;
+
+/// Statistics returned by `VersionSet::stats()`.
+pub struct VersionStats {
+    pub num_tables: usize,
+    pub total_size: usize,
+    pub total_records: usize,
+    pub sst_kb: usize,
+    pub sst_files: usize,
+    pub sst_records: usize,
+    pub max_levels_reached: usize,
+    pub num_tables_at_max: usize,
+}
 
 pub struct VersionSet<C: Cache> {
     _cache: std::marker::PhantomData<C>,
     tables: std::collections::HashMap<String, Vec<crate::core::table::Table>>,
+    block_cache: Option<Arc<GlobalBlockCache>>,
 }
 
 impl<C: Cache> VersionSet<C> {
@@ -10,12 +25,42 @@ impl<C: Cache> VersionSet<C> {
         Self {
             _cache: std::marker::PhantomData,
             tables: std::collections::HashMap::new(),
+            block_cache: None,
         }
+    }
+
+    /// Set the block cache for this VersionSet (used for SstableReader passthrough)
+    pub fn set_block_cache(&mut self, block_cache: Arc<GlobalBlockCache>) {
+        self.block_cache = Some(block_cache);
     }
 
     pub fn get(&self, cf: &str, key: &[u8]) -> Option<Vec<u8>> {
         if let Some(cf_tables) = self.tables.get(cf) {
-            for table in cf_tables.iter().rev() {
+            'table_loop: for table in cf_tables.iter().rev() {
+                // Skip tables whose key range doesn't include the target key
+                if !table.min_key.is_empty() && !table.max_key.is_empty() {
+                    if key < table.min_key.as_slice() || key > table.max_key.as_slice() {
+                        continue;
+                    }
+                }
+
+                // For persisted tables, check bloom filter before BTreeMap lookup
+                if let Some(ref path) = table.path {
+                    if let Some(ref block_cache) = self.block_cache {
+                        if let Ok(reader) = crate::storage::reader::SstableReader::open(
+                            path.clone(),
+                            crate::infra::config::StorageConfig::default(),
+                            block_cache.clone(),
+                        ) {
+                            if !reader.might_contain(key) {
+                                // Bloom filter says key definitely does not exist -> skip
+                                continue 'table_loop;
+                            }
+                            // Bloom says key might exist, fall through to BTreeMap lookup
+                        }
+                    }
+                }
+
                 if let Some(val) = table.data.get(key) {
                     return Some(val.clone());
                 }
@@ -70,6 +115,45 @@ impl<C: Cache> VersionSet<C> {
             .unwrap_or_default()
     }
 
+    /// Return table iterators whose [min_key, max_key] intersect the given range.
+    /// This avoids creating unnecessary iterators for tables that cannot
+    /// contain any key in the query range.
+    pub fn table_iters_in_range(
+        &self,
+        cf: &str,
+        lower: Option<&[u8]>,
+        upper: Option<&[u8]>,
+    ) -> Vec<crate::core::table::TableIterator<'_>> {
+        self.tables
+            .get(cf)
+            .map(|v| {
+                v.iter()
+                    .rev()
+                    .filter(|t| {
+                        // Skip tables that have no range metadata (treat as always included)
+                        if t.min_key.is_empty() || t.max_key.is_empty() {
+                            return true;
+                        }
+                        // Table's max_key is before the query lower bound → no intersection
+                        if let Some(lower) = lower {
+                            if t.max_key.as_slice() < lower {
+                                return false;
+                            }
+                        }
+                        // Table's min_key is at or after the query upper bound → no intersection
+                        if let Some(upper) = upper {
+                            if t.min_key.as_slice() >= upper {
+                                return false;
+                            }
+                        }
+                        true
+                    })
+                    .map(|t| t.iter())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn record_count(&self, cf: &str) -> usize {
         self.tables
             .get(cf)
@@ -118,6 +202,40 @@ impl<C: Cache> VersionSet<C> {
                 tables.push(new_table);
             }
         }
+    }
+
+    /// Return statistics about the tables in a column family.
+    pub fn stats(&self, cf: &str) -> VersionStats {
+        let mut stats = VersionStats {
+            num_tables: 0,
+            total_size: 0,
+            total_records: 0,
+            sst_kb: 0,
+            sst_files: 0,
+            sst_records: 0,
+            max_levels_reached: 0,
+            num_tables_at_max: 0,
+        };
+
+        if let Some(cf_tables) = self.tables.get(cf) {
+            stats.num_tables = cf_tables.len();
+            stats.sst_files = cf_tables.len();
+            stats.sst_records = cf_tables.iter().map(|t| t.data.len()).sum();
+            stats.total_records = stats.sst_records;
+            // Estimate size: sum of key+value lengths across all tables
+            stats.total_size = cf_tables
+                .iter()
+                .map(|t| {
+                    t.data
+                        .iter()
+                        .map(|(k, v)| k.len() + v.len())
+                        .sum::<usize>()
+                })
+                .sum();
+            stats.sst_kb = stats.total_size / 1024;
+        }
+
+        stats
     }
 
     /// Get list of all column families

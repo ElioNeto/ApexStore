@@ -7,6 +7,8 @@ pub struct LogRecord {
     pub value: Vec<u8>,
     pub timestamp: u128,
     pub is_deleted: bool,
+    #[serde(default)]
+    pub column_family: Option<String>,
 }
 
 impl LogRecord {
@@ -19,6 +21,7 @@ impl LogRecord {
                 .unwrap_or_default()
                 .as_nanos(),
             is_deleted: false,
+            column_family: None,
         }
     }
 
@@ -31,6 +34,7 @@ impl LogRecord {
                 .unwrap_or_default()
                 .as_nanos(),
             is_deleted: true,
+            column_family: None,
         }
     }
 }

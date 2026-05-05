@@ -3,6 +3,8 @@ pub struct Table {
     pub data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
     pub level: usize,
     pub path: Option<std::path::PathBuf>,
+    pub min_key: Vec<u8>,
+    pub max_key: Vec<u8>,
 }
 
 impl Table {
@@ -10,10 +12,19 @@ impl Table {
         data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
         _options: &crate::core::engine::EngineOptions,
     ) -> Self {
+        let (min_key, max_key) = if let (Some(first), Some(last)) =
+            (data.first_key_value(), data.last_key_value())
+        {
+            (first.0.clone(), last.0.clone())
+        } else {
+            (Vec::new(), Vec::new())
+        };
         Self {
             data,
             level: 0,
             path: None,
+            min_key,
+            max_key,
         }
     }
 
@@ -33,11 +44,67 @@ impl Table {
             std::collections::BTreeMap::new()
         };
 
+        // Extract min_key/max_key from the SSTable's MetaBlock
+        let (min_key, max_key) = if path.exists() {
+            Self::extract_range_from_sstable(path).unwrap_or_default()
+        } else {
+            (Vec::new(), Vec::new())
+        };
+
         Ok(Self {
             data,
             level: 1, // Assume L1 for compacted tables
             path: Some(path.to_path_buf()),
+            min_key,
+            max_key,
         })
+    }
+
+    /// Read the MetaBlock from an SSTable file to extract min_key/max_key
+    fn extract_range_from_sstable(path: &std::path::Path) -> crate::infra::error::Result<(Vec<u8>, Vec<u8>)> {
+        use crate::infra::codec::decode;
+        use crate::storage::builder::MetaBlock;
+        use lz4_flex::decompress_size_prepended;
+        use std::fs::File;
+        use std::io::{Read, Seek, SeekFrom};
+
+        const SST_MAGIC_V2: &[u8; 8] = b"LSMSST03";
+        const FOOTER_SIZE: u64 = 8;
+
+        let mut file = File::open(path)?;
+
+        // Verify magic number
+        let mut magic = [0u8; 8];
+        file.read_exact(&mut magic)?;
+        if &magic != SST_MAGIC_V2 {
+            return Err(crate::infra::error::LsmError::InvalidSstableFormat(
+                format!("Invalid magic number: expected {:?}, found {:?}", SST_MAGIC_V2, magic)
+            ));
+        }
+
+        // Read footer to get metadata offset
+        file.seek(SeekFrom::End(-(FOOTER_SIZE as i64)))?;
+        let mut footer_bytes = [0u8; 8];
+        file.read_exact(&mut footer_bytes)?;
+        let meta_offset = u64::from_le_bytes(footer_bytes);
+
+        // Read compressed metadata
+        file.seek(SeekFrom::Start(meta_offset))?;
+        let file_len = file.metadata()?.len();
+        let meta_size = (file_len - meta_offset - FOOTER_SIZE) as usize;
+        let mut compressed_meta = vec![0u8; meta_size];
+        file.read_exact(&mut compressed_meta)?;
+
+        // Decompress metadata
+        let decompressed = decompress_size_prepended(&compressed_meta)
+            .map_err(|e| crate::infra::error::LsmError::DecompressionFailed(
+                format!("Metadata decompression failed: {}", e)
+            ))?;
+
+        // Deserialize metadata
+        let metadata: MetaBlock = decode(&decompressed)?;
+
+        Ok((metadata.min_key, metadata.max_key))
     }
 
     pub fn size(&self) -> usize {

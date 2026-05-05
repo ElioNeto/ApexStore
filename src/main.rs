@@ -5,6 +5,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .dir_path("/var/lib/apexstore/data")
         .build()?;
 
-    let _engine = LsmEngine::new(config)?;
+    let _engine = LsmEngine::new_from_config(&config, apexstore::storage::cache::GlobalBlockCache::new(100, 4096))?;
     Ok(())
 }

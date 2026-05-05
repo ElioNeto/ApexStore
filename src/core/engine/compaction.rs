@@ -220,6 +220,7 @@ impl Default for LeveledCompaction {
 }
 
 impl LeveledCompaction {
+    #[allow(dead_code)]
     fn get_table_size(table: &Table) -> usize {
         table
             .data

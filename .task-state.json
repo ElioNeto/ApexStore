@@ -1,16 +1,71 @@
 {
-  "issue": 123,
-  "title": "[FEAT] Background compaction real — maybe_compact é síncrono e bloqueia escritas",
-  "branch": "feat/123-background-compaction",
+  "issue": 125,
+  "title": "[PERF] Latência de leitura acima de 1 ms — operações read/scan com performance sub-ótima",
+  "branch": "fix/125-read-performance",
   "todos": [
-    {"id":1,"title":"Create EngineCore<C> struct","description":"Extract all mutable fields from Engine<C> into a new struct EngineCore<C>: memtables, memtable_bytes, version_set, compaction, wal","files":["src/core/engine/mod.rs"],"depends_on":[],"status":"done"},
-    {"id":2,"title":"Wrap EngineCore in Arc<Mutex<>>","description":"Change Engine<C> to hold `core: Arc<Mutex<EngineCore<C>>>` and `compaction_running: Arc<AtomicBool>`. Add `use std::sync::{Arc, Mutex, atomic::AtomicBool};`. Remove old fields from Engine.","files":["src/core/engine/mod.rs"],"depends_on":[1],"status":"done"},
-    {"id":3,"title":"Add close() and Drop with JoinHandle","description":"Add `compaction_thread: Mutex<Option<JoinHandle<()>>>` field to Engine. Implement `close()` method that sets compaction_running=false and joins thread. Add Drop that calls close(). Import JoinHandle.","files":["src/core/engine/mod.rs"],"depends_on":[2],"status":"done"},
-    {"id":4,"title":"Refactor new_generic and write methods","description":"Refactor new_generic to construct EngineCore and wrap in Arc<Mutex>. Refactor put_cf, delete_cf, flush_memtable_impl to lock core with `let mut core = self.core.lock().unwrap();`","files":["src/core/engine/mod.rs"],"depends_on":[2],"status":"done"},
-    {"id":5,"title":"Refactor read methods","description":"Refactor get_cf, scan_cf, scan_range, search_prefix, keys, count, stats, stats_all to lock core internally","files":["src/core/engine/mod.rs"],"depends_on":[2],"status":"done"},
-    {"id":6,"title":"Refactor compact/compact_cf/maybe_compact","description":"Refactor compact and compact_cf to work via locked core. Change maybe_compact to spawn thread: `std::thread::spawn(move || { ... })`","files":["src/core/engine/mod.rs"],"depends_on":[4],"status":"done"},
-    {"id":7,"title":"Error handling in compaction thread","description":"In the spawned compaction thread, wrap core in `catch_unwind` or use `tracing::error!` for errors. No unwrap() in compaction thread. Log errors with tracing::error!","files":["src/core/engine/mod.rs"],"depends_on":[6],"status":"done"},
-    {"id":8,"title":"Add tests","description":"Add 2 tests: (1) test_500_writes_during_compaction writes 500 keys while compaction runs, no Err returns. (2) test_shutdown_with_compaction_in_progress starts compaction, immediately drops engine, no panic.","files":["src/core/engine/mod.rs"],"depends_on":[7],"status":"done"},
-    {"id":9,"title":"Final validation","description":"Run cargo test --all-features, cargo clippy -- -D warnings, fix issues. Update .task-state.json all done.","files":[],"depends_on":[8],"status":"done"}
+    {
+      "id": 1,
+      "title": "Add min_key/max_key fields to Table struct",
+      "description": "Table currently lacks range metadata. Add min_key/max_key fields, populate them from BTreeMap first/last entries in Table::build(), and from MetaBlock when loading from SSTable path.",
+      "files": ["src/core/table.rs"],
+      "depends_on": [],
+      "status": "done"
+    },
+    {
+      "id": 2,
+      "title": "Wire LsmConfig block_cache_size into GlobalBlockCache",
+      "description": "Engine::new_generic() currently hardcodes block_cache_size_mb: 64. Thread the LsmConfig.storage.block_cache_size_mb value through.",
+      "files": ["src/core/engine/mod.rs", "src/infra/config.rs"],
+      "depends_on": [],
+      "status": "done"
+    },
+    {
+      "id": 3,
+      "title": "Plumb block cache and bloom filter into version_set.get()",
+      "description": "Modify VersionSet.get() to use SstableReader with might_contain() (bloom filter) before reading blocks. Store Arc<GlobalBlockCache> in VersionSet for cache passthrough.",
+      "files": ["src/core/engine/version_set.rs", "src/storage/reader.rs"],
+      "depends_on": [1, 2],
+      "status": "done"
+    },
+    {
+      "id": 4,
+      "title": "Skip non-intersecting SSTables in scan_cf",
+      "description": "In scan_cf, before adding an SSTable iterator, check if query range intersects table's [min_key, max_key]. Skip non-intersecting tables.",
+      "files": ["src/core/engine/mod.rs", "src/core/engine/version_set.rs"],
+      "depends_on": [1],
+      "status": "done"
+    },
+    {
+      "id": 5,
+      "title": "Verify MergeIterator uses BinaryHeap",
+      "description": "Confirm MergeIterator in iterators.rs uses BinaryHeap. Add a unit test if not already present.",
+      "files": ["src/core/iterators.rs"],
+      "depends_on": [],
+      "status": "done"
+    },
+    {
+      "id": 6,
+      "title": "Remove unwrap() from critical read paths",
+      "description": "Audit get_cf, scan_cf, version_set.get, SstableReader methods for unwrap() calls. Replace with ? or proper error handling.",
+      "files": ["src/core/engine/mod.rs", "src/core/engine/version_set.rs", "src/storage/reader.rs", "src/core/iterators.rs"],
+      "depends_on": [3, 4, 5],
+      "status": "done"
+    },
+    {
+      "id": 7,
+      "title": "Add read performance benchmarks",
+      "description": "Add new criterion benchmark functions to benches/read_bench.rs for: memtable read latency, SSTable hot cache latency, Bloom filter negative read latency, scan 1000 keys latency.",
+      "files": ["benches/read_bench.rs"],
+      "depends_on": [3, 4, 5],
+      "status": "done"
+    },
+    {
+      "id": 8,
+      "title": "Run lint, clippy, tests; fix regressions",
+      "description": "cargo clippy -- -D warnings, cargo test --all-features, fix regressions. Update .task-state.json to done.",
+      "files": [],
+      "depends_on": [6, 7],
+      "status": "done"
+    }
   ]
 }
