@@ -19,6 +19,39 @@ pub struct CompactionMetrics {
 }
 
 /// Trait for compaction strategies.
+///
+/// Implementations define how SSTables are grouped and merged to maintain
+/// read/write performance and bound space amplification.
+///
+/// # Usage example
+///
+/// ```rust
+/// use apexstore::core::engine::compaction::{
+///     CompactionStrategy, SizeTieredCompaction, CompactionMetrics,
+/// };
+/// use apexstore::core::engine::EngineOptions;
+/// use apexstore::infra::config::StorageConfig;
+/// use apexstore::core::table::Table;
+/// use std::collections::BTreeMap;
+///
+/// let strategy = SizeTieredCompaction::default();
+/// let options = EngineOptions::default();
+/// let storage = StorageConfig::default();
+/// let dir = tempfile::tempdir().unwrap();
+///
+/// // Build a single table with some data
+/// let mut data = BTreeMap::new();
+/// data.insert(b"a".to_vec(), b"1".to_vec());
+/// let table = Table::build(data, &options);
+///
+/// let output_dir = dir.path().to_path_buf();
+/// let (new_tables, metrics) = strategy
+///     .execute(vec![table], &options, &storage, &output_dir)
+///     .unwrap();
+///
+/// assert!(!new_tables.is_empty());
+/// assert!(metrics.bytes_read > 0);
+/// ```
 pub trait CompactionStrategy: Send + Sync {
     /// Pick tables that should be compacted.
     /// Returns a vector of groups, where each group is a vector of tables to merge together.

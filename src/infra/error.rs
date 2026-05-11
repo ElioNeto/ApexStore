@@ -20,15 +20,9 @@ use thiserror::Error;
 ///
 /// # Variant history
 ///
-/// | Removed variant       | Reason |
-/// |-----------------------|--------|
-/// | `KeyNotFound`         | Renamed to `NotFound(String)` to include the missing key |
-/// | `InvalidSstable`      | Context-free alias for `InvalidSstableFormat(String)` — zero call sites |
-/// | `SerializationFailed(String)` | Replaced by `JsonError(#[from] serde_json::Error)` |
-/// | `DeserializationFailed(String)` | Replaced by `JsonError(#[from] serde_json::Error)` |
-///
-/// `Serialization(#[from] bincode::Error)` was renamed to `Codec` to match
-/// the `infra::codec` module name.
+/// See [`CHANGELOG.md`](https://github.com/ElioNeto/ApexStore/blob/main/CHANGELOG.md)
+/// under `[Unreleased]` → `Removed` / `Changed` for the full history of removed
+/// variants and renames (issue #92).
 #[derive(Error, Debug)]
 pub enum LsmError {
     // -------------------------------------------------------------------------

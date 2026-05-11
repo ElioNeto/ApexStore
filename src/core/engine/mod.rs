@@ -116,6 +116,34 @@ pub(crate) struct EngineCore<C: Cache> {
 }
 
 /// The core engine that manages LSM-tree structure and compaction.
+///
+/// # Type parameters
+///
+/// * `C` — The block cache implementation (typically
+///   [`GlobalBlockCache`](crate::storage::cache::GlobalBlockCache) or
+///   [`NoopCache`](crate::storage::cache::NoopCache) for tests).
+///
+/// # Usage example
+///
+/// ```rust
+/// use apexstore::LsmConfig;
+/// use apexstore::core::engine::Engine;
+/// use apexstore::storage::cache::GlobalBlockCache;
+///
+/// let dir = tempfile::tempdir().unwrap();
+/// let mut config = LsmConfig::default();
+/// config.core.dir_path = dir.path().to_path_buf();
+///
+/// let mut engine = Engine::new_from_config(
+///     &config,
+///     GlobalBlockCache::new(100, 4096),
+/// ).unwrap();
+///
+/// engine.set(b"key1", b"value1").unwrap();
+/// assert_eq!(engine.get(b"key1").unwrap(), Some(b"value1".to_vec()));
+/// engine.delete(b"key1").unwrap();
+/// assert_eq!(engine.get(b"key1").unwrap(), None);
+/// ```
 pub struct Engine<C: Cache> {
     options: EngineOptions,
     /// All mutable state behind a mutex for thread-safe access.

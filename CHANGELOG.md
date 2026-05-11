@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **#124** — `search()` removed from public API (was a stub returning `Vec::new()`; was listed as added in v2.0.0)
 - `search_prefix_legacy()` removed (was a stub returning `Vec::new()`)
+- **#92** — Removed duplicate `LsmError` variants: `KeyNotFound` (replaced by `NotFound(String)`), `InvalidSstable` (no call sites), `SerializationFailed(String)`/`DeserializationFailed(String)` (replaced by `JsonError(#[from] serde_json::Error)`)
+
+### 🔄 Changed
+
+- **#92** — Renamed `LsmError::Serialization(#[from] bincode::Error)` → `Codec` to match `infra::codec` module name; moved variant history table from `src/infra/error.rs` into `CHANGELOG.md`
 
 ### 🔧 Fixes Planned
 
