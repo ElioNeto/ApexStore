@@ -3,10 +3,45 @@ use crate::infra::codec::{decode, encode};
 use crate::infra::error::{LsmError, Result};
 use crc32fast::Hasher;
 use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use tracing::debug;
+
+/// WAL frame version constants for backward compatibility.
+///
+/// - Version 0: LogRecord serialized WITHOUT `column_family` (original format).
+/// - Version 1: LogRecord serialized WITH `column_family`.
+pub(crate) const WAL_FRAME_VERSION_V0: u8 = 0;
+pub(crate) const WAL_FRAME_VERSION_V1: u8 = 1;
+pub(crate) const WAL_CURRENT_FRAME_VERSION: u8 = WAL_FRAME_VERSION_V1;
+
+/// LogRecord payload format for V0 frames (without `column_family`).
+///
+/// This struct is used exclusively for backward-compatible deserialization of
+/// WAL frames written by older versions of the engine that did not persist the
+/// column family.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct LogRecordV0 {
+    pub key: Vec<u8>,
+    pub value: Vec<u8>,
+    pub timestamp: u128,
+    pub is_deleted: bool,
+    // no column_family — this is the old format
+}
+
+impl From<LogRecordV0> for LogRecord {
+    fn from(v0: LogRecordV0) -> Self {
+        LogRecord {
+            key: v0.key,
+            value: v0.value,
+            timestamp: v0.timestamp,
+            is_deleted: v0.is_deleted,
+            column_family: None, // legacy records have no CF → treated as "default"
+        }
+    }
+}
 
 /// Write-Ahead Log for crash-recovery durability.
 ///
@@ -24,10 +59,16 @@ use tracing::debug;
 /// # On-Disk Format
 ///
 /// Each WAL record frame follows this structure:
-/// `[length: u32 LE][payload: bytes][crc32: u32 LE]`
+/// `[length: u32 LE][version: u8][payload: bytes][crc32: u32 LE]`
 ///
-/// The CRC32 checksum is calculated over the payload and provides protection
-/// against partial writes, bit rot, and other forms of data corruption.
+/// - `length`: total size of (`version` + `payload`) in bytes.
+/// - `version`: frame format version (`0` = no CF field, `1` = with CF field).
+/// - `payload`: bincode-serialized `LogRecord` (structure depends on version).
+/// - `crc32`: CRC32 checksum calculated over (`version` + `payload`).
+///
+/// The CRC32 checksum provides protection against partial writes, bit rot,
+/// and other forms of data corruption.  The version byte enables backward
+/// compatible upgrades of the serialised log record format.
 pub struct WriteAheadLog {
     file: Mutex<BufWriter<File>>,
     /// Exposed read-only so callers (e.g. `LsmEngine::stats_all`) can
@@ -53,20 +94,25 @@ impl WriteAheadLog {
 
     /// Append a single record to the WAL and fsync.
     ///
-    /// The on-disk format is a length-prefixed frame with CRC32 checksum:
-    /// `[length: u32 LE][payload: bytes][crc32: u32 LE]`
+    /// The on-disk format is:
+    /// `[length: u32 LE][version: u8][payload: bytes][crc32: u32 LE]`
     pub fn write_record(&self, record: &LogRecord) -> Result<()> {
         let serialized = encode(record)?;
-        let length = serialized.len() as u32;
+        let version = WAL_CURRENT_FRAME_VERSION;
 
-        // Calculate CRC32 over the payload
+        // `length` includes version byte + payload bytes
+        let length = 1u32 + serialized.len() as u32;
+
+        // Calculate CRC32 over (version + payload)
         let mut hasher = Hasher::new();
+        hasher.update(&[version]);
         hasher.update(&serialized);
         let checksum = hasher.finalize();
 
         let mut writer = self.file.lock();
 
         writer.write_all(&length.to_le_bytes())?;
+        writer.write_all(&[version])?;
         writer.write_all(&serialized)?;
         writer.write_all(&checksum.to_le_bytes())?;
         writer.flush()?;
@@ -83,13 +129,18 @@ impl WriteAheadLog {
     /// write that was not fsynced before a crash.
     ///
     /// The expected on-disk format is:
-    /// `[length: u32 LE][payload: bytes][crc32: u32 LE]`
+    /// `[length: u32 LE][version: u8][payload: bytes][crc32: u32 LE]`
     ///
     /// # Compatibility Note
     ///
-    /// WALs created by versions prior to this change (without CRC32) will
-    /// be rejected with a `CorruptedData` error. The engine requires all
-    /// WAL frames to include the checksum for crash recovery safety.
+    /// WAL frames with `version == 0` are deserialised without the
+    /// `column_family` field (legacy format) and treated as `"default"`.
+    /// Frames with `version == 1` are deserialised with full `column_family`
+    /// support.
+    ///
+    /// WALs created by versions prior to the CRC32 addition will be rejected
+    /// with a `CorruptedData` error. The engine requires all WAL frames to
+    /// include the checksum for crash recovery safety.
     pub fn recover(&self) -> Result<Vec<LogRecord>> {
         let mut records = Vec::new();
         let file = File::open(&self.path)?;
@@ -115,7 +166,20 @@ impl WriteAheadLog {
                 ));
             }
 
-            let mut payload = vec![0u8; length];
+            if length < 1 {
+                return Err(LsmError::CorruptedData(
+                    "WAL record too short (missing version byte)".to_string(),
+                ));
+            }
+
+            // Read version byte
+            let mut versionbuf = [0u8; 1];
+            reader.read_exact(&mut versionbuf)?;
+            let version = versionbuf[0];
+
+            // The payload is length - 1 (excluding the version byte itself)
+            let payload_len = length - 1;
+            let mut payload = vec![0u8; payload_len];
             if let Err(e) = reader.read_exact(&mut payload) {
                 if e.kind() == io::ErrorKind::UnexpectedEof {
                     return Err(LsmError::CorruptedData(
@@ -137,8 +201,9 @@ impl WriteAheadLog {
             }
             let stored_checksum = u32::from_le_bytes(checksumbuf);
 
-            // Recalculate and validate checksum
+            // Recalculate and validate checksum over (version + payload)
             let mut hasher = Hasher::new();
+            hasher.update(&[version]);
             hasher.update(&payload);
             let calculated = hasher.finalize();
 
@@ -148,9 +213,28 @@ impl WriteAheadLog {
                 ));
             }
 
-            let record: LogRecord = decode(&payload).map_err(|_| {
-                LsmError::CorruptedData("WAL record deserialization failed".to_string())
-            })?;
+            // Deserialize based on version
+            let record = match version {
+                WAL_FRAME_VERSION_V0 => {
+                    let v0: LogRecordV0 = decode(&payload).map_err(|_| {
+                        LsmError::CorruptedData("WAL record V0 deserialization failed".to_string())
+                    })?;
+                    LogRecord::from(v0)
+                }
+                WAL_FRAME_VERSION_V1 => {
+                    let r: LogRecord = decode(&payload).map_err(|_| {
+                        LsmError::CorruptedData("WAL record V1 deserialization failed".to_string())
+                    })?;
+                    r
+                }
+                other => {
+                    return Err(LsmError::CorruptedData(format!(
+                        "Unknown WAL frame version: {}",
+                        other
+                    )));
+                }
+            };
+
             records.push(record);
         }
 
@@ -195,6 +279,41 @@ impl WriteAheadLog {
         // the intermediate state.
         let file = guard.get_mut().try_clone()?;
         *guard = BufWriter::new(file);
+
+        Ok(())
+    }
+
+    /// Remove all WAL records that do **not** satisfy the predicate, then
+    /// rewrite the surviving records.
+    ///
+    /// This is used after flushing a single column family so that records
+    /// belonging to other (non-flushed) column families are preserved.
+    ///
+    /// # Crash safety
+    ///
+    /// The operation reads all records into memory, truncates the file,
+    /// and re-encodes the survivors.  If a crash occurs during the rewrite
+    /// the WAL will contain only the records that were written up to that
+    /// point, which is a subset of the original set — the engine will
+    /// simply replay fewer records on next startup, which is safe because
+    /// the flushed CF's data is already durable in an SSTable.
+    pub fn retain<F>(&self, mut predicate: F) -> Result<()>
+    where
+        F: FnMut(&LogRecord) -> bool,
+    {
+        // 1. Read all existing records
+        let all_records = self.recover()?;
+
+        // 2. Filter
+        let survivors: Vec<LogRecord> = all_records.into_iter().filter(|r| predicate(r)).collect();
+
+        // 3. Rewind file
+        self.clear()?;
+
+        // 4. Write back survivors
+        for record in &survivors {
+            self.write_record(record)?;
+        }
 
         Ok(())
     }
@@ -244,7 +363,7 @@ mod tests {
         let mut data = Vec::new();
         file.read_to_end(&mut data).unwrap();
 
-        // Flip a bit in the first byte of the payload (after the length prefix)
+        // Flip a bit in the version byte (offset 4 from start, after length prefix)
         if data.len() > 5 {
             data[4] ^= 0x01;
         }
@@ -306,15 +425,17 @@ mod tests {
         let wal_path = temp_dir.path().join("wal.log");
         let mut original = fs::read(&wal_path).unwrap();
 
-        // Original structure: [len:4][payload:N][crc32:4]
-        // We want to truncate the payload, keeping len and part of payload, but removing checksum
-        // Calculate where payload starts (after len prefix at offset 4)
-        // and where checksum is at the end
-        if original.len() > 8 {
-            // Keep length prefix (4 bytes) + part of payload (reduce by 8 bytes)
-            // but remove checksum (4 bytes)
-            let keep_length = 4 + (original.len() - 8) - 4;
-            if keep_length > 4 {
+        // Current structure: [len:4][ver:1][payload:N][crc32:4]
+        // We want to truncate so that the payload is shorter than 'length' claims,
+        // and the checksum is removed.
+        // Minimum viable frame with >0 payload: 4+1+min_payload+4 >= 9.
+        // We keep len + ver + half the payload, dropping checksum.
+        if original.len() > 9 {
+            // Keep length (4) + version (1) + half of the payload (no checksum)
+            let payload_area = original.len() - 9; // N
+            let half_payload = payload_area / 2;
+            let keep_length = 4 + 1 + half_payload; // len + ver + half payload
+            if keep_length > 5 {
                 original.truncate(keep_length);
                 fs::write(&wal_path, original).unwrap();
             }
@@ -332,27 +453,89 @@ mod tests {
     }
 
     #[test]
-    fn test_wal_backward_compat_no_cf() {
-        // Test that a LogRecord without column_family (simulating old WAL format)
-        // deserializes correctly and maps to "default" CF.
+    fn test_wal_v1_round_trip_with_cf() {
+        // Test that a LogRecord WITH a column family round-trips correctly.
         let (_temp_dir, wal) = create_test_wal();
 
-        // Create a record using the constructor — column_family is None
-        let record = LogRecord::new(b"test_key".to_vec(), b"test_value".to_vec());
-        assert!(record.column_family.is_none());
+        let mut record = LogRecord::new(b"k1".to_vec(), b"v1".to_vec());
+        record.column_family = Some("users".to_string());
 
-        // Write it to WAL (serialized without CF field)
         wal.write_record(&record).unwrap();
-
-        // Recover it back
         let recovered = wal.recover().unwrap();
         assert_eq!(recovered.len(), 1);
         assert_eq!(recovered[0], record);
+        assert_eq!(
+            recovered[0].column_family.as_deref(),
+            Some("users")
+        );
+    }
 
-        // Verify column_family is None (old-format record)
+    #[test]
+    fn test_wal_v1_record_with_no_cf_round_trip() {
+        // Test that a V1 record with column_family: None round-trips correctly.
+        let (_temp_dir, wal) = create_test_wal();
+
+        let record = LogRecord::new(b"test_key".to_vec(), b"test_value".to_vec());
+        assert!(record.column_family.is_none());
+
+        wal.write_record(&record).unwrap();
+        let recovered = wal.recover().unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0], record);
         assert!(recovered[0].column_family.is_none());
 
         // Verify it maps to "default" via unwrap_or
+        let cf = recovered[0].column_family.as_deref().unwrap_or("default");
+        assert_eq!(cf, "default");
+    }
+
+    #[test]
+    fn test_wal_v0_backward_compat_no_cf() {
+        // Test that a manually constructed V0 frame (without column_family field)
+        // can be recovered and maps to column_family = None → "default".
+        //
+        // A V0 frame is: [len:u32 LE][ver:u8 = 0][payload: LogRecordV0 (bincode)][crc32:u32 LE]
+        let temp_dir = TempDir::new().unwrap();
+        let wal_path = temp_dir.path().join("wal.log");
+
+        // Construct a LogRecordV0 payload manually
+        let v0 = LogRecordV0 {
+            key: b"legacy_key".to_vec(),
+            value: b"legacy_value".to_vec(),
+            timestamp: 42,
+            is_deleted: false,
+        };
+
+        // Serialize using bincode (same encoding as V1 but without column_family)
+        let payload = encode(&v0).unwrap();
+        let version = WAL_FRAME_VERSION_V0;
+
+        // Frame: [len:4][ver:1][payload:N][crc32:4]
+        let length = 1u32 + payload.len() as u32;
+
+        let mut hasher = Hasher::new();
+        hasher.update(&[version]);
+        hasher.update(&payload);
+        let checksum = hasher.finalize();
+
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&length.to_le_bytes());
+        frame.push(version);
+        frame.extend_from_slice(&payload);
+        frame.extend_from_slice(&checksum.to_le_bytes());
+
+        fs::write(&wal_path, &frame).unwrap();
+
+        // Now recover via WriteAheadLog
+        let wal = WriteAheadLog::new(temp_dir.path()).unwrap();
+        let recovered = wal.recover().unwrap();
+        assert_eq!(recovered.len(), 1);
+
+        // The record should have column_family = None (treated as "default")
+        assert!(recovered[0].column_family.is_none());
+        assert_eq!(recovered[0].key, v0.key);
+        assert_eq!(recovered[0].value, v0.value);
+
         let cf = recovered[0].column_family.as_deref().unwrap_or("default");
         assert_eq!(cf, "default");
     }

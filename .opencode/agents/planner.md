@@ -2,7 +2,7 @@
 description: Lê AGENTS.md + corpo da issue e gera .task-state.json com TODOs atômicos.
 mode: subagent
 temperature: 0.0
-maxSteps: 6
+maxSteps: 100
 permission:
   read: allow
   list: allow

@@ -1,10 +1,30 @@
-#[derive(Clone)]
 pub struct Table {
     pub data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
     pub level: usize,
     pub path: Option<std::path::PathBuf>,
     pub min_key: Vec<u8>,
     pub max_key: Vec<u8>,
+    /// Cached bloom filter to avoid opening an SstableReader just for might_contain().
+    /// Loaded from the SSTable's MetaBlock when a table is created from a file path.
+    pub bloom_filter: Option<bloomfilter::Bloom<[u8]>>,
+}
+
+impl Clone for Table {
+    fn clone(&self) -> Self {
+        let bloom_filter = self.bloom_filter.as_ref().map(|bf| {
+            let bytes = bf.to_bytes();
+            bloomfilter::Bloom::<[u8]>::from_bytes(bytes)
+                .expect("Bloom filter serialization round-trip should not fail")
+        });
+        Self {
+            data: self.data.clone(),
+            level: self.level,
+            path: self.path.clone(),
+            min_key: self.min_key.clone(),
+            max_key: self.max_key.clone(),
+            bloom_filter,
+        }
+    }
 }
 
 impl Table {
@@ -25,6 +45,7 @@ impl Table {
             path: None,
             min_key,
             max_key,
+            bloom_filter: None,
         }
     }
 
@@ -38,17 +59,22 @@ impl Table {
     pub fn from_sstable_path(path: &std::path::Path) -> crate::infra::error::Result<Self> {
         // Read the SSTable and extract data
         // For now, we'll create an empty table - in production this would read the SSTable
-        let data = if path.exists() {
-            std::collections::BTreeMap::new()
-        } else {
-            std::collections::BTreeMap::new()
-        };
+        let data = std::collections::BTreeMap::new();
 
-        // Extract min_key/max_key from the SSTable's MetaBlock
-        let (min_key, max_key) = if path.exists() {
-            Self::extract_range_from_sstable(path).unwrap_or_default()
+        // Extract metadata from the SSTable's MetaBlock
+        let (min_key, max_key, bloom_filter) = if path.exists() {
+            match Self::read_meta_block(path) {
+                Ok(meta) => {
+                    let bf = bloomfilter::Bloom::<[u8]>::from_bytes(meta.bloom_filter_data)
+                        .map_err(|e| crate::infra::error::LsmError::CompactionFailed(
+                            format!("Bloom filter deserialization failed: {}", e)
+                        ))?;
+                    (meta.min_key, meta.max_key, Some(bf))
+                }
+                Err(_) => (Vec::new(), Vec::new(), None),
+            }
         } else {
-            (Vec::new(), Vec::new())
+            (Vec::new(), Vec::new(), None)
         };
 
         Ok(Self {
@@ -57,11 +83,12 @@ impl Table {
             path: Some(path.to_path_buf()),
             min_key,
             max_key,
+            bloom_filter,
         })
     }
 
-    /// Read the MetaBlock from an SSTable file to extract min_key/max_key
-    fn extract_range_from_sstable(path: &std::path::Path) -> crate::infra::error::Result<(Vec<u8>, Vec<u8>)> {
+    /// Read the MetaBlock from an SSTable file
+    fn read_meta_block(path: &std::path::Path) -> crate::infra::error::Result<crate::storage::builder::MetaBlock> {
         use crate::infra::codec::decode;
         use crate::storage::builder::MetaBlock;
         use lz4_flex::decompress_size_prepended;
@@ -104,7 +131,7 @@ impl Table {
         // Deserialize metadata
         let metadata: MetaBlock = decode(&decompressed)?;
 
-        Ok((metadata.min_key, metadata.max_key))
+        Ok(metadata)
     }
 
     pub fn size(&self) -> usize {

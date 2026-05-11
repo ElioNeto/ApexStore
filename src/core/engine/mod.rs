@@ -4,7 +4,7 @@ pub mod version_set;
 
 use crate::core::log_record::LogRecord;
 use crate::core::table::Table;
-use crate::storage::cache::{Cache, GlobalBlockCache};
+use crate::storage::cache::Cache;
 use crate::storage::wal::WriteAheadLog;
 use crate::infra::error::Result;
 use std::collections::HashMap;
@@ -307,18 +307,7 @@ impl<C: Cache> Engine<C> {
         let recovered_records = wal.recover()?;
         
         // Build EngineCore with all mutable state
-        // Clone cache for type inspection before moving into VersionSet
-        let cache_clone = cache.clone();
-        let mut version_set = VersionSet::new(options.clone(), cache);
-        // If the generic cache is an Arc<GlobalBlockCache>, wire it into VersionSet
-        // for bloom filter passthrough in get().
-        {
-            use std::any::Any;
-            let cache_any: &dyn Any = &cache_clone;
-            if let Some(arc_cache) = cache_any.downcast_ref::<Arc<GlobalBlockCache>>() {
-                version_set.set_block_cache((*arc_cache).clone());
-            }
-        }
+        let version_set = VersionSet::new(options.clone(), cache);
 
         let mut core = EngineCore {
             memtables: HashMap::new(),
@@ -380,7 +369,9 @@ impl<C: Cache> Engine<C> {
     pub fn put_cf(&mut self, cf: &str, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
         let needs_compact;
         {
-            let mut core = self.core.lock().unwrap();
+            let mut core = self.core.lock().map_err(|_| {
+                crate::infra::error::LsmError::LockPoisoned("engine core in put_cf")
+            })?;
             // Write to WAL first (before modifying memtable) for crash safety
             let mut record = LogRecord::new(key.clone(), value.clone());
             record.column_family = Some(cf.to_string());
@@ -421,7 +412,9 @@ impl<C: Cache> Engine<C> {
         let key = key.into();
         let needs_compact;
         {
-            let mut core = self.core.lock().unwrap();
+            let mut core = self.core.lock().map_err(|_| {
+                crate::infra::error::LsmError::LockPoisoned("engine core in delete_cf")
+            })?;
             
             // Write tombstone to WAL first (before modifying memtable) for crash safety
             let mut record = LogRecord::tombstone(key.clone());
@@ -599,7 +592,9 @@ impl<C: Cache> Engine<C> {
     }
     
     pub fn keys(&self) -> Result<Vec<Vec<u8>>> {
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock().map_err(|_| {
+            crate::infra::error::LsmError::LockPoisoned("engine core in keys")
+        })?;
         let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
         
         if let Some(memtables) = core.memtables.get("default") {
@@ -624,7 +619,9 @@ impl<C: Cache> Engine<C> {
     }
     
     pub fn count(&self) -> Result<usize> {
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock().map_err(|_| {
+            crate::infra::error::LsmError::LockPoisoned("engine core in count")
+        })?;
         let mut count = 0;
         let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
         
@@ -652,7 +649,9 @@ impl<C: Cache> Engine<C> {
     /// Flush the current memtable to an SSTable.
     /// Public wrapper used by benchmarks and tests.
     pub fn flush_memtable(&self) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.lock().map_err(|_| {
+            crate::infra::error::LsmError::LockPoisoned("engine core in flush_memtable")
+        })?;
         self.flush_memtable_impl("default", &mut core)?;
         Ok(())
     }
@@ -681,13 +680,17 @@ impl<C: Cache> Engine<C> {
     }
     
     pub fn compact_cf(&self, cf: &str) -> Result<Option<CompactionMetrics>> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.lock().map_err(|_| {
+            crate::infra::error::LsmError::LockPoisoned("engine core in compact_cf")
+        })?;
         compact_cf_core(&mut core, &self.options, cf)
     }
     
     pub fn compact(&self) -> Result<Vec<(String, CompactionMetrics)>> {
         let mut results = Vec::new();
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock().map_err(|_| {
+            crate::infra::error::LsmError::LockPoisoned("engine core in compact")
+        })?;
         let column_families = core.version_set.column_families();
         drop(core); // Release lock before calling compact_cf which will re-acquire
         // Actually, we need the lock for compact_cf, so just call it per CF
@@ -849,7 +852,9 @@ impl<C: Cache> Engine<C> {
     }
     
     pub fn stats(&self, cf: &str) -> Result<LsmStats> {
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock().map_err(|_| {
+            crate::infra::error::LsmError::LockPoisoned("engine core in stats")
+        })?;
         let mut stats = LsmStats::default();
         
         // Get stats from version set
@@ -876,7 +881,9 @@ impl<C: Cache> Engine<C> {
     }
     
     pub fn stats_all(&self) -> Result<LsmStats> {
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock().map_err(|_| {
+            crate::infra::error::LsmError::LockPoisoned("engine core in stats_all")
+        })?;
         let mut combined = LsmStats::default();
         let column_families = core.version_set.column_families();
         
@@ -1597,6 +1604,79 @@ mod tests {
             count > 0,
             "Data should survive shutdown during compaction, got {} keys",
             count
+        );
+    }
+
+    #[test]
+    fn test_benchmark_memtable_read_latency() {
+        let dir = tempdir().unwrap();
+        let mut config = crate::infra::config::LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+        config.compaction.max_sstables = 4;
+        let mut engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+        let key = b"bench_key";
+        engine
+            .put_cf("default", key.to_vec(), b"value".to_vec())
+            .unwrap();
+
+        // Warm up
+        for _ in 0..100 {
+            engine.get_cf("default", key).unwrap();
+        }
+
+        let start = std::time::Instant::now();
+        let iterations = 1000;
+        for _ in 0..iterations {
+            engine.get_cf("default", key).unwrap();
+        }
+        let elapsed = start.elapsed() / iterations as u32;
+
+        // Memtable reads should be < 10 µs
+        assert!(
+            elapsed < std::time::Duration::from_micros(10),
+            "Memtable read avg {:?} exceeds 10µs",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn test_benchmark_bloom_filter_negative_read() {
+        let dir = tempdir().unwrap();
+        let mut config = crate::infra::config::LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+        config.compaction.max_sstables = 4;
+        // Use small memtable to trigger flush
+        config.core.memtable_max_size = 4096;
+        let mut engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Write enough to trigger flush
+        for i in 0..1000 {
+            engine
+                .put_cf("default", format!("key{}", i).into_bytes(), b"val".to_vec())
+                .unwrap();
+        }
+        engine.flush_memtable().unwrap();
+
+        let start = std::time::Instant::now();
+        let iterations = 1000;
+        for _ in 0..iterations {
+            // Key that doesn't exist — should be caught by bloom filter fast path
+            let _ = engine.get_cf("default", b"nonexistent_key_xyz");
+        }
+        let elapsed = start.elapsed() / iterations as u32;
+
+        assert!(
+            elapsed < std::time::Duration::from_micros(10),
+            "Bloom filter negative read avg {:?} exceeds 10µs",
+            elapsed
         );
     }
 }

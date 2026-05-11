@@ -1,6 +1,4 @@
 use crate::storage::cache::Cache;
-use crate::storage::cache::GlobalBlockCache;
-use std::sync::Arc;
 
 /// Statistics returned by `VersionSet::stats()`.
 pub struct VersionStats {
@@ -17,7 +15,6 @@ pub struct VersionStats {
 pub struct VersionSet<C: Cache> {
     _cache: std::marker::PhantomData<C>,
     tables: std::collections::HashMap<String, Vec<crate::core::table::Table>>,
-    block_cache: Option<Arc<GlobalBlockCache>>,
 }
 
 impl<C: Cache> VersionSet<C> {
@@ -25,13 +22,7 @@ impl<C: Cache> VersionSet<C> {
         Self {
             _cache: std::marker::PhantomData,
             tables: std::collections::HashMap::new(),
-            block_cache: None,
         }
-    }
-
-    /// Set the block cache for this VersionSet (used for SstableReader passthrough)
-    pub fn set_block_cache(&mut self, block_cache: Arc<GlobalBlockCache>) {
-        self.block_cache = Some(block_cache);
     }
 
     pub fn get(&self, cf: &str, key: &[u8]) -> Option<Vec<u8>> {
@@ -44,21 +35,13 @@ impl<C: Cache> VersionSet<C> {
                     }
                 }
 
-                // For persisted tables, check bloom filter before BTreeMap lookup
-                if let Some(ref path) = table.path {
-                    if let Some(ref block_cache) = self.block_cache {
-                        if let Ok(reader) = crate::storage::reader::SstableReader::open(
-                            path.clone(),
-                            crate::infra::config::StorageConfig::default(),
-                            block_cache.clone(),
-                        ) {
-                            if !reader.might_contain(key) {
-                                // Bloom filter says key definitely does not exist -> skip
-                                continue 'table_loop;
-                            }
-                            // Bloom says key might exist, fall through to BTreeMap lookup
-                        }
+                // Use cached bloom filter to avoid I/O
+                if let Some(ref bloom_filter) = table.bloom_filter {
+                    if !bloom_filter.check(key) {
+                        // Bloom filter says key definitely does not exist -> skip
+                        continue 'table_loop;
                     }
+                    // Bloom says key might exist, fall through to BTreeMap lookup
                 }
 
                 if let Some(val) = table.data.get(key) {

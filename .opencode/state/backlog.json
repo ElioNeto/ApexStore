@@ -1,1 +1,138 @@
-{"last_sync":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","issues":[]}
+{
+  "issues": [
+    {
+      "number": 119,
+      "priority": "critical",
+      "title": "[BUG] Pipeline CI não validado",
+      "status": "open",
+      "depends_on": [
+        93,
+        107,
+        47
+      ],
+      "blocks": [],
+      "acceptance_summary": [
+        "cargo build passa",
+        "cargo clippy -- -D warnings",
+        "Nenhum unwrap()",
+        "cargo test --all-features",
+        "cargo audit"
+      ],
+      "fetched_body": false
+    },
+    {
+      "number": 120,
+      "priority": "high",
+      "title": "[BUG] Testes de falha ausentes",
+      "status": "open",
+      "depends_on": [
+        107,
+        47
+      ],
+      "blocks": [],
+      "acceptance_summary": [
+        "WAL truncation recovery",
+        "SSTable corrupção LsmError",
+        "Crash durante compaction",
+        "WAL parcial replay",
+        "Write amplification"
+      ],
+      "fetched_body": false
+    },
+    {
+      "number": 121,
+      "priority": "low",
+      "title": "[REFACTOR] Mover histórico LsmError p/ CHANGELOG",
+      "status": "open",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "CHANGELOG.md criado",
+        "Unreleased doc breaking changes",
+        "Histórico removido error.rs",
+        "Docstrings Engine/LsmConfig/Compaction",
+        "Exemplo em examples/"
+      ],
+      "fetched_body": false
+    },
+    {
+      "number": 122,
+      "priority": "critical",
+      "title": "[BUG] WAL não persiste Column Family",
+      "status": "done",
+      "depends_on": [
+        107
+      ],
+      "blocks": [
+        120
+      ],
+      "acceptance_summary": [
+        "LogRecord inclui column_family",
+        "WAL serializa CF",
+        "WAL recover com CF",
+        "replay_wal_records distribui CF",
+        "Backward compat"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 123,
+      "priority": "high",
+      "title": "[FEAT] Background compaction real",
+      "status": "done",
+      "depends_on": [
+        47
+      ],
+      "blocks": [
+        119
+      ],
+      "acceptance_summary": [
+        "maybe_compact spawna thread",
+        "compaction_running real",
+        "Escritas não bloqueiam",
+        "Shutdown ordenado",
+        "Sem unwrap()"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 124,
+      "priority": "medium",
+      "title": "[BUG] search() e search_prefix_legacy() stubs vazios",
+      "status": "open",
+      "depends_on": [],
+      "blocks": [
+        119
+      ],
+      "acceptance_summary": [
+        "search() implementada/removida",
+        "search_prefix_legacy() deprecated",
+        "Nenhum Vec::new() silencioso",
+        "Err explícito se unimplemented",
+        "Teste após inserir dados"
+      ],
+      "fetched_body": false
+    },
+    {
+      "number": 125,
+      "priority": "high",
+      "title": "[PERF] Latência de leitura acima de 1 ms",
+      "status": "open",
+      "depends_on": [
+        47,
+        123
+      ],
+      "blocks": [
+        120
+      ],
+      "acceptance_summary": [
+        "Bloom filter antes de I/O",
+        "Block cache configurável",
+        "scan_cf skip SSTables fora do range",
+        "Merge BinaryHeap O(log N)",
+        "Sem unwrap() crítico"
+      ],
+      "fetched_body": false
+    }
+  ]
+}
