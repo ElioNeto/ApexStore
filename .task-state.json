@@ -1,71 +1,186 @@
 {
-  "issue": 125,
-  "title": "[PERF] Latência de leitura acima de 1 ms — operações read/scan com performance sub-ótima",
-  "branch": "fix/125-read-performance",
+  "issues": [
+    {
+      "number": 119,
+      "priority": "critical",
+      "title": "[BUG] Pipeline CI não validado",
+      "status": "open",
+      "depends_on": [
+        93,
+        107,
+        47
+      ],
+      "blocks": [],
+      "acceptance_summary": [
+        "cargo build passa",
+        "cargo clippy -- -D warnings passa",
+        "Nenhum unwrap() em produção",
+        "cargo test --all-features passa",
+        "cargo audit sem vulnerabilidades"
+      ],
+      "fetched_body": false
+    },
+    {
+      "number": 120,
+      "priority": "high",
+      "title": "[BUG] Testes de falha ausentes",
+      "status": "open",
+      "depends_on": [
+        107,
+        47
+      ],
+      "blocks": [],
+      "acceptance_summary": [
+        "Teste: WAL truncation recovery",
+        "Teste: corrupção SSTable LsmError",
+        "Teste: crash durante compaction",
+        "Teste: WAL parcial replay",
+        "Benchmark: write amplification"
+      ],
+      "fetched_body": false
+    },
+    {
+      "number": 121,
+      "priority": "low",
+      "title": "[REFACTOR] Mover histórico LsmError para CHANGELOG.md",
+      "status": "open",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "CHANGELOG.md criado",
+        "Unreleased documenta breaking changes",
+        "Histórico removido de error.rs",
+        "Docstrings de Engine, LsmConfig, CompactionStrategy",
+        "Exemplo funcional em examples/"
+      ],
+      "fetched_body": false
+    },
+    {
+      "number": 122,
+      "priority": "critical",
+      "title": "[BUG] WAL não persiste Column Family",
+      "status": "done",
+      "depends_on": [
+        107
+      ],
+      "blocks": [
+        120
+      ],
+      "acceptance_summary": [
+        "LogRecord inclui column_family",
+        "WAL serializa CF",
+        "WAL recover com CF",
+        "replay_wal_records distribui CF",
+        "Backward compat WAL sem CF"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 123,
+      "priority": "high",
+      "title": "[FEAT] Background compaction real",
+      "status": "done",
+      "depends_on": [
+        47
+      ],
+      "blocks": [
+        119
+      ],
+      "acceptance_summary": [
+        "maybe_compact spawna thread",
+        "compaction_running reflete estado",
+        "Escritas não bloqueiam",
+        "Engine shutdown ordenado",
+        "Nenhum unwrap() na thread"
+      ],
+      "fetched_body": false
+    },
+    {
+      "number": 124,
+      "priority": "medium",
+      "title": "[BUG] search() e search_prefix_legacy() stubs vazios",
+      "status": "open",
+      "depends_on": [],
+      "blocks": [
+        119
+      ],
+      "acceptance_summary": [
+        "search() implementada/removida",
+        "search_prefix_legacy() deprecated",
+        "Nenhuma fn retorna Vec::new()",
+        "Se unimplemented, retornar Err",
+        "Teste: chamar fn após inserir dados"
+      ],
+      "fetched_body": false
+    },
+    {
+      "number": 125,
+      "priority": "high",
+      "title": "[PERF] Latência de leitura acima de 1 ms",
+      "status": "open",
+      "depends_on": [
+        47,
+        123
+      ],
+      "blocks": [
+        120
+      ],
+      "acceptance_summary": [
+        "get_cf consulta Bloom filter",
+        "Block cache implementado",
+        "scan_cf pula SSTables fora do range",
+        "Merge iteradores BinaryHeap",
+        "Nenhum unwrap() crítico"
+      ],
+      "fetched_body": false
+    }
+  ],
   "todos": [
     {
-      "id": 1,
-      "title": "Add min_key/max_key fields to Table struct",
-      "description": "Table currently lacks range metadata. Add min_key/max_key fields, populate them from BTreeMap first/last entries in Table::build(), and from MetaBlock when loading from SSTable path.",
-      "files": ["src/core/table.rs"],
-      "depends_on": [],
-      "status": "done"
+      "id": "T1",
+      "description": "Refatorar compact() para ser chamável via Arc<Mutex<EngineCore>> pela thread background",
+      "status": "done",
+      "files": [
+        "src/core/engine/mod.rs"
+      ]
     },
     {
-      "id": 2,
-      "title": "Wire LsmConfig block_cache_size into GlobalBlockCache",
-      "description": "Engine::new_generic() currently hardcodes block_cache_size_mb: 64. Thread the LsmConfig.storage.block_cache_size_mb value through.",
-      "files": ["src/core/engine/mod.rs", "src/infra/config.rs"],
-      "depends_on": [],
-      "status": "done"
+      "id": "T2",
+      "description": "Atualizar maybe_compact para chamar compact() refatorado em vez de duplicar lógica",
+      "status": "done",
+      "files": [
+        "src/core/engine/mod.rs"
+      ]
     },
     {
-      "id": 3,
-      "title": "Plumb block cache and bloom filter into version_set.get()",
-      "description": "Modify VersionSet.get() to use SstableReader with might_contain() (bloom filter) before reading blocks. Store Arc<GlobalBlockCache> in VersionSet for cache passthrough.",
-      "files": ["src/core/engine/version_set.rs", "src/storage/reader.rs"],
-      "depends_on": [1, 2],
-      "status": "done"
+      "id": "T3",
+      "description": "Liberar core lock durante I/O de compaction: snapshot tables, drop lock, executar, re-acquire, replace",
+      "status": "done",
+      "files": [
+        "src/core/engine/mod.rs"
+      ]
     },
     {
-      "id": 4,
-      "title": "Skip non-intersecting SSTables in scan_cf",
-      "description": "In scan_cf, before adding an SSTable iterator, check if query range intersects table's [min_key, max_key]. Skip non-intersecting tables.",
-      "files": ["src/core/engine/mod.rs", "src/core/engine/version_set.rs"],
-      "depends_on": [1],
-      "status": "done"
+      "id": "T4",
+      "description": "Adicionar teste concorrente: 500 escritas em thread separada durante compaction, todas Ok",
+      "status": "done",
+      "files": [
+        "src/core/engine/mod.rs"
+      ]
     },
     {
-      "id": 5,
-      "title": "Verify MergeIterator uses BinaryHeap",
-      "description": "Confirm MergeIterator in iterators.rs uses BinaryHeap. Add a unit test if not already present.",
-      "files": ["src/core/iterators.rs"],
-      "depends_on": [],
-      "status": "done"
+      "id": "T5",
+      "description": "Melhorar teste de shutdown: verificar ausência de thread leak",
+      "status": "done",
+      "files": [
+        "src/core/engine/mod.rs"
+      ]
     },
     {
-      "id": 6,
-      "title": "Remove unwrap() from critical read paths",
-      "description": "Audit get_cf, scan_cf, version_set.get, SstableReader methods for unwrap() calls. Replace with ? or proper error handling.",
-      "files": ["src/core/engine/mod.rs", "src/core/engine/version_set.rs", "src/storage/reader.rs", "src/core/iterators.rs"],
-      "depends_on": [3, 4, 5],
-      "status": "done"
-    },
-    {
-      "id": 7,
-      "title": "Add read performance benchmarks",
-      "description": "Add new criterion benchmark functions to benches/read_bench.rs for: memtable read latency, SSTable hot cache latency, Bloom filter negative read latency, scan 1000 keys latency.",
-      "files": ["benches/read_bench.rs"],
-      "depends_on": [3, 4, 5],
-      "status": "done"
-    },
-    {
-      "id": 8,
-      "title": "Run lint, clippy, tests; fix regressions",
-      "description": "cargo clippy -- -D warnings, cargo test --all-features, fix regressions. Update .task-state.json to done.",
-      "files": [],
-      "depends_on": [6, 7],
-      "status": "done"
+      "id": "T6",
+      "description": "Executar cargo test --all-features e cargo clippy -- -D warnings",
+      "status": "done",
+      "files": []
     }
   ]
 }

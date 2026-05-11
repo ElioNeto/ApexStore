@@ -178,7 +178,14 @@ impl<C: Cache> VersionSet<C> {
             .map_or_else(Vec::new, |v| v.clone())
     }
 
-    /// Atomically replace specific tables with new ones
+    /// Atomically replace specific tables with new ones.
+    ///
+    /// New tables are inserted at the position of the first (minimum-index) removed table,
+    /// preserving the invariant that tables in the Vec are ordered oldest-first.
+    /// This prevents stale-data reads when flushes add tables during three-phase
+    /// compaction's Phase 2 (I/O without core lock), because the compacted result
+    /// is placed BEFORE the flushed tables in the Vec. Since `get()` iterates in
+    /// reverse (`.rev()`), flushed tables (newer data) are checked first.
     pub fn atomic_replace(
         &mut self,
         cf: &str,
@@ -186,21 +193,38 @@ impl<C: Cache> VersionSet<C> {
         new_tables: Vec<crate::core::table::Table>,
     ) {
         if let Some(tables) = self.tables.get_mut(cf) {
+            if new_tables.is_empty() {
+                // Only removing — no insertion needed
+                let mut sorted_indices: Vec<usize> = indices.to_vec();
+                sorted_indices.sort_unstable_by(|a, b| b.cmp(a));
+                for &idx in &sorted_indices {
+                    if idx < tables.len() {
+                        tables.remove(idx);
+                    }
+                }
+                return;
+            }
+
+            // The insertion point: where the first (oldest) removed table was
+            let insert_at = indices.iter().min().copied().unwrap_or(0);
+
             // Sort indices in descending order to remove from end without invalidating indices
             let mut sorted_indices: Vec<usize> = indices.to_vec();
             sorted_indices.sort_unstable_by(|a, b| b.cmp(a));
-            
+
             // Remove old tables
             for &idx in &sorted_indices {
                 if idx < tables.len() {
                     tables.remove(idx);
                 }
             }
-            
-            // Add new tables
-            for new_table in new_tables {
-                tables.push(new_table);
-            }
+
+            // Insert new tables at the position of the first removed table,
+            // rather than appending at the end. This ensures that tables added
+            // by flushes during Phase 2 (which are appended) remain AFTER the
+            // compacted result, so they are checked first by `get()`'s `.rev()`.
+            let insert_at = insert_at.min(tables.len());
+            let _ = tables.splice(insert_at..insert_at, new_tables);
         }
     }
 

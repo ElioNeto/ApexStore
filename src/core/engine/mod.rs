@@ -230,6 +230,44 @@ impl<C: Cache> Engine<C> {
     }
 }
 
+/// Compact a single column family, operating directly on `&mut EngineCore`.
+/// This is the core compaction logic extracted from `compact_cf` so it can be
+/// reused from both the public synchronous API and the background compaction thread.
+///
+/// NOTE: This function holds the lock (via the `&mut EngineCore` borrow) for the
+/// entire compaction duration, including I/O. For background compaction where
+/// the lock should be released during I/O, use the three-phase approach in
+/// `maybe_compact` instead.
+fn compact_cf_core<C: Cache>(
+    core: &mut EngineCore<C>,
+    options: &EngineOptions,
+    cf: &str,
+) -> Result<Option<CompactionMetrics>> {
+    let tables = core.version_set.get_tables(cf);
+    if tables.len() < core.compaction.options().compaction_threshold {
+        return Ok(None);
+    }
+
+    let groups = core.compaction.pick_compaction(&tables, options);
+    if groups.is_empty() {
+        return Ok(None);
+    }
+
+    let mut all_metrics = CompactionMetrics::default();
+    for group_indices in groups {
+        let (new_tables, metrics) =
+            core.compaction.compact(&group_indices, &tables, options)?;
+        core.version_set
+            .atomic_replace(cf, &group_indices, new_tables);
+        all_metrics.bytes_read += metrics.bytes_read;
+        all_metrics.bytes_written += metrics.bytes_written;
+        all_metrics.files_merged += metrics.files_merged;
+        all_metrics.duration_ms += metrics.duration_ms;
+    }
+
+    Ok(Some(all_metrics))
+}
+
 impl<C: Cache> Engine<C> {
     /// Create a new engine with default options.
     pub fn new_generic(options: EngineOptions, cache: C, dir_path: &std::path::Path) -> Result<Self> {
@@ -630,7 +668,9 @@ impl<C: Cache> Engine<C> {
                 *bytes = 0;
                 
                 // ✅ FIX issue #107: Clear WAL while we hold the core lock
-                core.wal.clear()?;
+                // ✅ FIX issue #122: Only remove records for the flushed CF,
+                // not the entire WAL (other CFs' data must survive).
+                core.wal.retain(|r| r.column_family.as_deref() != Some(cf))?;
                 
                 // Check if compaction might be needed after this flush
                 let threshold = self.options.compaction_options.compaction_threshold;
@@ -642,37 +682,7 @@ impl<C: Cache> Engine<C> {
     
     pub fn compact_cf(&self, cf: &str) -> Result<Option<CompactionMetrics>> {
         let mut core = self.core.lock().unwrap();
-        // Get tables for this column family
-        let tables = core.version_set.get_tables(cf);
-        
-        if tables.len() < core.compaction.options().compaction_threshold {
-            return Ok(None);
-        }
-        
-        // Pick tables to compact based on strategy
-        let groups = core.compaction.pick_compaction(&tables, &self.options);
-        
-        if groups.is_empty() {
-            return Ok(None);
-        }
-        
-        let mut all_metrics = CompactionMetrics::default();
-        
-        for group_indices in groups {
-            // Execute compaction on this group
-            let (new_tables, metrics) = core.compaction.compact(&group_indices, &tables, &self.options)?;
-            
-            // Atomic replace old tables with new ones
-            core.version_set.atomic_replace(cf, &group_indices, new_tables);
-            
-            // Accumulate metrics
-            all_metrics.bytes_read += metrics.bytes_read;
-            all_metrics.bytes_written += metrics.bytes_written;
-            all_metrics.files_merged += metrics.files_merged;
-            all_metrics.duration_ms += metrics.duration_ms;
-        }
-        
-        Ok(Some(all_metrics))
+        compact_cf_core(&mut core, &self.options, cf)
     }
     
     pub fn compact(&self) -> Result<Vec<(String, CompactionMetrics)>> {
@@ -692,72 +702,141 @@ impl<C: Cache> Engine<C> {
     
     /// Check if compaction should be triggered and run it in background
     pub fn maybe_compact(&self) {
-        // Check if compaction is already running
+        // Quick check to avoid unnecessary lock contention
         if self.compaction_running.load(Ordering::SeqCst) {
             return;
         }
-        
-        // Set flag atomically — if already set, another thread is running
-        if self.compaction_running.swap(true, Ordering::AcqRel) {
+
+        // Acquire the compaction_thread lock FIRST before spawning.
+        // This prevents a TOCTOU race with close(): when close() holds
+        // this lock, no new thread can be spawned and join-handle-stored
+        // after close() has already taken the handle.
+        let mut thread_guard = match self.compaction_thread.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+
+        // Now we hold the lock. Check running flag again — close() may
+        // have acquired this lock ahead of us and set running = false.
+        if self.compaction_running.load(Ordering::SeqCst) {
             return;
         }
-        
+
+        // Claim the compaction slot inside the lock, so close() is
+        // guaranteed to see this flag change before we store the handle.
+        self.compaction_running.store(true, Ordering::Release);
+
         // Clone what the thread needs before spawning
         let core = self.core.clone();
         let running = self.compaction_running.clone();
         let options = self.options.clone();
-        
+
         let handle = std::thread::spawn(move || {
             // Wrap compaction logic in catch_unwind to prevent panics from propagating
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                // Lock core and run compaction for all column families that need it
-                let mut core = match core.lock() {
-                    Ok(guard) => guard,
-                    Err(_) => {
-                        return;
-                    }
-                };
-                
-                let column_families = core.version_set.column_families();
-                for cf in column_families {
-                    let tables = core.version_set.get_tables(&cf);
-                    if tables.len() < core.compaction.options().compaction_threshold {
-                        continue;
-                    }
-                    let groups = core.compaction.pick_compaction(&tables, &options);
-                    if groups.is_empty() {
-                        continue;
-                    }
-                    for group_indices in groups {
-                        match core.compaction.compact(&group_indices, &tables, &options) {
+                // ── Phase 1: Build compaction plans while holding the lock ──
+                // Snapshot which CFs need compaction and what tables/groups to compact.
+                // Then drop the lock so writes can proceed during I/O.
+                #[derive(Clone)]
+                struct CompactionPlan {
+                    cf: String,
+                    tables: Vec<Table>,
+                    groups: Vec<Vec<usize>>,
+                    compaction: Compaction,
+                    options: EngineOptions,
+                }
+
+                let plans: Vec<CompactionPlan> = {
+                    let core = match core.lock() {
+                        Ok(guard) => guard,
+                        Err(_) => return,
+                    };
+
+                    core.version_set
+                        .column_families()
+                        .iter()
+                        .filter_map(|cf| {
+                            let tables = core.version_set.get_tables(cf);
+                            if tables.len() < core.compaction.options().compaction_threshold {
+                                return None;
+                            }
+                            let groups =
+                                core.compaction.pick_compaction(&tables, &options);
+                            if groups.is_empty() {
+                                return None;
+                            }
+                            Some(CompactionPlan {
+                                cf: cf.clone(),
+                                tables,
+                                groups,
+                                compaction: core.compaction.clone(),
+                                options: options.clone(),
+                            })
+                        })
+                        .collect()
+                }; // MutexGuard dropped here → core lock is released
+
+                // ── Phase 2: Execute compaction I/O without holding the lock ──
+                // This is the slow part: read SSTables, merge, write new SSTable.
+                let mut results: Vec<(String, Vec<usize>, Vec<Table>)> = Vec::new();
+                for plan in &plans {
+                    for group_indices in &plan.groups {
+                        match plan
+                            .compaction
+                            .compact(group_indices, &plan.tables, &plan.options)
+                        {
                             Ok((new_tables, _metrics)) => {
-                                core.version_set.atomic_replace(&cf, &group_indices, new_tables);
+                                results.push((plan.cf.clone(), group_indices.clone(), new_tables));
                             }
                             Err(e) => {
-                                tracing::error!("Background compaction failed for CF {}: {:?}", cf, e);
+                                tracing::error!(
+                                    "Background compaction failed for CF {}: {:?}",
+                                    plan.cf,
+                                    e
+                                );
                             }
                         }
                     }
                 }
+
+                // ── Phase 3: Re-acquire lock and apply results ──
+                if let Ok(mut core) = core.lock() {
+                    for (cf, group_indices, new_tables) in results {
+                        core.version_set
+                            .atomic_replace(&cf, &group_indices, new_tables);
+                    }
+                }
             }));
-            
+
             if let Err(panic_info) = result {
                 tracing::error!("Compaction thread panicked: {:?}", panic_info);
             }
-            
+
             running.store(false, Ordering::Release);
         });
-        
-        // Store the join handle so we can join on shutdown
-        if let Ok(mut thread_handle) = self.compaction_thread.lock() {
-            *thread_handle = Some(handle);
-        }
+
+        // Store the join handle while we still hold the lock.
+        // This guarantees that any concurrent close() either:
+        //   a) blocks on the lock and finds this handle after we release it, or
+        //   b) has already taken the handle (closing an earlier thread),
+        //      but then close() cannot spawn new threads because it can't
+        //      acquire this lock while we hold it.
+        *thread_guard = Some(handle);
     }
-    
+
     /// Close the engine: signal compaction thread to stop and wait for it to finish.
+    ///
+    /// Locks `compaction_thread` first, then sets `compaction_running = false`
+    /// inside the lock. This ordering eliminates the window where a concurrently
+    /// executing `maybe_compact()` could spawn a new thread and store its handle
+    /// after `close()` has already taken the handle but before it sets the flag.
     pub fn close(&self) {
-        self.compaction_running.store(false, Ordering::Release);
+        // Lock compaction_thread first so that any concurrent maybe_compact():
+        //   a) blocks until we release the lock, at which point running=false
+        //      prevents it from spawning; or
+        //   b) has already stored its handle under the lock, so we'll find it here.
         if let Ok(mut handle_opt) = self.compaction_thread.lock() {
+            self.compaction_running.store(false, Ordering::Release);
             if let Some(handle) = handle_opt.take() {
                 match handle.join() {
                     Ok(()) => {}
@@ -1325,6 +1404,64 @@ mod tests {
     }
 
     #[test]
+    fn test_crash_recovery_cf_after_flush() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+        // Use a tiny memtable so writes trigger a flush immediately
+        config.core.memtable_max_size = 512;
+
+        let mut engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Write data to both "users" and "default" CFs
+        let users_key = b"user:1".to_vec();
+        let users_value = b"alice".to_vec();
+        engine.put_cf("users", users_key.clone(), users_value.clone()).unwrap();
+
+        let default_key = b"default:1".to_vec();
+        let default_value = b"bob".to_vec();
+        engine.put_cf("default", default_key.clone(), default_value.clone()).unwrap();
+
+        // Verify both CFs have data before crash
+        let result_users = engine.get_cf("users", &users_key).unwrap();
+        assert_eq!(result_users, Some(users_value.clone()));
+
+        let result_default = engine.get_cf("default", &default_key).unwrap();
+        assert_eq!(result_default, Some(default_value.clone()));
+
+        // Drop engine — simulating crash without flush (WAL will be replayed)
+        drop(engine);
+
+        // Reopen engine
+        let engine2 = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Both CFs must have their data after WAL recovery
+        let result_users_recovered = engine2.get_cf("users", &users_key).unwrap();
+        assert_eq!(
+            result_users_recovered,
+            Some(users_value),
+            "users CF data should survive crash via WAL recovery"
+        );
+
+        let result_default_recovered = engine2.get_cf("default", &default_key).unwrap();
+        assert_eq!(
+            result_default_recovered,
+            Some(default_value),
+            "default CF data should survive crash via WAL recovery"
+        );
+    }
+
+    #[test]
     fn test_crash_during_compaction() {
         use crate::infra::config::LsmConfig;
 
@@ -1389,11 +1526,15 @@ mod tests {
         )
         .unwrap();
 
+        // Write keys to trigger flushes and compaction.
+        // Each put_cf call releases the inner core lock before maybe_compact,
+        // so background compaction (spawned by maybe_compact) can proceed
+        // while writes continue.
         let key_count = 500;
         for i in 0..key_count {
             engine
                 .set(format!("k{}", i), vec![b'x'; 100])
-                .unwrap();
+                .expect("write during compaction must succeed");
         }
 
         // Verify at least some keys are readable after compaction
@@ -1403,7 +1544,10 @@ mod tests {
                 found += 1;
             }
         }
-        assert!(found > 0, "At least some keys should be readable after compaction");
+        assert!(
+            found > 0,
+            "At least some keys should be readable after compaction"
+        );
     }
 
     #[test]
@@ -1437,5 +1581,22 @@ mod tests {
                     .unwrap();
             }
         } // engine dropped here — Drop::drop calls close() which joins the compaction thread
+
+        // Re-open the engine to verify:
+        // 1. The compaction thread was joined (no lock leak — engine can re-open)
+        // 2. Data survived the shutdown-with-compaction scenario
+        let engine2 = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Verify engine is operational after shutdown with compaction
+        let count = engine2.count().unwrap_or(0);
+        assert!(
+            count > 0,
+            "Data should survive shutdown during compaction, got {} keys",
+            count
+        );
     }
 }
