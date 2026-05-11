@@ -16,6 +16,22 @@ fn generate_key(index: usize) -> String {
     format!("key_{:08x}", index)
 }
 
+/// Compute write amplification ratio from the engine's compaction metrics.
+fn compute_write_amplification(engine: &LsmEngine) -> Option<f64> {
+    if let Ok(results) = engine.compact() {
+        let mut total_read: u64 = 0;
+        let mut total_written: u64 = 0;
+        for (_cf, metrics) in &results {
+            total_read += metrics.bytes_read;
+            total_written += metrics.bytes_written;
+        }
+        if total_read > 0 {
+            return Some(total_written as f64 / total_read as f64);
+        }
+    }
+    None
+}
+
 /// Benchmark write amplification for Leveled compaction strategy
 fn bench_write_amplification_leveled(c: &mut Criterion) {
     let mut group = c.benchmark_group("write_amplification_leveled");
@@ -42,7 +58,6 @@ fn bench_write_amplification_leveled(c: &mut Criterion) {
 
             // Write enough keys to trigger multiple flushes and compactions
             let num_keys = 10_000usize;
-            let input_bytes: usize = num_keys * (16 + 50); // key ~16 + value ~50
 
             for i in 0..num_keys {
                 let key = generate_key(i);
@@ -50,23 +65,20 @@ fn bench_write_amplification_leveled(c: &mut Criterion) {
                 engine.set(key, value).unwrap();
             }
 
-            // Get compaction metrics for write amplification calculation
-            if let Ok(results) = engine.compact() {
-                for (_cf, metrics) in &results {
-                    if metrics.bytes_read > 0 {
-                        let wa =
-                            metrics.bytes_written as f64 / metrics.bytes_read as f64;
-                        // Leveled should have < 10x amplification
-                        assert!(
-                            wa < 10.0,
-                            "Leveled write amplification too high: {:.2}x (expected < 10x)",
-                            wa
-                        );
-                    }
-                }
+            // Measure write amplification
+            let wa = compute_write_amplification(&engine);
+            if let Some(ratio) = wa {
+                println!(
+                    "  → Leveled write amplification: {ratio:.2}x (target < 10x)"
+                );
+                assert!(
+                    ratio < 10.0,
+                    "Leveled write amplification too high: {ratio:.2}x (expected < 10x)"
+                );
+            } else {
+                println!("  → Leveled: no compaction metrics available (all data in memtable)");
             }
 
-            // Also report input vs output ratio overall
             drop(engine);
         })
     });
@@ -106,20 +118,18 @@ fn bench_write_amplification_size_tiered(c: &mut Criterion) {
                 engine.set(key, value).unwrap();
             }
 
-            // Get compaction metrics
-            if let Ok(results) = engine.compact() {
-                for (_cf, metrics) in &results {
-                    if metrics.bytes_read > 0 {
-                        let wa =
-                            metrics.bytes_written as f64 / metrics.bytes_read as f64;
-                        // Size-Tiered should have < 3x amplification
-                        assert!(
-                            wa < 3.0,
-                            "Size-Tiered write amplification too high: {:.2}x (expected < 3x)",
-                            wa
-                        );
-                    }
-                }
+            // Measure write amplification
+            let wa = compute_write_amplification(&engine);
+            if let Some(ratio) = wa {
+                println!(
+                    "  → Size-Tiered write amplification: {ratio:.2}x (target < 3x)"
+                );
+                assert!(
+                    ratio < 3.0,
+                    "Size-Tiered write amplification too high: {ratio:.2}x (expected < 3x)"
+                );
+            } else {
+                println!("  → Size-Tiered: no compaction metrics available (all data in memtable)");
             }
 
             drop(engine);

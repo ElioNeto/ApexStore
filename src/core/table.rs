@@ -11,10 +11,9 @@ pub struct Table {
 
 impl Clone for Table {
     fn clone(&self) -> Self {
-        let bloom_filter = self.bloom_filter.as_ref().map(|bf| {
+        let bloom_filter = self.bloom_filter.as_ref().and_then(|bf| {
             let bytes = bf.to_bytes();
-            bloomfilter::Bloom::<[u8]>::from_bytes(bytes)
-                .expect("Bloom filter serialization round-trip should not fail")
+            bloomfilter::Bloom::<[u8]>::from_bytes(bytes).ok()
         });
         Self {
             data: self.data.clone(),
@@ -168,13 +167,13 @@ impl<'a> crate::core::iterators::StorageIterator for TableIterator<'a> {
     fn key(&self) -> Self::KeyType {
         match self.current {
             Some((k, _)) => crate::core::key::KeySlice::new(k.as_slice()),
-            None => panic!("current must be Some when key() is called"),
+            None => crate::core::key::KeySlice::new(&[]), // Caller should check is_valid() first
         }
     }
     fn value(&self) -> &[u8] {
         match self.current {
             Some((_, v)) => v.as_slice(),
-            None => panic!("current must be Some when value() is called"),
+            None => &[], // Caller should check is_valid() first
         }
     }
     fn is_valid(&self) -> bool {

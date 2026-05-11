@@ -153,7 +153,9 @@ impl WriteAheadLog {
             }
 
             if buf.len() < 4 {
-                return Err(LsmError::WalCorruption);
+                // Trailing incomplete length prefix — partial WAL frame from crash
+                debug!("WAL recovery: trailing incomplete frame at offset {}, discarding", buf.len());
+                break;
             }
 
             let mut lengthbuf = [0u8; 4];
@@ -182,9 +184,9 @@ impl WriteAheadLog {
             let mut payload = vec![0u8; payload_len];
             if let Err(e) = reader.read_exact(&mut payload) {
                 if e.kind() == io::ErrorKind::UnexpectedEof {
-                    return Err(LsmError::CorruptedData(
-                        "WAL record payload truncated".to_string(),
-                    ));
+                    // Trailing partial payload — crash during write_record
+                    debug!("WAL recovery: partial payload at end of log, discarding trailing frame");
+                    break;
                 }
                 return Err(e.into());
             }
@@ -193,9 +195,9 @@ impl WriteAheadLog {
             let mut checksumbuf = [0u8; 4];
             if let Err(e) = reader.read_exact(&mut checksumbuf) {
                 if e.kind() == io::ErrorKind::UnexpectedEof {
-                    return Err(LsmError::CorruptedData(
-                        "WAL record checksum truncated".to_string(),
-                    ));
+                    // Trailing partial checksum — crash during write_record fsync
+                    debug!("WAL recovery: partial checksum at end of log, discarding trailing frame");
+                    break;
                 }
                 return Err(e.into());
             }
@@ -385,71 +387,61 @@ mod tests {
     }
 
     #[test]
-    fn test_wal_crc32_truncation_detection() {
-        let (temp_dir, wal) = create_test_wal();
+    fn test_wal_graceful_truncation() {
+        // After a crash, the last WAL record may be partially written.
+        // The engine should recover all complete records and discard
+        // the trailing partial frame without returning an error.
+        let (_temp_dir, wal) = create_test_wal();
 
-        // Write a record first
-        let record = LogRecord::new(b"test_key".to_vec(), b"test_value".to_vec());
-        wal.write_record(&record).unwrap();
+        // Write two records
+        let record1 = LogRecord::new(b"key1".to_vec(), b"value1".to_vec());
+        let record2 = LogRecord::new(b"key2".to_vec(), b"value2".to_vec());
+        wal.write_record(&record1).unwrap();
+        wal.write_record(&record2).unwrap();
 
-        // Truncate the checksum from the WAL file
-        let wal_path = temp_dir.path().join("wal.log");
+        // Truncate the checksum from the last record to simulate partial write
+        let wal_path = wal.path.clone();
         let mut original = fs::read(&wal_path).unwrap();
         if original.len() > 4 {
             original.truncate(original.len() - 4);
             fs::write(&wal_path, original).unwrap();
         }
 
-        // Recovery should fail with truncated checksum
+        // Recovery should succeed with only the first (complete) record
         let result = wal.recover();
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            LsmError::CorruptedData(msg) => {
-                assert!(
-                    msg.contains("checksum") || msg.contains("CRC32") || msg.contains("truncated")
-                );
-            }
-            _ => panic!("Expected CorruptedData error"),
-        }
+        let recovered = result.expect("recovery should succeed even with truncated trailing frame");
+        assert_eq!(recovered.len(), 1, "should recover the first complete record");
+        assert_eq!(recovered[0], record1);
     }
 
     #[test]
-    fn test_wal_payload_truncation_detection() {
-        let (temp_dir, wal) = create_test_wal();
+    fn test_wal_graceful_payload_truncation() {
+        let (_temp_dir, wal) = create_test_wal();
 
-        // Write a record first
+        // Write one record
         let record = LogRecord::new(b"test_key".to_vec(), b"this_is_a_larger_value".to_vec());
         wal.write_record(&record).unwrap();
 
-        // Truncate part of the payload (remove bytes from the middle, before checksum)
-        let wal_path = temp_dir.path().join("wal.log");
+        // Truncate part of the payload (keep only half)
+        let wal_path = wal.path.clone();
         let mut original = fs::read(&wal_path).unwrap();
 
-        // Current structure: [len:4][ver:1][payload:N][crc32:4]
-        // We want to truncate so that the payload is shorter than 'length' claims,
-        // and the checksum is removed.
-        // Minimum viable frame with >0 payload: 4+1+min_payload+4 >= 9.
-        // We keep len + ver + half the payload, dropping checksum.
+        // Structure: [len:4][ver:1][payload:N][crc32:4]
+        // Truncate so that payload is cut short, removing checksum too
         if original.len() > 9 {
-            // Keep length (4) + version (1) + half of the payload (no checksum)
             let payload_area = original.len() - 9; // N
             let half_payload = payload_area / 2;
-            let keep_length = 4 + 1 + half_payload; // len + ver + half payload
+            let keep_length = 4 + 1 + half_payload;
             if keep_length > 5 {
                 original.truncate(keep_length);
                 fs::write(&wal_path, original).unwrap();
             }
         }
 
-        // Recovery should fail with truncated payload
+        // Recovery should succeed with 0 records (the partial frame is discarded)
         let result = wal.recover();
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            LsmError::CorruptedData(msg) => {
-                assert!(msg.contains("payload") || msg.contains("truncated"));
-            }
-            _ => panic!("Expected CorruptedData error"),
-        }
+        let recovered = result.expect("recovery should succeed with truncated payload");
+        assert_eq!(recovered.len(), 0, "partial frame should be discarded");
     }
 
     #[test]

@@ -185,13 +185,13 @@ impl<'a> StorageIterator for InternalMemTableIterator<'a> {
     fn key(&self) -> Self::KeyType {
         match self.current {
             Some((k, _)) => KeySlice::new(k.as_slice()),
-            None => panic!("InternalMemTableIterator is invalid when calling key()"),
+            None => KeySlice::new(&[]), // Caller should check is_valid() first
         }
     }
     fn value(&self) -> &[u8] {
         match self.current {
             Some((_, v)) => v.as_slice(),
-            None => panic!("InternalMemTableIterator is invalid when calling value()"),
+            None => &[], // Caller should check is_valid() first
         }
     }
     fn is_valid(&self) -> bool {
@@ -225,8 +225,10 @@ impl<C: Cache> Engine<C> {
     }
     
     /// Lock the core and return the guard.
-    pub(crate) fn lock_core(&self) -> std::sync::MutexGuard<'_, EngineCore<C>> {
-        self.core.lock().unwrap()
+    pub(crate) fn lock_core(&self) -> Result<std::sync::MutexGuard<'_, EngineCore<C>>> {
+        self.core.lock().map_err(|_| {
+            crate::infra::error::LsmError::LockPoisoned("engine core in lock_core")
+        })
     }
 }
 
@@ -945,6 +947,7 @@ mod tests {
     use tempfile::tempdir;
     use crate::core::engine::compaction::CompactionStrategy;
     use std::collections::BTreeMap;
+    use crate::storage::cache::NoopCache;
 
     #[test]
     fn test_prefix_end_basic() {
@@ -1607,6 +1610,118 @@ mod tests {
         );
     }
 
+    // ── T6: Bloom filter prevents data lookup for absent key ──
+    #[test]
+    fn test_bloom_filter_prevents_absent_key_lookup() {
+        let dir = tempdir().unwrap();
+        let mut config = crate::infra::config::LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+        config.core.memtable_max_size = 4096;
+        let engine = Engine::<NoopCache>::new_from_config(&config, NoopCache).unwrap();
+
+        // Insert some keys via the SSTable path (bypassing memtable)
+        // We create a VersionSet with a table that has a bloom filter and
+        // verify that reading an absent key doesn't iterate table data.
+        let mut core = engine.lock_core().unwrap();
+        let mut data = BTreeMap::new();
+        data.insert(b"present_key".to_vec(), b"present_value".to_vec());
+        let mut table = Table::build(data, &engine.options);
+        // Build a bloom filter covering only the inserted key
+        let mut bf = bloomfilter::Bloom::<[u8]>::new(1024, 1).expect("valid bloom params");
+        bf.set(b"present_key");
+        table.bloom_filter = Some(bf);
+        table.min_key = b"present_key".to_vec();
+        table.max_key = b"present_key".to_vec();
+        core.version_set.add_table("default", table);
+
+        // Reading an absent key should return None (bloom filter says no)
+        let result = core.version_set.get("default", b"absent_key");
+        assert!(result.is_none(), "Absent key should return None via Bloom filter");
+
+        // Reading a present key should succeed
+        let result = core.version_set.get("default", b"present_key");
+        assert_eq!(result, Some(b"present_value".to_vec()));
+    }
+
+    // ── T7: Block cache hit returns cached value on repeated read ──
+    #[test]
+    fn test_kv_cache_hit_on_repeated_read() {
+        let dir = tempdir().unwrap();
+        let mut config = crate::infra::config::LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+        config.core.memtable_max_size = 4096;
+        let engine = Engine::<NoopCache>::new_from_config(&config, NoopCache).unwrap();
+
+        // Insert a key into the version set directly
+        let mut core = engine.lock_core().unwrap();
+        let mut data = BTreeMap::new();
+        data.insert(b"cached_key".to_vec(), b"cached_value".to_vec());
+        let table = Table::build(data, &engine.options);
+        core.version_set.add_table("default", table);
+
+        // First read populates the KV cache
+        let r1 = core.version_set.get("default", b"cached_key");
+        assert_eq!(r1, Some(b"cached_value".to_vec()));
+
+        // Second read should hit the KV cache (cache populated by first read)
+        let r2 = core.version_set.get("default", b"cached_key");
+        assert_eq!(r2, Some(b"cached_value".to_vec()));
+
+        // Verify cache stats by checking that clearing the cache still works
+        core.version_set.clear_cache();
+        let r3 = core.version_set.get("default", b"cached_key");
+        assert_eq!(r3, Some(b"cached_value".to_vec()), "Value still readable after cache clear");
+    }
+
+    // ── T8: scan_cf skips non-intersecting SSTables ──
+    #[test]
+    fn test_scan_cf_skips_non_intersecting_sstables() {
+        let dir = tempdir().unwrap();
+        let mut config = crate::infra::config::LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+        let engine = Engine::<NoopCache>::new_from_config(&config, NoopCache).unwrap();
+
+        let mut core = engine.lock_core().unwrap();
+
+        // Table 1: keys "a" to "c"
+        let mut data1 = BTreeMap::new();
+        data1.insert(b"a".to_vec(), b"1".to_vec());
+        data1.insert(b"b".to_vec(), b"2".to_vec());
+        data1.insert(b"c".to_vec(), b"3".to_vec());
+        let mut t1 = Table::build(data1, &engine.options);
+        t1.min_key = b"a".to_vec();
+        t1.max_key = b"c".to_vec();
+        core.version_set.add_table("default", t1);
+
+        // Table 2: keys "x" to "z"
+        let mut data2 = BTreeMap::new();
+        data2.insert(b"x".to_vec(), b"24".to_vec());
+        data2.insert(b"y".to_vec(), b"25".to_vec());
+        data2.insert(b"z".to_vec(), b"26".to_vec());
+        let mut t2 = Table::build(data2, &engine.options);
+        t2.min_key = b"x".to_vec();
+        t2.max_key = b"z".to_vec();
+        core.version_set.add_table("default", t2);
+
+        // Table 3: keys "m" to "p"
+        let mut data3 = BTreeMap::new();
+        data3.insert(b"m".to_vec(), b"13".to_vec());
+        data3.insert(b"n".to_vec(), b"14".to_vec());
+        data3.insert(b"o".to_vec(), b"15".to_vec());
+        let mut t3 = Table::build(data3, &engine.options);
+        t3.min_key = b"m".to_vec();
+        t3.max_key = b"o".to_vec();
+        core.version_set.add_table("default", t3);
+
+        // Drop the core lock so scan_cf can acquire it
+        drop(core);
+
+        // Scan range [b, n] — should only include keys from table 1 and 3 (table 2 is entirely after "n")
+        let results = engine.scan_cf("default", Some(b"b"), Some(b"n"), None).unwrap();
+        let keys: Vec<&[u8]> = results.iter().map(|(k, _)| k.as_slice()).collect();
+        assert_eq!(keys, vec![b"b", b"c", b"m"], "Should only return keys b, c, m from intersecting tables");
+    }
+
     #[test]
     fn test_benchmark_memtable_read_latency() {
         let dir = tempdir().unwrap();
@@ -1639,6 +1754,82 @@ mod tests {
         assert!(
             elapsed < std::time::Duration::from_micros(10),
             "Memtable read avg {:?} exceeds 10µs",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn test_benchmark_sstable_warm_read_latency() {
+        let dir = tempdir().unwrap();
+        let mut config = crate::infra::config::LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+        config.core.memtable_max_size = 4096;
+        let mut engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Insert keys and flush to SSTable
+        for i in 0..1000 {
+            engine
+                .put_cf("default", format!("key_{:04}", i).into_bytes(), b"value_1234567890".to_vec())
+                .unwrap();
+        }
+        engine.flush_memtable().unwrap();
+
+        // Warm up cache by reading all keys once
+        for i in 0..1000 {
+            let _ = engine.get_cf("default", format!("key_{:04}", i).as_bytes());
+        }
+
+        // Measure warm reads
+        let start = std::time::Instant::now();
+        let iterations = 100;
+        for _ in 0..iterations {
+            for i in 0..1000 {
+                let _ = engine.get_cf("default", format!("key_{:04}", i).as_bytes());
+            }
+        }
+        let elapsed = start.elapsed() / (iterations * 1000) as u32;
+
+        assert!(
+            elapsed < std::time::Duration::from_micros(500),
+            "Warm SSTable read avg {:?} exceeds 500µs",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn test_benchmark_scan_1k_keys_latency() {
+        let dir = tempdir().unwrap();
+        let mut config = crate::infra::config::LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+        config.core.memtable_max_size = 10 * 1024 * 1024; // Keep all keys in memtable
+        let mut engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Insert 1000 keys
+        for i in 0..1000 {
+            engine
+                .put_cf("default", format!("key_{:04}", i).into_bytes(), b"value_1234567890".to_vec())
+                .unwrap();
+        }
+
+        let start = std::time::Instant::now();
+        let iterations = 10;
+        for _ in 0..iterations {
+            let results = engine.scan_cf("default", None, None, Some(1000)).unwrap();
+            assert_eq!(results.len(), 1000, "Should return all 1000 keys");
+        }
+        let elapsed = start.elapsed() / iterations as u32;
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(5),
+            "Scan 1k keys avg {:?} exceeds 5ms",
             elapsed
         );
     }

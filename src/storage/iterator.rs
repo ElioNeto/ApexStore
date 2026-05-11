@@ -49,20 +49,17 @@ impl<'a> StorageIterator for MemTableIterator<'a> {
     type KeyType = KeySlice<'a>;
 
     fn key(&self) -> Self::KeyType {
-        KeySlice::new(
-            self.current
-                .expect("key() called on invalid iterator")
-                .0
-                .as_slice(),
-        )
+        match self.current {
+            Some((k, _)) => KeySlice::new(k.as_slice()),
+            None => KeySlice::new(&[]), // Caller should check is_valid() first
+        }
     }
 
     fn value(&self) -> &[u8] {
-        &self
-            .current
-            .expect("value() called on invalid iterator")
-            .1
-            .value
+        match self.current {
+            Some((_, r)) => &r.value,
+            None => &[], // Caller should check is_valid() first
+        }
     }
 
     fn is_valid(&self) -> bool {

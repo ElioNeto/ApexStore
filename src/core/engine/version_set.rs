@@ -1,4 +1,7 @@
 use crate::storage::cache::Cache;
+use lru::LruCache;
+use std::num::NonZeroUsize;
+use std::sync::{Arc, Mutex};
 
 /// Statistics returned by `VersionSet::stats()`.
 pub struct VersionStats {
@@ -14,18 +17,50 @@ pub struct VersionStats {
 
 pub struct VersionSet<C: Cache> {
     _cache: std::marker::PhantomData<C>,
+    /// Key-value cache for table lookups. Caches individual key-value results
+    /// so repeated reads for the same key bypass table iteration.
+    kv_cache: Arc<Mutex<LruCache<Vec<u8>, Vec<u8>>>>,
     tables: std::collections::HashMap<String, Vec<crate::core::table::Table>>,
 }
 
 impl<C: Cache> VersionSet<C> {
-    pub fn new(_options: crate::core::engine::EngineOptions, _cache: C) -> Self {
+    pub fn new(options: crate::core::engine::EngineOptions, _cache: C) -> Self {
+        // Derive KV cache capacity from block cache size (rough estimate: entry ~200 bytes)
+        let kv_capacity = (options.block_cache_size_mb * 1024 * 1024 / 200).max(1000);
+        let kv_capacity = NonZeroUsize::new(kv_capacity).expect("kv_capacity >= 1000, NonZeroUsize is safe");
         Self {
             _cache: std::marker::PhantomData,
+            kv_cache: Arc::new(Mutex::new(LruCache::new(kv_capacity))),
             tables: std::collections::HashMap::new(),
         }
     }
 
+    /// Check if a key is cached.
+    pub fn get_cached(&self, key: &[u8]) -> Option<Vec<u8>> {
+        let mut cache = self.kv_cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.get(key).cloned()
+    }
+
+    /// Store a key-value pair in the cache.
+    pub fn put_cached(&self, key: Vec<u8>, value: Vec<u8>) {
+        let mut cache = self.kv_cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.put(key, value);
+    }
+
+    /// Clear the entire KV cache. Should be called after compaction or flush
+    /// to prevent stale results.
+    pub fn clear_cache(&self) {
+        if let Ok(mut cache) = self.kv_cache.lock() {
+            cache.clear();
+        }
+    }
+
     pub fn get(&self, cf: &str, key: &[u8]) -> Option<Vec<u8>> {
+        // 1. Check KV cache first — avoids table iteration entirely for hot keys
+        if let Some(cached) = self.get_cached(key) {
+            return Some(cached);
+        }
+
         if let Some(cf_tables) = self.tables.get(cf) {
             'table_loop: for table in cf_tables.iter().rev() {
                 // Skip tables whose key range doesn't include the target key
@@ -45,6 +80,8 @@ impl<C: Cache> VersionSet<C> {
                 }
 
                 if let Some(val) = table.data.get(key) {
+                    // 2. Populate cache after successful read
+                    self.put_cached(key.to_vec(), val.clone());
                     return Some(val.clone());
                 }
             }
@@ -81,6 +118,8 @@ impl<C: Cache> VersionSet<C> {
 
     pub fn add_table(&mut self, cf: &str, table: crate::core::table::Table) {
         self.tables.entry(cf.to_string()).or_default().push(table);
+        // New table means previously cached entries might have been superseded
+        self.clear_cache();
     }
 
     pub fn current_version(&self) -> crate::core::version::Version<C> {
@@ -144,7 +183,9 @@ impl<C: Cache> VersionSet<C> {
     }
 
     pub fn drain_tables(&mut self, cf: &str) -> Vec<crate::core::table::Table> {
-        self.tables.remove(cf).unwrap_or_default()
+        let result = self.tables.remove(cf).unwrap_or_default();
+        self.clear_cache();
+        result
     }
 
     pub fn remove_and_add_table(&mut self, cf: &str, new_table: crate::core::table::Table) {
