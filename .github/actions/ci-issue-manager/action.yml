@@ -48,7 +48,31 @@ runs:
       run: |
         RUN_URL="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
 
-        echo '${{ inputs.job_results }}' | jq -c 'to_entries[]' | while IFS= read -r entry; do
+        # Parse job results safely — avoid pipefail crash if jq fails
+        JOB_ENTRIES=$(echo '${{ inputs.job_results }}' | jq -c 'to_entries[]' 2>/dev/null || echo "")
+
+        if [ -z "$JOB_ENTRIES" ]; then
+          echo "::warning::Failed to parse job_results, creating fallback issue"
+          gh issue create \
+            --repo "$REPO" \
+            --title "[CI-FAILURE] ${WORKFLOW_NAME} failed" \
+            --body "## CI Failure
+
+        Workflow: ${WORKFLOW_NAME}
+        Run: ${RUN_URL}
+        Branch: ${REF_NAME}
+        Commit: ${COMMIT_SHA}
+
+        The CI issue manager could not parse the job results. See the workflow run for details.
+
+        ---
+        This issue was automatically created by the CI Issue Manager action." \
+            --label "ci-failure" \
+            2>/dev/null || true
+          exit 0
+        fi
+
+        echo "$JOB_ENTRIES" | while IFS= read -r entry; do
           JOB_NAME=$(echo "$entry" | jq -r '.key')
           JOB_RESULT=$(echo "$entry" | jq -r '.value.result')
 
@@ -59,7 +83,42 @@ runs:
           echo "Processing job: $JOB_NAME (result: $JOB_RESULT)"
 
           if [ "$JOB_RESULT" = "failure" ] || [ "$JOB_RESULT" = "cancelled" ]; then
-            FULL_LOG=$(gh run view "$RUN_ID" --log --job "$JOB_NAME" 2>/dev/null || echo "")
+            # Fetch logs — try multiple strategies
+            FULL_LOG=""
+
+            # Strategy 1: --job with needs key (works for some gh versions)
+            FULL_LOG=$(gh run view "$RUN_ID" --log --job "$JOB_NAME" 2>/dev/null || true)
+
+            # Strategy 2: If result is too small, get the numeric job ID via API
+            LOG_LINES=$(printf '%s' "$FULL_LOG" | wc -l 2>/dev/null || echo "0")
+            if [ "${LOG_LINES:-0}" -lt 5 ]; then
+              echo "::debug::Strategy 1 returned few lines, trying API for job: $JOB_NAME"
+              JOBS_JSON=$(gh api "/repos/${REPO}/actions/runs/${RUN_ID}/jobs" 2>/dev/null || echo '{"jobs":[]}')
+              NUMERIC_ID=$(echo "$JOBS_JSON" | jq -r --arg name "$JOB_NAME" '
+                first(
+                  .jobs[] | select(.name == $name) | .id,
+                  .jobs[] | select(.name | ascii_downcase == ($name | ascii_downcase)) | .id,
+                  .jobs[] | select(.name | ascii_downcase | contains($name | ascii_downcase)) | .id,
+                  .jobs[] | select(.steps[]?.name | ascii_downcase | contains($name | ascii_downcase)) | .id
+                ) // empty
+              ' 2>/dev/null || echo "")
+              if [ -n "$NUMERIC_ID" ]; then
+                echo "::debug::Found numeric job ID $NUMERIC_ID for $JOB_NAME"
+                FULL_LOG=$(gh run view "$RUN_ID" --log --job "$NUMERIC_ID" 2>/dev/null || true)
+              fi
+            fi
+
+            # Strategy 3: Last resort — get all logs
+            LOG_LINES=$(printf '%s' "$FULL_LOG" | wc -l 2>/dev/null || echo "0")
+            if [ "${LOG_LINES:-0}" -lt 5 ]; then
+              echo "::warning::Strategies 1-2 failed, fetching all logs for job: $JOB_NAME"
+              FULL_LOG=$(gh run view "$RUN_ID" --log 2>/dev/null || true)
+              # Try to filter by job prefix if logs are mixed
+              FILTERED=$(printf '%s' "$FULL_LOG" | grep "^\[$JOB_NAME[/ ]" 2>/dev/null || true)
+              if [ -n "$FILTERED" ]; then
+                FULL_LOG="$FILTERED"
+              fi
+            fi
 
             ERROR_BLOCK=""
             COMPILE_ERR=$(echo "$FULL_LOG" | grep -A 5 -E '^error\[E' | head -120)

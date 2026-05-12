@@ -6,6 +6,11 @@ on:
   push:
     branches: [ main ]
 
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
