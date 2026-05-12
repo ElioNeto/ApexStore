@@ -55,7 +55,7 @@
       "number": 126,
       "priority": "low",
       "title": "[Benchmark] Traduzir resultado do benchmark com OpenCode antes de commitar no README",
-      "status": "open",
+      "status": "completed",
       "depends_on": [],
       "blocks": [],
       "acceptance_summary": [
@@ -71,7 +71,7 @@
     {
       "id": "T1",
       "description": "Create scripts/format-benchmarks.sh — pipes raw Criterion output through `opencode run` for AI formatting, outputs markdown block between BENCHMARK_RESULTS markers, returns 0 on success, non-zero on failure",
-      "status": "pending",
+      "status": "completed",
       "files": [
         "scripts/format-benchmarks.sh"
       ]
@@ -79,7 +79,7 @@
     {
       "id": "T2",
       "description": "Add OpenCode CLI installation step to benchmarks.yml — curl install script, PATH setup, binary caching",
-      "status": "pending",
+      "status": "completed",
       "files": [
         ".github/workflows/benchmarks.yml"
       ],
@@ -90,7 +90,7 @@
     {
       "id": "T3",
       "description": "Modify 'Generate benchmark summary' step in benchmarks.yml — try format-benchmarks.sh first, fall back to existing Perl parsing if OpenCode fails, inject result into README.md",
-      "status": "pending",
+      "status": "completed",
       "files": [
         ".github/workflows/benchmarks.yml"
       ],
@@ -101,7 +101,7 @@
     {
       "id": "T4",
       "description": "Run make bench-local to validate the modified workflow — confirm OpenCode formatting works with API key set and fallback works without it",
-      "status": "pending",
+      "status": "completed",
       "files": [],
       "depends_on": [
         "T3"

@@ -30,6 +30,25 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: Install OpenCode CLI
+        id: install_opencode
+        run: |
+          if command -v opencode &>/dev/null; then
+            echo "OpenCode already installed at $(which opencode)"
+            echo "cache-hit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Installing OpenCode..."
+            curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/main/install.sh | bash
+            # The installer typically places it in ~/.opencode/bin or /usr/local/bin
+            # Ensure PATH includes the install location
+            if [ -f "$HOME/.opencode/bin/opencode" ]; then
+              echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+            elif [ -f "/usr/local/bin/opencode" ]; then
+              : # already in PATH
+            fi
+            echo "cache-hit=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -83,54 +102,59 @@ jobs:
             exit 0
           fi
 
-          # Parse using Perl: handles multi-line Criterion output correctly.
-          # Criterion format:
-          #   Line 1 (name line):   "bench_name/param        time:   [low median high]"
-          #   OR split across two lines:
-          #   Line 1: "bench_name/param"
-          #   Line 2: "                        time:   [low median high]"
-          # Strategy: collect name from lines that look like bench names (no leading space,
-          # contain word chars + optional /param), then extract median from the time: [...] line.
-          ROWS=$(perl -ne '
-            # Match standalone benchmark name line (no leading whitespace, ends with word/number)
-            if (/^([a-zA-Z]\S+(?:\/\S+)?)\s*$/) {
-              $name = $1;
-            }
-            # Match inline: "bench_name/param   time:   [low median high]"
-            elsif (/^([a-zA-Z]\S+(?:\/\S+)?)\s+time:\s+\[([^\]]+)\]/) {
-              $name = $1;
-              my @vals = split(/\s+/, $2);
-              # median is index 2 (0=low_val, 1=low_unit, 2=med_val, 3=med_unit)
-              my $median = "$vals[2] $vals[3]";
-              $median =~ s/^\s+|\s+$//g;
-              print "| `$name` | $median |\n";
-              $name = "";
-            }
-            # Match timing on its own line (after name was set)
-            elsif ($name && /^\s+time:\s+\[([^\]]+)\]/) {
-              my @vals = split(/\s+/, $1);
-              my $median = "$vals[2] $vals[3]";
-              $median =~ s/^\s+|\s+$//g;
-              print "| `$name` | $median |\n";
-              $name = "";
-            }
-          ' bench_output.txt)
-
-          # Build the full block
-          {
-            echo "<!-- BENCHMARK_RESULTS_START -->"
-            echo "> 🤖 Auto-updated by CI on **${DATE}** — [View run](${RUN_URL})"
-            echo ""
-            if [ -n "$ROWS" ]; then
-              echo "| Benchmark | Mediana |"
-              echo "|-----------|--------|"
-              echo "$ROWS"
+          # Try format-benchmarks.sh first (supports OpenCode AI formatting with fallback)
+          FORMAT_OK=false
+          if [ -f scripts/format-benchmarks.sh ]; then
+            chmod +x scripts/format-benchmarks.sh
+            if ./scripts/format-benchmarks.sh bench_output.txt > bench_block.txt 2>/tmp/format_stderr.txt; then
+              echo "✅ format-benchmarks.sh succeeded"
+              FORMAT_OK=true
             else
-              echo "*Nenhum resultado parseado — verifique os [artefatos do run](${RUN_URL}).*"
+              echo "⚠️  format-benchmarks.sh failed (exit code $?), using fallback parser" >&2
+              cat /tmp/format_stderr.txt >&2
             fi
-            echo ""
-            echo "<!-- BENCHMARK_RESULTS_END -->"
-          } > bench_block.txt
+          else
+            echo "⚠️  scripts/format-benchmarks.sh not found, using fallback parser" >&2
+          fi
+
+          # Fallback: parse using Perl (handles multi-line Criterion output correctly)
+          if [ "$FORMAT_OK" != "true" ]; then
+            ROWS=$(perl -ne '
+              if (/^([a-zA-Z]\S+(?:\/\S+)?)\s*$/) {
+                $name = $1;
+              }
+              elsif (/^([a-zA-Z]\S+(?:\/\S+)?)\s+time:\s+\[([^\]]+)\]/) {
+                $name = $1;
+                my @vals = split(/\s+/, $2);
+                my $median = "$vals[2] $vals[3]";
+                $median =~ s/^\s+|\s+$//g;
+                print "| `$name` | $median |\n";
+                $name = "";
+              }
+              elsif ($name && /^\s+time:\s+\[([^\]]+)\]/) {
+                my @vals = split(/\s+/, $1);
+                my $median = "$vals[2] $vals[3]";
+                $median =~ s/^\s+|\s+$//g;
+                print "| `$name` | $median |\n";
+                $name = "";
+              }
+            ' bench_output.txt)
+
+            {
+              echo "<!-- BENCHMARK_RESULTS_START -->"
+              echo "> 🤖 Auto-updated by CI on **${DATE}** — [View run](${RUN_URL})"
+              echo ""
+              if [ -n "$ROWS" ]; then
+                echo "| Benchmark | Mediana |"
+                echo "|-----------|--------|"
+                echo "$ROWS"
+              else
+                echo "*Nenhum resultado parseado — verifique os [artefatos do run](${RUN_URL}).*"
+              fi
+              echo ""
+              echo "<!-- BENCHMARK_RESULTS_END -->"
+            } > bench_block.txt
+          fi
 
           # Inject block into README between markers
           perl -i -0pe '

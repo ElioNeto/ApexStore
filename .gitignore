@@ -3,9 +3,11 @@ target
 /local
 credentials
 *.sh
+!scripts/format-benchmarks.sh
 .env
 node_modules
 .angular
 dist
 .notes/
 .aider*
+.secrets
