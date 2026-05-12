@@ -44,7 +44,7 @@ fn generate_value(index: usize, value_size: usize) -> Vec<u8> {
 }
 
 /// Compute P50, P95, P99 from a sorted slice of latencies (in ns).
-fn compute_percentiles(latencies_ns: &mut Vec<u64>) -> (f64, f64, f64) {
+fn compute_percentiles(latencies_ns: &mut [u64]) -> (f64, f64, f64) {
     if latencies_ns.is_empty() {
         return (0.0, 0.0, 0.0);
     }
@@ -224,7 +224,7 @@ fn bench_write_latency_1k(c: &mut Criterion) {
     )
     .unwrap();
     let keys: Vec<String> = (0..1_000).map(|i| generate_key(i, 10)).collect();
-    let values: Vec<Vec<u8>> = (0..1_000).map(|i| generate_value(i, 100)).collect();
+    let _values: Vec<Vec<u8>> = (0..1_000).map(|i| generate_value(i, 100)).collect();
 
     let mut all_latencies = Vec::with_capacity(keys.len());
     group.bench_function("write_1k", |b| {

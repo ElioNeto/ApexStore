@@ -56,7 +56,7 @@ fn test_cli_scan_pagination_cursor() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get second page starting after page1's last key
     if let Some((last_key, _)) = page1.last() {
-        let page2 = engine.scan_range("default", &last_key, b"k:~", Some(3))?;
+        let page2 = engine.scan_range("default", last_key, b"k:~", Some(3))?;
         assert_eq!(page2.len(), 3, "Second page should have 3 results");
     }
 

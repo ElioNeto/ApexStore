@@ -21,7 +21,7 @@
       "number": 131,
       "priority": "low",
       "title": "[CI-FAILURE] CI / PR Validation: clippy failed",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "blocks": [],
       "acceptance_summary": [
@@ -102,7 +102,7 @@
     {
       "id": "T8",
       "description": "Run cargo clippy --all-targets --all-features -- -D warnings locally to reproduce the CI failure and capture the exact clippy warnings/errors",
-      "status": "pending",
+      "status": "done",
       "files": [],
       "depends_on": [],
       "notes": ""
@@ -110,7 +110,7 @@
     {
       "id": "T9",
       "description": "Analyze output from T8 and fix all clippy warnings/errors in the affected source files (lib, bins, tests, benches)",
-      "status": "pending",
+      "status": "done",
       "files": [
         "src/",
         "benches/",
@@ -123,7 +123,7 @@
     {
       "id": "T10",
       "description": "Verify cargo clippy --all-targets --all-features -- -D warnings passes cleanly with zero warnings after fixes",
-      "status": "pending",
+      "status": "done",
       "files": [],
       "depends_on": ["T9"],
       "notes": ""
@@ -131,7 +131,7 @@
     {
       "id": "T11",
       "description": "Run cargo test --all-features --workspace to ensure all tests still pass after clippy fixes",
-      "status": "pending",
+      "status": "done",
       "files": [],
       "depends_on": ["T10"],
       "notes": ""
@@ -139,7 +139,7 @@
     {
       "id": "T12",
       "description": "Push the clippy fixes to the target branch and verify GitHub Actions PR Validation workflow passes — confirm issue #131 auto-closes via ci-issue-manager",
-      "status": "pending",
+      "status": "done",
       "files": [],
       "depends_on": ["T11"],
       "notes": ""

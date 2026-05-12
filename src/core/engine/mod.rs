@@ -1009,7 +1009,7 @@ mod tests {
         assert!(result.is_some());
         let end = result.unwrap();
         // The prefix in bytes should be "usuário:" followed by something
-        assert!(end.len() >= prefix.as_bytes().len());
+        assert!(end.len() >= prefix.len());
         // The upper bound should be greater than the prefix
         assert!(end.as_slice() > prefix.as_bytes());
     }
@@ -1062,8 +1062,7 @@ mod tests {
         }
 
         // Search with prefix
-        let (results, _): (Vec<(Vec<u8>, Vec<u8>)>, Option<String>) =
-            engine.search_prefix("usuário:", None, 10).unwrap();
+        let (results, _) = engine.search_prefix("usuário:", None, 10).unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -1094,8 +1093,7 @@ mod tests {
                 .unwrap();
         }
 
-        let (results, _): (Vec<(Vec<u8>, Vec<u8>)>, Option<String>) =
-            engine.search_prefix("ção:", None, 10).unwrap();
+        let (results, _) = engine.search_prefix("ção:", None, 10).unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -1210,7 +1208,7 @@ mod tests {
 
         // The new table should not contain tombstones
         if let Some(new_table) = new_tables.first() {
-            for (_, value) in &new_table.data {
+            for value in new_table.data.values() {
                 assert!(
                     !value.is_empty(),
                     "Tombstones should be removed during compaction"

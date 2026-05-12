@@ -247,7 +247,7 @@ fn test_wal_partial_replay() {
         let v = engine
             .get(format!("k{i}"))
             .unwrap()
-            .expect(&format!("key k{i} should be recovered"));
+            .unwrap_or_else(|| panic!("key k{i} should be recovered"));
         assert_eq!(v, b"value".to_vec());
     }
 
