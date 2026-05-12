@@ -13,6 +13,22 @@ inputs:
   repo_token:
     description: 'GitHub token for API access'
     required: true
+  repository:
+    description: 'Repository in owner/repo format'
+    required: true
+  server_url:
+    description: 'GitHub server URL'
+    required: true
+    default: 'https://github.com'
+  run_id:
+    description: 'ID of the current workflow run'
+    required: true
+  ref_name:
+    description: 'Branch or tag name'
+    required: true
+  sha:
+    description: 'Commit SHA'
+    required: true
 runs:
   using: 'composite'
   steps:
@@ -23,55 +39,58 @@ runs:
         WORKFLOW_NAME: ${{ inputs.workflow_name }}
         JOB_STATUS: ${{ inputs.job_status }}
         JOB_NAME: ${{ inputs.job_name }}
+        REPO: ${{ inputs.repository }}
+        SERVER_URL: ${{ inputs.server_url }}
+        RUN_ID: ${{ inputs.run_id }}
+        REF_NAME: ${{ inputs.ref_name }}
+        COMMIT_SHA: ${{ inputs.sha }}
       run: |
         ISSUE_TITLE="[CI-FAILURE] ${WORKFLOW_NAME}: ${JOB_NAME} failed"
-        
+        RUN_URL="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
+
         if [ "$JOB_STATUS" = "failure" ]; then
-          echo "Job failed — creating/updating issue..."
-          EXISTING=$(gh issue list --repo ${{ github.repository }} \
+          echo "Job failed - creating/updating issue..."
+          EXISTING=$(gh issue list \
+            --repo "$REPO" \
             --label "ci-failure" \
             --state open \
             --json title,number \
             --jq ".[] | select(.title | startswith(\"[CI-FAILURE] ${WORKFLOW_NAME}\")) | .number" \
             | head -1)
-          
+
           if [ -n "$EXISTING" ]; then
             echo "Updating existing issue #$EXISTING"
-            gh issue comment "$EXISTING" --repo ${{ github.repository }} \
-              --body "❌ Job **${JOB_NAME}** failed again in workflow **${WORKFLOW_NAME}**.
-
-Check run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            gh issue comment "$EXISTING" \
+              --repo "$REPO" \
+              --body "$(printf '\u274c Job **%s** failed again in workflow **%s**.\n\nCheck run: %s' "$JOB_NAME" "$WORKFLOW_NAME" "$RUN_URL")"
           else
             echo "Creating new issue"
+            BODY=$(printf '## \u274c CI Failure\n\n**Workflow:** %s\n**Job:** %s\n**Run:** %s\n**Branch:** %s\n**Commit:** %s\n\nThe job **%s** failed in workflow **%s**.' \
+              "$WORKFLOW_NAME" "$JOB_NAME" "$RUN_URL" "$REF_NAME" "$COMMIT_SHA" "$JOB_NAME" "$WORKFLOW_NAME")
             gh issue create \
-              --repo ${{ github.repository }} \
+              --repo "$REPO" \
               --title "$ISSUE_TITLE" \
-              --body "## ❌ CI Failure
-
-**Workflow:** ${WORKFLOW_NAME}
-**Job:** ${JOB_NAME}
-**Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-**Branch:** ${{ github.ref_name }}
-**Commit:** ${{ github.sha }}
-
-The job **${JOB_NAME}** failed in workflow **${WORKFLOW_NAME}**." \
+              --body "$BODY" \
               --label "ci-failure"
           fi
+
         elif [ "$JOB_STATUS" = "success" ]; then
-          echo "Job succeeded — closing related issues..."
-          EXISTING=$(gh issue list --repo ${{ github.repository }} \
+          echo "Job succeeded - closing related issues..."
+          EXISTING=$(gh issue list \
+            --repo "$REPO" \
             --label "ci-failure" \
             --state open \
             --json title,number \
             --jq ".[] | select(.title | startswith(\"[CI-FAILURE] ${WORKFLOW_NAME}\")) | .number" \
             | head -1)
-          
+
           if [ -n "$EXISTING" ]; then
             echo "Closing issue #$EXISTING"
-            gh issue comment "$EXISTING" --repo ${{ github.repository }} \
-              --body "✅ Workflow **${WORKFLOW_NAME}** succeeded. Issue closed automatically."
-            gh issue close "$EXISTING" --repo ${{ github.repository }}
+            gh issue comment "$EXISTING" \
+              --repo "$REPO" \
+              --body "$(printf '\u2705 Workflow **%s** succeeded. Issue closed automatically.' "$WORKFLOW_NAME")"
+            gh issue close "$EXISTING" --repo "$REPO"
           else
-            echo "No open issues for ${WORKFLOW_NAME} — nothing to close"
+            echo "No open issues for ${WORKFLOW_NAME} - nothing to close"
           fi
         fi
