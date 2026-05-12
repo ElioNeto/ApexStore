@@ -1,0 +1,77 @@
+name: 'CI Issue Manager'
+description: 'Automatically creates/closes issues on CI job failure/success'
+inputs:
+  workflow_name:
+    description: 'Name of the workflow'
+    required: true
+  job_status:
+    description: 'Status of the job (success/failure)'
+    required: true
+  job_name:
+    description: 'Name of the job that ran'
+    required: true
+  repo_token:
+    description: 'GitHub token for API access'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Manage CI Issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.repo_token }}
+        WORKFLOW_NAME: ${{ inputs.workflow_name }}
+        JOB_STATUS: ${{ inputs.job_status }}
+        JOB_NAME: ${{ inputs.job_name }}
+      run: |
+        ISSUE_TITLE="[CI-FAILURE] ${WORKFLOW_NAME}: ${JOB_NAME} failed"
+        
+        if [ "$JOB_STATUS" = "failure" ]; then
+          echo "Job failed — creating/updating issue..."
+          EXISTING=$(gh issue list --repo ${{ github.repository }} \
+            --label "ci-failure" \
+            --state open \
+            --json title,number \
+            --jq ".[] | select(.title | startswith(\"[CI-FAILURE] ${WORKFLOW_NAME}\")) | .number" \
+            | head -1)
+          
+          if [ -n "$EXISTING" ]; then
+            echo "Updating existing issue #$EXISTING"
+            gh issue comment "$EXISTING" --repo ${{ github.repository }} \
+              --body "❌ Job **${JOB_NAME}** failed again in workflow **${WORKFLOW_NAME}**.
+
+Check run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          else
+            echo "Creating new issue"
+            gh issue create \
+              --repo ${{ github.repository }} \
+              --title "$ISSUE_TITLE" \
+              --body "## ❌ CI Failure
+
+**Workflow:** ${WORKFLOW_NAME}
+**Job:** ${JOB_NAME}
+**Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+**Branch:** ${{ github.ref_name }}
+**Commit:** ${{ github.sha }}
+
+The job **${JOB_NAME}** failed in workflow **${WORKFLOW_NAME}**." \
+              --label "ci-failure"
+          fi
+        elif [ "$JOB_STATUS" = "success" ]; then
+          echo "Job succeeded — closing related issues..."
+          EXISTING=$(gh issue list --repo ${{ github.repository }} \
+            --label "ci-failure" \
+            --state open \
+            --json title,number \
+            --jq ".[] | select(.title | startswith(\"[CI-FAILURE] ${WORKFLOW_NAME}\")) | .number" \
+            | head -1)
+          
+          if [ -n "$EXISTING" ]; then
+            echo "Closing issue #$EXISTING"
+            gh issue comment "$EXISTING" --repo ${{ github.repository }} \
+              --body "✅ Workflow **${WORKFLOW_NAME}** succeeded. Issue closed automatically."
+            gh issue close "$EXISTING" --repo ${{ github.repository }}
+          else
+            echo "No open issues for ${WORKFLOW_NAME} — nothing to close"
+          fi
+        fi
