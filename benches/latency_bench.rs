@@ -50,9 +50,9 @@ fn compute_percentiles(latencies_ns: &mut Vec<u64>) -> (f64, f64, f64) {
     }
     latencies_ns.sort_unstable();
     let len = latencies_ns.len();
-    let p50 = latencies_ns[(len as f64 * 0.50) as usize.min(len - 1)] as f64 / 1000.0;
-    let p95 = latencies_ns[(len as f64 * 0.95) as usize.min(len - 1)] as f64 / 1000.0;
-    let p99 = latencies_ns[(len as f64 * 0.99) as usize.min(len - 1)] as f64 / 1000.0;
+    let p50 = latencies_ns[((len as f64 * 0.50) as usize).min(len - 1)] as f64 / 1000.0;
+    let p95 = latencies_ns[((len as f64 * 0.95) as usize).min(len - 1)] as f64 / 1000.0;
+    let p99 = latencies_ns[((len as f64 * 0.99) as usize).min(len - 1)] as f64 / 1000.0;
     (p50, p95, p99)
 }
 

@@ -32,6 +32,14 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Ensure ci-failure label exists
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.repo_token }}
+      run: |
+        gh label list --repo ${{ github.repository }} --json name --jq '.[].name' | grep -q "^ci-failure$" || \
+          gh label create "ci-failure" --repo ${{ github.repository }} --description "CI workflow failure tracking" --color FF0000
+
     - name: Manage CI Issue
       shell: bash
       env:
