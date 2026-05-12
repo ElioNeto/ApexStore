@@ -334,7 +334,7 @@ impl WriteAheadLog {
     pub fn size(&self) -> Result<u64> {
         std::fs::metadata(&self.path)
             .map(|m| m.len())
-            .map_err(|e| crate::infra::error::LsmError::Io(e))
+            .map_err(crate::infra::error::LsmError::Io)
     }
 }
 

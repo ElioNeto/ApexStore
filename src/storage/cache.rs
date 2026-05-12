@@ -8,16 +8,12 @@ impl Cache for Arc<GlobalBlockCache> {}
 impl Cache for GlobalBlockCache {}
 
 /// A no-op cache for testing purposes
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct NoopCache;
 
 impl Cache for NoopCache {}
 
 impl NoopCache {
-    pub fn new() -> Self {
-        Self
-    }
-
     pub fn get(&self, _table_id: u64, _block_idx: usize) -> Option<Vec<u8>> {
         None
     }

@@ -6,7 +6,7 @@ use crate::core::table::Table;
 use crate::infra::config::StorageConfig;
 use crate::infra::error::Result;
 use crate::storage::builder::SstableBuilder;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Metrics collected during a compaction operation.
@@ -63,7 +63,7 @@ pub trait CompactionStrategy: Send + Sync {
         tables: Vec<Table>,
         options: &EngineOptions,
         storage_config: &StorageConfig,
-        output_dir: &PathBuf,
+        output_dir: &Path,
     ) -> Result<(Vec<Table>, CompactionMetrics)>;
 
     /// Returns the name of the strategy.
@@ -74,13 +74,15 @@ pub trait CompactionStrategy: Send + Sync {
 fn execute_compaction(
     tables: &[Table],
     storage_config: &StorageConfig,
-    output_dir: &PathBuf,
+    output_dir: &Path,
     output_prefix: &str,
     level: Option<usize>,
 ) -> Result<(Vec<Table>, CompactionMetrics)> {
     let start_time = SystemTime::now();
-    let mut metrics = CompactionMetrics::default();
-    metrics.files_merged = tables.len();
+    let mut metrics = CompactionMetrics {
+        files_merged: tables.len(),
+        ..Default::default()
+    };
 
     if tables.is_empty() {
         return Ok((Vec::new(), metrics));
@@ -214,7 +216,7 @@ impl CompactionStrategy for SizeTieredCompaction {
         tables: Vec<Table>,
         _options: &EngineOptions,
         storage_config: &StorageConfig,
-        output_dir: &PathBuf,
+        output_dir: &Path,
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
         execute_compaction(&tables, storage_config, output_dir, "sst", None)
     }
@@ -284,7 +286,7 @@ impl CompactionStrategy for LeveledCompaction {
         tables: Vec<Table>,
         _options: &EngineOptions,
         storage_config: &StorageConfig,
-        output_dir: &PathBuf,
+        output_dir: &Path,
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
         execute_compaction(&tables, storage_config, output_dir, "sst_L1", Some(1))
     }
@@ -298,18 +300,10 @@ impl CompactionStrategy for LeveledCompaction {
 ///
 /// Hybrid approach: top level (L0) uses Size-Tiered, lower levels use Leveled.
 /// This reduces write amplification compared to pure Leveled.
+#[derive(Default)]
 pub struct LazyLevelingCompaction {
     pub size_tiered: SizeTieredCompaction,
     pub leveled: LeveledCompaction,
-}
-
-impl Default for LazyLevelingCompaction {
-    fn default() -> Self {
-        Self {
-            size_tiered: SizeTieredCompaction::default(),
-            leveled: LeveledCompaction::default(),
-        }
-    }
 }
 
 impl CompactionStrategy for LazyLevelingCompaction {
@@ -322,7 +316,7 @@ impl CompactionStrategy for LazyLevelingCompaction {
             .map(|(i, _)| i)
             .collect();
 
-        let l0_indices: Vec<usize> = l0_tables.iter().copied().collect();
+        let l0_indices: Vec<usize> = l0_tables.to_vec();
 
         if !l0_indices.is_empty() {
             // Use size-tiered for L0
@@ -354,7 +348,7 @@ impl CompactionStrategy for LazyLevelingCompaction {
         tables: Vec<Table>,
         _options: &EngineOptions,
         storage_config: &StorageConfig,
-        output_dir: &PathBuf,
+        output_dir: &Path,
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
         // Determine which strategy to use based on table levels
         let has_l0 = tables.iter().any(|t| t.level == 0);

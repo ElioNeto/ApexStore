@@ -547,19 +547,19 @@ impl<C: Cache> Engine<C> {
 
         while merge_iter.is_valid() && results.len() < limit {
             if let Some(lower) = lower {
-                if merge_iter.key().as_ref() as &[u8] < lower {
+                if merge_iter.key() < lower {
                     merge_iter.next();
                     continue;
                 }
             }
             if let Some(upper) = upper {
-                if merge_iter.key().as_ref() as &[u8] >= upper {
+                if merge_iter.key() >= upper {
                     break;
                 }
             }
             results.push((
-                (merge_iter.key().as_ref() as &[u8]).to_vec(),
-                (merge_iter.value().as_ref() as &[u8]).to_vec(),
+                merge_iter.key().to_vec(),
+                merge_iter.value().to_vec(),
             ));
             merge_iter.next();
         }
@@ -602,7 +602,7 @@ impl<C: Cache> Engine<C> {
         // If cursor is set, skip the first result if it matches the cursor key
         let results: Vec<(Vec<u8>, Vec<u8>)> = results
             .into_iter()
-            .skip_while(|(k, _)| cursor.map_or(false, |c| k.as_slice() == c.as_bytes()))
+            .skip_while(|(k, _)| cursor.is_some_and(|c| k.as_slice() == c.as_bytes()))
             .collect();
 
         // Determine if there are more results beyond the limit
@@ -645,7 +645,7 @@ impl<C: Cache> Engine<C> {
         let mut results = Vec::new();
 
         while merge_iter.is_valid() && results.len() < MAX_SCAN_LIMIT {
-            results.push((merge_iter.key().as_ref() as &[u8]).to_vec());
+            results.push(merge_iter.key().to_vec());
             merge_iter.next();
         }
 
