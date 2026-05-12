@@ -105,9 +105,7 @@ fn bench_read_latency_memtable_1k(c: &mut Criterion) {
         });
     });
     let (p50, p95, p99) = compute_percentiles(&mut all_latencies);
-    println!(
-        "  → P50={p50:.1}µs  P95={p95:.1}µs  P99={p99:.1}µs  (memtable, 1k keys)"
-    );
+    println!("  → P50={p50:.1}µs  P95={p95:.1}µs  P99={p99:.1}µs  (memtable, 1k keys)");
     group.finish();
     drop(engine);
     drop(temp_dir);
@@ -139,9 +137,7 @@ fn bench_read_latency_memtable_100k(c: &mut Criterion) {
         });
     });
     let (p50, p95, p99) = compute_percentiles(&mut all_latencies);
-    println!(
-        "  → P50={p50:.1}µs  P95={p95:.1}µs  P99={p99:.1}µs  (memtable, 100k keys)"
-    );
+    println!("  → P50={p50:.1}µs  P95={p95:.1}µs  P99={p99:.1}µs  (memtable, 100k keys)");
     group.finish();
     drop(engine);
     drop(temp_dir);
@@ -177,9 +173,7 @@ fn bench_read_latency_sstable_1k(c: &mut Criterion) {
         });
     });
     let (p50, p95, p99) = compute_percentiles(&mut all_latencies);
-    println!(
-        "  → P50={p50:.1}µs  P95={p95:.1}µs  P99={p99:.1}µs  (sstable, 1k keys)"
-    );
+    println!("  → P50={p50:.1}µs  P95={p95:.1}µs  P99={p99:.1}µs  (sstable, 1k keys)");
     group.finish();
     drop(engine);
     drop(temp_dir);
@@ -211,9 +205,7 @@ fn bench_read_latency_sstable_100k(c: &mut Criterion) {
         });
     });
     let (p50, p95, p99) = compute_percentiles(&mut all_latencies);
-    println!(
-        "  → P50={p50:.1}µs  P95={p95:.1}µs  P99={p99:.1}µs  (sstable, 100k keys)"
-    );
+    println!("  → P50={p50:.1}µs  P95={p95:.1}µs  P99={p99:.1}µs  (sstable, 100k keys)");
     group.finish();
     drop(engine);
     drop(temp_dir);
@@ -239,8 +231,11 @@ fn bench_write_latency_1k(c: &mut Criterion) {
         b.iter(|| {
             all_latencies.clear();
             // Re-create keys/values each iteration to avoid key conflicts
-            let iteration_keys: Vec<String> = (0..1_000).map(|i| generate_key(i + 999_999, 10)).collect();
-            let iteration_values: Vec<Vec<u8>> = (0..1_000).map(|i| generate_value(i + 999_999, 100)).collect();
+            let iteration_keys: Vec<String> =
+                (0..1_000).map(|i| generate_key(i + 999_999, 10)).collect();
+            let iteration_values: Vec<Vec<u8>> = (0..1_000)
+                .map(|i| generate_value(i + 999_999, 100))
+                .collect();
             for (k, v) in iteration_keys.iter().zip(iteration_values.iter()) {
                 let start = Instant::now();
                 engine.set(k.clone(), v.clone()).unwrap();
@@ -249,9 +244,7 @@ fn bench_write_latency_1k(c: &mut Criterion) {
         });
     });
     let (p50, p95, p99) = compute_percentiles(&mut all_latencies);
-    println!(
-        "  → P50={p50:.1}µs  P95={p95:.1}µs  P99={p99:.1}µs  (write, 1k keys)"
-    );
+    println!("  → P50={p50:.1}µs  P95={p95:.1}µs  P99={p99:.1}µs  (write, 1k keys)");
     group.finish();
     drop(engine);
     drop(temp_dir);
@@ -291,9 +284,7 @@ fn bench_write_latency_100k(c: &mut Criterion) {
         });
     });
     let (p50, p95, p99) = compute_percentiles(&mut all_latencies);
-    println!(
-        "  → P50={p50:.1}µs  P95={p95:.1}µs  P99={p99:.1}µs  (write, 100k keys)"
-    );
+    println!("  → P50={p50:.1}µs  P95={p95:.1}µs  P99={p99:.1}µs  (write, 100k keys)");
     group.finish();
     drop(engine);
     drop(temp_dir);
