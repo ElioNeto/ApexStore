@@ -1,0 +1,24 @@
+{
+  "issues": [
+    {
+      "number": 131,
+      "priority": "low",
+      "title": "[CI-FAILURE] CI / PR Validation: clippy failed",
+      "status": "open",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [],
+      "fetched_body": false
+    },
+    {
+      "number": 130,
+      "priority": "low",
+      "title": "[CI-FAILURE] Benchmarks: benchmarks failed",
+      "status": "open",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [],
+      "fetched_body": false
+    }
+  ]
+}

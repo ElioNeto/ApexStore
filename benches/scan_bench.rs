@@ -74,7 +74,7 @@ fn bench_full_scan(c: &mut Criterion) {
                 }
 
                 b.iter(|| {
-                    let results = engine.scan_cf("default", None, None, None).unwrap();
+                    let results = engine.scan_cf("default", None, None, Some(nk)).unwrap();
                     assert_eq!(results.len(), nk);
                 });
 
@@ -232,7 +232,7 @@ fn bench_iteration_sorted(c: &mut Criterion) {
                 }
 
                 b.iter(|| {
-                    let results = engine.scan_cf("default", None, None, None).unwrap();
+                    let results = engine.scan_cf("default", None, None, Some(nk)).unwrap();
                     for i in 1..results.len() {
                         assert!(results[i - 1].0 <= results[i].0);
                     }
@@ -393,7 +393,7 @@ fn bench_sstable_layer_scan(c: &mut Criterion) {
                 }
 
                 b.iter(|| {
-                    let results = engine.scan_cf("default", None, None, None).unwrap();
+                    let results = engine.scan_cf("default", None, None, Some(keys_per_layer * layer_count)).unwrap();
                     assert!(results.len() >= keys_per_layer);
                 });
 

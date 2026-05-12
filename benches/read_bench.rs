@@ -372,7 +372,7 @@ fn bench_scan_sequential(c: &mut Criterion) {
                 engine.flush_memtable().unwrap();
 
                 b.iter(|| {
-                    let results = engine.scan_cf("default", None, None, None).unwrap();
+                    let results = engine.scan_cf("default", None, None, Some(nk)).unwrap();
                     assert_eq!(results.len(), nk);
                 });
 
