@@ -393,7 +393,9 @@ fn bench_sstable_layer_scan(c: &mut Criterion) {
                 }
 
                 b.iter(|| {
-                    let results = engine.scan_cf("default", None, None, Some(keys_per_layer * layer_count)).unwrap();
+                    let results = engine
+                        .scan_cf("default", None, None, Some(keys_per_layer * layer_count))
+                        .unwrap();
                     assert!(results.len() >= keys_per_layer);
                 });
 
