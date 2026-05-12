@@ -80,3 +80,17 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  report-status:
+    if: always()
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report job status
+        uses: ./.github/actions/ci-issue-manager
+        with:
+          workflow_name: "Release"
+          job_status: ${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}
+          job_name: "${{ join(needs.*.result, ', ') }}"
+          repo_token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,14 +1,27 @@
-# DEPRECATED: This file duplicates pr-validation.yml.
-# All CI validation happens in pr-validation.yml.
-# Keeping this file empty to avoid conflicts - remove after confirming
-# the replacement workflow is active.
-name: PR Validation (deprecated)
+name: CI / Workflow Validation
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
-  noop:
+  validate-workflows:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "ci.yml is deprecated. Use pr-validation.yml instead."
+      - uses: actions/checkout@v4
+      - uses: rhysd/actionlint-action@v1
+
+  report-status:
+    if: always()
+    needs: [validate-workflows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report job status
+        uses: ./.github/actions/ci-issue-manager
+        with:
+          workflow_name: "CI / Workflow Validation"
+          job_status: ${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}
+          job_name: "${{ join(needs.*.result, ', ') }}"
+          repo_token: ${{ secrets.GITHUB_TOKEN }}

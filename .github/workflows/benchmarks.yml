@@ -161,3 +161,17 @@ jobs:
 
       - name: Format check
         run: cargo fmt --all -- --check
+
+  report-status:
+    if: always()
+    needs: [benchmarks]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report job status
+        uses: ./.github/actions/ci-issue-manager
+        with:
+          workflow_name: "Benchmarks"
+          job_status: ${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}
+          job_name: "${{ join(needs.*.result, ', ') }}"
+          repo_token: ${{ secrets.GITHUB_TOKEN }}

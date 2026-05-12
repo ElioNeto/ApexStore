@@ -1,1 +1,190 @@
-{"issues":[{"number":121,"priority":"low","title":"[REFACTOR] Mover histórico LsmError para CHANGELOG.md","status":"completed","depends_on":[],"blocks":[],"acceptance_summary":["CHANGELOG.md created on root, Keep a Changelog format (already done by #124)","[Unreleased] entry documents breaking changes from LsmError cleanup (#92)","Variant history table removed from src/infra/error.rs; only CHANGELOG reference remains","Docstrings with examples on Engine, LsmConfig, CompactionStrategy","At least one functional example in examples/: open → put → get → delete","cargo clippy -- -D warnings and cargo test pass"],"fetched_body":true}],"todos":[{"id":"T1","description":"Add [Unreleased] entries in CHANGELOG.md documenting #92 LsmError breaking changes (removed variants + renamed Serialization→Codec)","status":"completed","files":["CHANGELOG.md"]},{"id":"T2","description":"Remove inline variant history table from src/infra/error.rs (lines 21-31) and replace with a concise reference pointing to CHANGELOG.md","status":"completed","files":["src/infra/error.rs"],"depends_on":["T1"]},{"id":"T3","description":"Add docstring with usage example to Engine<C: Cache> struct in src/core/engine/mod.rs","status":"completed","files":["src/core/engine/mod.rs"]},{"id":"T4","description":"Add docstring with usage example to LsmConfig struct in src/infra/config.rs","status":"completed","files":["src/infra/config.rs"]},{"id":"T5","description":"Add docstring with usage example to CompactionStrategy trait in src/core/engine/compaction.rs","status":"completed","files":["src/core/engine/compaction.rs"]},{"id":"T6","description":"Create examples/basic.rs with functional open → put → get → delete workflow using LsmEngine public API","status":"completed","files":["examples/basic.rs"]},{"id":"T7","description":"Run cargo clippy -- -D warnings and cargo test to verify no regressions","status":"completed","files":[]},{"id":"T8","description":"Clean up .task-state.json marking all tasks completed","status":"completed","files":[".task-state.json"]}]}
+{
+  "issues": [
+    {
+      "number": 121,
+      "priority": "low",
+      "title": "[REFACTOR] Mover histórico LsmError para CHANGELOG.md",
+      "status": "completed",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "CHANGELOG.md created on root, Keep a Changelog format (already done by #124)",
+        "[Unreleased] entry documents breaking changes from LsmError cleanup (#92)",
+        "Variant history table removed from src/infra/error.rs; only CHANGELOG reference remains",
+        "Docstrings with examples on Engine, LsmConfig, CompactionStrategy",
+        "At least one functional example in examples/: open → put → get → delete",
+        "cargo clippy -- -D warnings and cargo test pass"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 128,
+      "priority": "critical",
+      "title": "[CI] Simular GitHub Actions localmente com Docker para validação sem push",
+      "status": "completed",
+      "depends_on": [
+        119
+      ],
+      "blocks": [],
+      "acceptance_summary": [
+        ".actrc configurado com catthehacker/ubuntu:act-latest",
+        ".secrets.example criado, .secrets no .gitignore",
+        "Makefile com targets: ci-local, bench-local, ci-dry",
+        "make ci-local executa CI.yml via Docker sem erros",
+        "validate-workflows job com actionlint no CI.yml"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 127,
+      "priority": "low",
+      "title": "[CI] Abrir issue com log de erro quando job falhar e fechar automaticamente ao ter sucesso",
+      "status": "completed",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "Issue criada automaticamente quando job falha",
+        "Label ci-failure adicionada na issue",
+        "Issues fechadas automaticamente ao sucesso",
+        "Comentário adicionado ao fechar",
+        "Filtra issues por nome do workflow"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 126,
+      "priority": "low",
+      "title": "[Benchmark] Traduzir resultado do benchmark com OpenCode antes de commitar no README",
+      "status": "open",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "Job de benchmark chama OpenCode com output bruto",
+        "README atualizado com conteúdo formatado",
+        "Commit contém resultado formatado",
+        "Fallback para resultado bruto se OpenCode falhar"
+      ],
+      "fetched_body": true
+    }
+  ],
+  "todos": [
+    {
+      "id": "T1",
+      "description": "Create scripts/format-benchmarks.sh — pipes raw Criterion output through `opencode run` for AI formatting, outputs markdown block between BENCHMARK_RESULTS markers, returns 0 on success, non-zero on failure",
+      "status": "pending",
+      "files": [
+        "scripts/format-benchmarks.sh"
+      ]
+    },
+    {
+      "id": "T2",
+      "description": "Add OpenCode CLI installation step to benchmarks.yml — curl install script, PATH setup, binary caching",
+      "status": "pending",
+      "files": [
+        ".github/workflows/benchmarks.yml"
+      ],
+      "depends_on": [
+        "T1"
+      ]
+    },
+    {
+      "id": "T3",
+      "description": "Modify 'Generate benchmark summary' step in benchmarks.yml — try format-benchmarks.sh first, fall back to existing Perl parsing if OpenCode fails, inject result into README.md",
+      "status": "pending",
+      "files": [
+        ".github/workflows/benchmarks.yml"
+      ],
+      "depends_on": [
+        "T2"
+      ]
+    },
+    {
+      "id": "T4",
+      "description": "Run make bench-local to validate the modified workflow — confirm OpenCode formatting works with API key set and fallback works without it",
+      "status": "pending",
+      "files": [],
+      "depends_on": [
+        "T3"
+      ]
+    },
+    {
+      "id": "T8",
+      "description": "Create composite action .github/actions/ci-issue-manager/action.yml for auto-creating/closing issues on CI job failure/success",
+      "status": "completed",
+      "files": [
+        ".github/actions/ci-issue-manager/action.yml"
+      ]
+    },
+    {
+      "id": "T9",
+      "description": "Add report-status job to pr-validation.yml with needs: [fmt, clippy, audit, test, build_and_docs]",
+      "status": "completed",
+      "files": [
+        ".github/workflows/pr-validation.yml"
+      ],
+      "depends_on": [
+        "T8"
+      ]
+    },
+    {
+      "id": "T10",
+      "description": "Add report-status job to ci.yml with needs: [validate-workflows]",
+      "status": "completed",
+      "files": [
+        ".github/workflows/ci.yml"
+      ],
+      "depends_on": [
+        "T8"
+      ]
+    },
+    {
+      "id": "T11",
+      "description": "Add report-status job to benchmarks.yml with needs: [benchmarks]",
+      "status": "completed",
+      "files": [
+        ".github/workflows/benchmarks.yml"
+      ],
+      "depends_on": [
+        "T8"
+      ]
+    },
+    {
+      "id": "T12",
+      "description": "Add report-status job to release.yml with needs: [release]",
+      "status": "completed",
+      "files": [
+        ".github/workflows/release.yml"
+      ],
+      "depends_on": [
+        "T8"
+      ]
+    },
+    {
+      "id": "T13",
+      "description": "Add report-status job to deploy-docs.yml with needs: [deploy]",
+      "status": "completed",
+      "files": [
+        ".github/workflows/deploy-docs.yml"
+      ],
+      "depends_on": [
+        "T8"
+      ]
+    },
+    {
+      "id": "T14",
+      "description": "Update .task-state.json marking todos T8-T13 as completed and issue #127 status as completed",
+      "status": "completed",
+      "files": [
+        ".task-state.json"
+      ],
+      "depends_on": [
+        "T8",
+        "T9",
+        "T10",
+        "T11",
+        "T12",
+        "T13"
+      ]
+    }
+  ]
+}
