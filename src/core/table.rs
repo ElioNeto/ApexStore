@@ -31,13 +31,12 @@ impl Table {
         data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
         _options: &crate::core::engine::EngineOptions,
     ) -> Self {
-        let (min_key, max_key) = if let (Some(first), Some(last)) =
-            (data.first_key_value(), data.last_key_value())
-        {
-            (first.0.clone(), last.0.clone())
-        } else {
-            (Vec::new(), Vec::new())
-        };
+        let (min_key, max_key) =
+            if let (Some(first), Some(last)) = (data.first_key_value(), data.last_key_value()) {
+                (first.0.clone(), last.0.clone())
+            } else {
+                (Vec::new(), Vec::new())
+            };
         Self {
             data,
             level: 0,
@@ -65,9 +64,12 @@ impl Table {
             match Self::read_meta_block(path) {
                 Ok(meta) => {
                     let bf = bloomfilter::Bloom::<[u8]>::from_bytes(meta.bloom_filter_data)
-                        .map_err(|e| crate::infra::error::LsmError::CompactionFailed(
-                            format!("Bloom filter deserialization failed: {}", e)
-                        ))?;
+                        .map_err(|e| {
+                            crate::infra::error::LsmError::CompactionFailed(format!(
+                                "Bloom filter deserialization failed: {}",
+                                e
+                            ))
+                        })?;
                     (meta.min_key, meta.max_key, Some(bf))
                 }
                 Err(_) => (Vec::new(), Vec::new(), None),
@@ -87,7 +89,9 @@ impl Table {
     }
 
     /// Read the MetaBlock from an SSTable file
-    fn read_meta_block(path: &std::path::Path) -> crate::infra::error::Result<crate::storage::builder::MetaBlock> {
+    fn read_meta_block(
+        path: &std::path::Path,
+    ) -> crate::infra::error::Result<crate::storage::builder::MetaBlock> {
         use crate::infra::codec::decode;
         use crate::storage::builder::MetaBlock;
         use lz4_flex::decompress_size_prepended;
@@ -104,7 +108,10 @@ impl Table {
         file.read_exact(&mut magic)?;
         if &magic != SST_MAGIC_V2 {
             return Err(crate::infra::error::LsmError::InvalidSstableFormat(
-                format!("Invalid magic number: expected {:?}, found {:?}", SST_MAGIC_V2, magic)
+                format!(
+                    "Invalid magic number: expected {:?}, found {:?}",
+                    SST_MAGIC_V2, magic
+                ),
             ));
         }
 
@@ -122,10 +129,12 @@ impl Table {
         file.read_exact(&mut compressed_meta)?;
 
         // Decompress metadata
-        let decompressed = decompress_size_prepended(&compressed_meta)
-            .map_err(|e| crate::infra::error::LsmError::DecompressionFailed(
-                format!("Metadata decompression failed: {}", e)
-            ))?;
+        let decompressed = decompress_size_prepended(&compressed_meta).map_err(|e| {
+            crate::infra::error::LsmError::DecompressionFailed(format!(
+                "Metadata decompression failed: {}",
+                e
+            ))
+        })?;
 
         // Deserialize metadata
         let metadata: MetaBlock = decode(&decompressed)?;
@@ -134,10 +143,7 @@ impl Table {
     }
 
     pub fn size(&self) -> usize {
-        self.data
-            .iter()
-            .map(|(k, v)| k.len() + v.len())
-            .sum()
+        self.data.iter().map(|(k, v)| k.len() + v.len()).sum()
     }
 
     pub fn iter(&self) -> TableIterator<'_> {

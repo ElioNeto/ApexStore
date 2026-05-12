@@ -215,12 +215,14 @@ impl App {
                 let query = parts[1];
                 let prefix_mode = parts.len() > 2 && parts[2] == "--prefix";
                 let rows = if prefix_mode {
-                    self.engine.search_prefix(query, None, 100)
+                    self.engine
+                        .search_prefix(query, None, 100)
                         .map(|(rows, _)| rows)
                         .unwrap_or_else(|_| Vec::new())
                 } else {
                     // Use scan with the query as a prefix
-                    self.engine.scan_cf("default", Some(query.as_bytes()), None, Some(100))
+                    self.engine
+                        .scan_cf("default", Some(query.as_bytes()), None, Some(100))
                         .unwrap_or_else(|_| Vec::new())
                 };
                 if rows.is_empty() {
@@ -250,7 +252,9 @@ impl App {
                     self.log_push("\u{274c} Usage: SCAN <prefix>", C_ERR);
                     return;
                 }
-                let rows = self.engine.search_prefix(parts[1], None, 100)
+                let rows = self
+                    .engine
+                    .search_prefix(parts[1], None, 100)
                     .map(|(rows, _)| rows)
                     .unwrap_or_else(|_| Vec::new());
                 if rows.is_empty() {
@@ -361,22 +365,13 @@ impl App {
                                 ),
                                 C_TEXT,
                             );
-                            self.log_push(
-                                format!("  SSTable files    : {}", s.sst_files),
-                                C_TEXT,
-                            );
+                            self.log_push(format!("  SSTable files    : {}", s.sst_files), C_TEXT);
                             self.log_push(
                                 format!("  SSTable records  : {}", s.sst_records),
                                 C_TEXT,
                             );
-                            self.log_push(
-                                format!("  SSTable size     : {} KB", s.sst_kb),
-                                C_TEXT,
-                            );
-                            self.log_push(
-                                format!("  WAL size         : {} KB", s.wal_kb),
-                                C_TEXT,
-                            );
+                            self.log_push(format!("  SSTable size     : {} KB", s.sst_kb), C_TEXT);
+                            self.log_push(format!("  WAL size         : {} KB", s.wal_kb), C_TEXT);
                             self.log_push(
                                 format!("  Total records    : {}", s.total_records),
                                 C_TEXT,
@@ -601,7 +596,11 @@ fn main() -> io::Result<()> {
         .build()
         .map_err(|e: LsmError| io::Error::other(e.to_string()))?;
 
-    let engine = LsmEngine::new_from_config(&config, apexstore::storage::cache::GlobalBlockCache::new(64, 4096)).map_err(|e: LsmError| io::Error::other(e.to_string()))?;
+    let engine = LsmEngine::new_from_config(
+        &config,
+        apexstore::storage::cache::GlobalBlockCache::new(64, 4096),
+    )
+    .map_err(|e: LsmError| io::Error::other(e.to_string()))?;
 
     let mut terminal = setup()?;
     let mut app = App::new(engine);

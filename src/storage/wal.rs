@@ -118,7 +118,10 @@ impl WriteAheadLog {
         writer.flush()?;
         writer.get_ref().sync_all()?;
 
-        debug!("WAL persisted: key={:?}, ts={}", record.key, record.timestamp);
+        debug!(
+            "WAL persisted: key={:?}, ts={}",
+            record.key, record.timestamp
+        );
         Ok(())
     }
 
@@ -154,7 +157,10 @@ impl WriteAheadLog {
 
             if buf.len() < 4 {
                 // Trailing incomplete length prefix — partial WAL frame from crash
-                debug!("WAL recovery: trailing incomplete frame at offset {}, discarding", buf.len());
+                debug!(
+                    "WAL recovery: trailing incomplete frame at offset {}, discarding",
+                    buf.len()
+                );
                 break;
             }
 
@@ -185,7 +191,9 @@ impl WriteAheadLog {
             if let Err(e) = reader.read_exact(&mut payload) {
                 if e.kind() == io::ErrorKind::UnexpectedEof {
                     // Trailing partial payload — crash during write_record
-                    debug!("WAL recovery: partial payload at end of log, discarding trailing frame");
+                    debug!(
+                        "WAL recovery: partial payload at end of log, discarding trailing frame"
+                    );
                     break;
                 }
                 return Err(e.into());
@@ -196,7 +204,9 @@ impl WriteAheadLog {
             if let Err(e) = reader.read_exact(&mut checksumbuf) {
                 if e.kind() == io::ErrorKind::UnexpectedEof {
                     // Trailing partial checksum — crash during write_record fsync
-                    debug!("WAL recovery: partial checksum at end of log, discarding trailing frame");
+                    debug!(
+                        "WAL recovery: partial checksum at end of log, discarding trailing frame"
+                    );
                     break;
                 }
                 return Err(e.into());
@@ -410,7 +420,11 @@ mod tests {
         // Recovery should succeed with only the first (complete) record
         let result = wal.recover();
         let recovered = result.expect("recovery should succeed even with truncated trailing frame");
-        assert_eq!(recovered.len(), 1, "should recover the first complete record");
+        assert_eq!(
+            recovered.len(),
+            1,
+            "should recover the first complete record"
+        );
         assert_eq!(recovered[0], record1);
     }
 
@@ -456,10 +470,7 @@ mod tests {
         let recovered = wal.recover().unwrap();
         assert_eq!(recovered.len(), 1);
         assert_eq!(recovered[0], record);
-        assert_eq!(
-            recovered[0].column_family.as_deref(),
-            Some("users")
-        );
+        assert_eq!(recovered[0].column_family.as_deref(), Some("users"));
     }
 
     #[test]

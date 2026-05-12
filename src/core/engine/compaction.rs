@@ -98,9 +98,7 @@ fn execute_compaction(
     }
 
     let mut merge_iter = MergeIterator::new(iters);
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_nanos();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
 
     // Create output SSTable
     let output_path = output_dir.join(format!("{}_{}.sst", output_prefix, timestamp));
@@ -241,9 +239,9 @@ impl Default for LeveledCompaction {
     fn default() -> Self {
         // Level sizes: L1=10MB, L2=100MB, L3=1GB, etc.
         let max_level_size = vec![
-            10 * 1024 * 1024,    // L1: 10MB
-            100 * 1024 * 1024,   // L2: 100MB
-            1024 * 1024 * 1024,  // L3: 1GB
+            10 * 1024 * 1024,   // L1: 10MB
+            100 * 1024 * 1024,  // L2: 100MB
+            1024 * 1024 * 1024, // L3: 1GB
         ];
         Self {
             level_multiplier: 10,
@@ -325,16 +323,16 @@ impl CompactionStrategy for LazyLevelingCompaction {
             .collect();
 
         let l0_indices: Vec<usize> = l0_tables.iter().copied().collect();
-        
+
         if !l0_indices.is_empty() {
             // Use size-tiered for L0
-            let l0_tables_ref: Vec<Table> = l0_indices
-                .iter()
-                .map(|&i| tables[i].clone())
-                .collect();
-            
-            let buckets = SizeTieredCompaction::group_into_buckets(&l0_tables_ref, self.size_tiered.min_tables_to_merge);
-            
+            let l0_tables_ref: Vec<Table> = l0_indices.iter().map(|&i| tables[i].clone()).collect();
+
+            let buckets = SizeTieredCompaction::group_into_buckets(
+                &l0_tables_ref,
+                self.size_tiered.min_tables_to_merge,
+            );
+
             // Map back to original indices
             buckets
                 .into_iter()
@@ -360,11 +358,13 @@ impl CompactionStrategy for LazyLevelingCompaction {
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
         // Determine which strategy to use based on table levels
         let has_l0 = tables.iter().any(|t| t.level == 0);
-        
+
         if has_l0 {
-            self.size_tiered.execute(tables, _options, storage_config, output_dir)
+            self.size_tiered
+                .execute(tables, _options, storage_config, output_dir)
         } else {
-            self.leveled.execute(tables, _options, storage_config, output_dir)
+            self.leveled
+                .execute(tables, _options, storage_config, output_dir)
         }
     }
 
@@ -402,9 +402,13 @@ pub enum CompactionStrategyType {
 impl From<crate::infra::config::CompactionStrategy> for CompactionStrategyType {
     fn from(s: crate::infra::config::CompactionStrategy) -> Self {
         match s {
-            crate::infra::config::CompactionStrategy::SizeTiered => CompactionStrategyType::SizeTiered,
+            crate::infra::config::CompactionStrategy::SizeTiered => {
+                CompactionStrategyType::SizeTiered
+            }
             crate::infra::config::CompactionStrategy::Leveled => CompactionStrategyType::Leveled,
-            crate::infra::config::CompactionStrategy::LazyLeveling => CompactionStrategyType::LazyLeveling,
+            crate::infra::config::CompactionStrategy::LazyLeveling => {
+                CompactionStrategyType::LazyLeveling
+            }
         }
     }
 }
@@ -414,7 +418,7 @@ impl From<crate::infra::config::CompactionStrategy> for CompactionOptions {
         let strategy_type: CompactionStrategyType = config.into();
         CompactionOptions {
             strategy_type,
-            compaction_threshold: 4, // default
+            compaction_threshold: 4,      // default
             max_tables_per_compaction: 8, // default
         }
     }
@@ -444,7 +448,7 @@ impl Clone for Compaction {
             CompactionStrategyType::Leveled => Box::new(LeveledCompaction::default()),
             CompactionStrategyType::LazyLeveling => Box::new(LazyLevelingCompaction::default()),
         };
-        
+
         Self {
             strategy,
             options: self.options.clone(),

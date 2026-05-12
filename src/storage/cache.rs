@@ -17,20 +17,17 @@ impl NoopCache {
     pub fn new() -> Self {
         Self
     }
-    
+
     pub fn get(&self, _table_id: u64, _block_idx: usize) -> Option<Vec<u8>> {
         None
     }
-    
+
     pub fn put(&self, _table_id: u64, _block_idx: usize, _data: Vec<u8>) {
         // No-op
     }
-    
+
     pub fn stats(&self) -> CacheStats {
-        CacheStats {
-            len: 0,
-            cap: 0,
-        }
+        CacheStats { len: 0, cap: 0 }
     }
 }
 
@@ -44,7 +41,8 @@ pub struct GlobalBlockCache {
 impl GlobalBlockCache {
     pub fn new(size_mb: usize, block_size: usize) -> Arc<Self> {
         let max_blocks = (size_mb * 1024 * 1024) / block_size;
-        let capacity = NonZeroUsize::new(max_blocks.max(1)).expect("max_blocks is at least 1, NonZeroUsize is safe");
+        let capacity = NonZeroUsize::new(max_blocks.max(1))
+            .expect("max_blocks is at least 1, NonZeroUsize is safe");
 
         Arc::new(Self {
             cache: Arc::new(Mutex::new(LruCache::new(capacity))),

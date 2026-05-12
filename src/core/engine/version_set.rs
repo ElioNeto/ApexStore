@@ -27,7 +27,8 @@ impl<C: Cache> VersionSet<C> {
     pub fn new(options: crate::core::engine::EngineOptions, _cache: C) -> Self {
         // Derive KV cache capacity from block cache size (rough estimate: entry ~200 bytes)
         let kv_capacity = (options.block_cache_size_mb * 1024 * 1024 / 200).max(1000);
-        let kv_capacity = NonZeroUsize::new(kv_capacity).expect("kv_capacity >= 1000, NonZeroUsize is safe");
+        let kv_capacity =
+            NonZeroUsize::new(kv_capacity).expect("kv_capacity >= 1000, NonZeroUsize is safe");
         Self {
             _cache: std::marker::PhantomData,
             kv_cache: Arc::new(Mutex::new(LruCache::new(kv_capacity))),
@@ -197,9 +198,7 @@ impl<C: Cache> VersionSet<C> {
 
     /// Get all tables for a column family (without draining)
     pub fn get_tables(&self, cf: &str) -> Vec<crate::core::table::Table> {
-        self.tables
-            .get(cf)
-            .map_or_else(Vec::new, |v| v.clone())
+        self.tables.get(cf).map_or_else(Vec::new, |v| v.clone())
     }
 
     /// Atomically replace specific tables with new ones.
@@ -273,12 +272,7 @@ impl<C: Cache> VersionSet<C> {
             // Estimate size: sum of key+value lengths across all tables
             stats.total_size = cf_tables
                 .iter()
-                .map(|t| {
-                    t.data
-                        .iter()
-                        .map(|(k, v)| k.len() + v.len())
-                        .sum::<usize>()
-                })
+                .map(|t| t.data.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>())
                 .sum();
             stats.sst_kb = stats.total_size / 1024;
         }

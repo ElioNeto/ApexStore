@@ -161,8 +161,16 @@ impl SstableBuilder {
         let meta_block = MetaBlock {
             blocks: self.block_metas,
             bloom_filter_data: bloom_bytes,
-            min_key: self.first_key.ok_or_else(|| LsmError::InvalidSstableFormat("No records in SSTable, cannot determine min key".to_string()))?,
-            max_key: self.last_key.ok_or_else(|| LsmError::InvalidSstableFormat("No records in SSTable, cannot determine max key".to_string()))?,
+            min_key: self.first_key.ok_or_else(|| {
+                LsmError::InvalidSstableFormat(
+                    "No records in SSTable, cannot determine min key".to_string(),
+                )
+            })?,
+            max_key: self.last_key.ok_or_else(|| {
+                LsmError::InvalidSstableFormat(
+                    "No records in SSTable, cannot determine max key".to_string(),
+                )
+            })?,
             record_count: self.record_count,
             timestamp: self.timestamp,
         };
@@ -273,7 +281,10 @@ mod tests {
 
         let large_value = vec![b'x'; 1000];
         builder
-            .add(b"large_key", &create_test_record(b"large_key", &large_value))
+            .add(
+                b"large_key",
+                &create_test_record(b"large_key", &large_value),
+            )
             .unwrap();
 
         let result = builder.finish();

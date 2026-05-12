@@ -63,10 +63,10 @@ impl ApiToken {
     /// Check if token has expired
     pub fn is_expired(&self) -> bool {
         if let Some(expires_at) = self.expires_at {
-        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(d) => d.as_nanos(),
-            Err(e) => panic!("SystemTime error: {}", e),
-        };
+            let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+                Ok(d) => d.as_nanos(),
+                Err(e) => panic!("SystemTime error: {}", e),
+            };
             now > expires_at
         } else {
             false

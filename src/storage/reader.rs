@@ -472,19 +472,18 @@ mod tests {
             let key = format!("key_{:02}", i);
             let value = format!("value_{}", i);
             builder
-                .add(key.as_bytes(), &create_test_record(key.as_bytes(), value.as_bytes()))
+                .add(
+                    key.as_bytes(),
+                    &create_test_record(key.as_bytes(), value.as_bytes()),
+                )
                 .unwrap();
         }
 
         let path = builder.finish().unwrap();
 
         // Open the SSTable for reading
-        let reader = SstableReader::open(
-            path.clone(),
-            config,
-            GlobalBlockCache::new(100, 4096),
-        )
-        .unwrap();
+        let reader =
+            SstableReader::open(path.clone(), config, GlobalBlockCache::new(100, 4096)).unwrap();
 
         // Corrupt the first data block by writing junk after the magic number
         {

@@ -71,7 +71,10 @@ impl<I: StorageIterator> MergeIterator<I> {
                     // Same key as current, but from an older iterator (higher index)
                     // Pop it, advance it, and re-push if valid.
                     // Safe: we just peeked, so the heap is non-empty
-                    let mut entry = self.heap.pop().unwrap_or_else(|| unreachable!("heap confirmed non-empty by peek"));
+                    let mut entry = self
+                        .heap
+                        .pop()
+                        .unwrap_or_else(|| unreachable!("heap confirmed non-empty by peek"));
                     entry.iter.next();
                     if entry.iter.is_valid() {
                         self.heap.push(entry);
@@ -206,46 +209,49 @@ mod tests {
             vec!["apple", "cherry", "elderberry"],
             vec!["v1", "v3", "v5"],
         );
-        let iter_b = MockIter::new(
-            vec!["banana", "date", "fig"],
-            vec!["v2", "v4", "v6"],
-        );
-        let iter_c = MockIter::new(
-            vec!["grape", "honeydew"],
-            vec!["v7", "v8"],
-        );
+        let iter_b = MockIter::new(vec!["banana", "date", "fig"], vec!["v2", "v4", "v6"]);
+        let iter_c = MockIter::new(vec!["grape", "honeydew"], vec!["v7", "v8"]);
 
         let iters = vec![iter_a, iter_b, iter_c];
         let mut merged = MergeIterator::new(iters);
 
         // Verify the heap is backed by BinaryHeap (compile-time check)
-        let _: std::collections::BinaryHeap<HeapEntry<MockIter>> = std::collections::BinaryHeap::new();
+        let _: std::collections::BinaryHeap<HeapEntry<MockIter>> =
+            std::collections::BinaryHeap::new();
 
         // Collect merged output
         let mut output = Vec::new();
         while merged.is_valid() {
-            output.push((
-                merged.key().clone(),
-                merged.value().to_vec(),
-            ));
+            output.push((merged.key().clone(), merged.value().to_vec()));
             merged.next();
         }
 
         // Expected sorted order
         let expected: Vec<&[u8]> = vec![
-            b"apple", b"banana", b"cherry", b"date",
-            b"elderberry", b"fig", b"grape", b"honeydew",
+            b"apple",
+            b"banana",
+            b"cherry",
+            b"date",
+            b"elderberry",
+            b"fig",
+            b"grape",
+            b"honeydew",
         ];
 
-        assert_eq!(output.len(), expected.len(),
-            "MergeIterator should produce all 8 keys in sorted order");
+        assert_eq!(
+            output.len(),
+            expected.len(),
+            "MergeIterator should produce all 8 keys in sorted order"
+        );
 
         for (i, exp_key) in expected.iter().enumerate() {
             assert_eq!(
                 output[i].0.as_slice(),
                 *exp_key,
                 "Position {} should be {:?}, got {:?}",
-                i, exp_key, output[i].0
+                i,
+                exp_key,
+                output[i].0
             );
         }
 

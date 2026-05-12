@@ -31,8 +31,7 @@ fn main() {
 
     // Open the engine
     let cache = GlobalBlockCache::new(100, 4096);
-    let mut engine = Engine::new_from_config(&config, cache)
-        .expect("failed to open engine");
+    let mut engine = Engine::new_from_config(&config, cache).expect("failed to open engine");
 
     // ── Put ──
     engine
@@ -46,10 +45,7 @@ fn main() {
         .expect("get failed")
         .expect("key not found");
     assert_eq!(got, b"hello, world!");
-    println!(
-        "✓ Get  : greeting → {}",
-        String::from_utf8_lossy(&got)
-    );
+    println!("✓ Get  : greeting → {}", String::from_utf8_lossy(&got));
 
     // ── Delete ──
     engine.delete(b"greeting").expect("delete failed");

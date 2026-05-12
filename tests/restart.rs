@@ -7,7 +7,6 @@ use tempfile::tempdir;
 use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 
-
 #[test]
 fn restart_recovers_from_wal() {
     let dir = tempdir().unwrap();
@@ -18,11 +17,19 @@ fn restart_recovers_from_wal() {
         .unwrap();
 
     {
-        let mut engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+        let mut engine = LsmEngine::new_from_config(
+            &cfg,
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
         engine.set("k1".to_string(), b"v1".to_vec()).unwrap();
     }
 
-    let engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+    let engine = LsmEngine::new_from_config(
+        &cfg,
+        apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+    )
+    .unwrap();
     let v = engine.get("k1").unwrap().unwrap();
     assert_eq!(v, b"v1".to_vec());
 }
@@ -38,7 +45,11 @@ fn restart_after_flush_reads_sstable() {
         .unwrap();
 
     {
-        let mut engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+        let mut engine = LsmEngine::new_from_config(
+            &cfg,
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
         // Write enough data to trigger flush (1KB memtable)
         // 50 entries * ~25 bytes (20 bytes value + key + overhead) = ~1250 bytes > 1024
         for i in 0..50 {
@@ -48,7 +59,11 @@ fn restart_after_flush_reads_sstable() {
         // (though with 1KB limit it should happen automatically)
     }
 
-    let engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+    let engine = LsmEngine::new_from_config(
+        &cfg,
+        apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+    )
+    .unwrap();
     let v = engine.get("k1").unwrap().unwrap();
     assert!(!v.is_empty());
 }
@@ -63,12 +78,20 @@ fn tombstone_persists_across_restart() {
         .unwrap();
 
     {
-        let mut engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+        let mut engine = LsmEngine::new_from_config(
+            &cfg,
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
         engine.set("k".to_string(), b"v".to_vec()).unwrap();
         engine.delete("k".to_string()).unwrap();
     }
 
-    let engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+    let engine = LsmEngine::new_from_config(
+        &cfg,
+        apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+    )
+    .unwrap();
     assert!(engine.get("k").unwrap().is_none());
 }
 
@@ -83,7 +106,11 @@ fn wal_truncation_recovers_partial_last_record() {
         .unwrap();
 
     {
-        let mut engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+        let mut engine = LsmEngine::new_from_config(
+            &cfg,
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
         engine.set("k1".to_string(), b"v1".to_vec()).unwrap();
     }
 
@@ -101,9 +128,16 @@ fn wal_truncation_recovers_partial_last_record() {
     drop(file);
 
     // Engine should start gracefully; the truncated record is unconfirmed data and is lost
-    let engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+    let engine = LsmEngine::new_from_config(
+        &cfg,
+        apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+    )
+    .unwrap();
     // The only record was truncated → k1 should not be present
-    assert!(engine.get("k1").unwrap().is_none(), "truncated record should be lost");
+    assert!(
+        engine.get("k1").unwrap().is_none(),
+        "truncated record should be lost"
+    );
 }
 
 #[test]
@@ -119,11 +153,17 @@ fn wal_truncation_mid_write_recovers_prior_records() {
     // Write N=5 records, record size after first 4
     let size_after_4: u64;
     {
-        let mut engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+        let mut engine = LsmEngine::new_from_config(
+            &cfg,
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
         for i in 0..4 {
             engine.set(format!("k{i}"), b"value".to_vec()).unwrap();
         }
-        size_after_4 = std::fs::metadata(dir_path.join("wal.log")).map(|m| m.len()).unwrap();
+        size_after_4 = std::fs::metadata(dir_path.join("wal.log"))
+            .map(|m| m.len())
+            .unwrap();
         // Write 5th record
         engine.set("k4".to_string(), b"value".to_vec()).unwrap();
     }
@@ -139,17 +179,26 @@ fn wal_truncation_mid_write_recovers_prior_records() {
     drop(file);
 
     // Reopen — should recover first 4 records, discard the partial 5th
-    let engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+    let engine = LsmEngine::new_from_config(
+        &cfg,
+        apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+    )
+    .unwrap();
 
     // Verify first 4 records are present
     for i in 0..4 {
-        let v = engine.get(format!("k{i}")).unwrap()
+        let v = engine
+            .get(format!("k{i}"))
+            .unwrap()
             .unwrap_or_else(|| panic!("key k{i} should be recovered"));
         assert_eq!(v, b"value".to_vec());
     }
 
     // The partially written 5th record should be lost
-    assert!(engine.get("k4").unwrap().is_none(), "partial 5th record should be lost");
+    assert!(
+        engine.get("k4").unwrap().is_none(),
+        "partial 5th record should be lost"
+    );
 }
 
 #[test]
@@ -167,7 +216,11 @@ fn test_wal_partial_replay() {
     // Write N=5 records, recording WAL size after the first 4
     let size_after_4: u64;
     {
-        let mut engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+        let mut engine = LsmEngine::new_from_config(
+            &cfg,
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
         for i in 0..4 {
             engine.set(format!("k{i}"), b"value".to_vec()).unwrap();
         }
@@ -183,16 +236,26 @@ fn test_wal_partial_replay() {
     drop(file);
 
     // Reopen — should recover the first 4 records (N-1)
-    let engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+    let engine = LsmEngine::new_from_config(
+        &cfg,
+        apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+    )
+    .unwrap();
 
     // Verify all N-1 records are present
     for i in 0..4 {
-        let v = engine.get(format!("k{i}")).unwrap().expect(&format!("key k{i} should be recovered"));
+        let v = engine
+            .get(format!("k{i}"))
+            .unwrap()
+            .expect(&format!("key k{i} should be recovered"));
         assert_eq!(v, b"value".to_vec());
     }
 
     // The 5th record should be lost (truncated)
-    assert!(engine.get("k4").unwrap().is_none(), "key k4 should not be recovered after truncation");
+    assert!(
+        engine.get("k4").unwrap().is_none(),
+        "key k4 should not be recovered after truncation"
+    );
 }
 
 #[test]
@@ -213,7 +276,11 @@ fn compaction_crash_restart_consistency() {
 
     // Populate with enough data to trigger multiple flushes and compactions
     {
-        let mut engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+        let mut engine = LsmEngine::new_from_config(
+            &cfg,
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
         for i in 0..200 {
             engine.set(format!("k{i:04}"), vec![b'x'; 40]).unwrap();
         }
@@ -223,23 +290,36 @@ fn compaction_crash_restart_consistency() {
     } // engine dropped — simulates crash during/after compaction
 
     // Reopen — VersionSet must be consistent, engine must not panic
-    let mut engine = LsmEngine::new_from_config(&cfg, apexstore::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
+    let mut engine = LsmEngine::new_from_config(
+        &cfg,
+        apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+    )
+    .unwrap();
 
     // Engine is operational — stats and scan work without panic
     let _stats = engine.stats("default");
     let scan_result = engine.scan();
-    assert!(scan_result.is_ok(), "scan must work after compaction crash restart");
+    assert!(
+        scan_result.is_ok(),
+        "scan must work after compaction crash restart"
+    );
 
     // New writes must succeed (no lock poison or corrupted state)
-    engine.set("fresh_key".to_string(), b"fresh_value".to_vec()).unwrap();
+    engine
+        .set("fresh_key".to_string(), b"fresh_value".to_vec())
+        .unwrap();
     let v = engine.get("fresh_key").unwrap();
-    assert_eq!(v, Some(b"fresh_value".to_vec()), "new writes must work after crash restart");
+    assert_eq!(
+        v,
+        Some(b"fresh_value".to_vec()),
+        "new writes must work after crash restart"
+    );
 }
 
 #[test]
 fn test_sstable_corruption() {
-    use apexstore::infra::config::StorageConfig;
     use apexstore::core::log_record::LogRecord;
+    use apexstore::infra::config::StorageConfig;
     use apexstore::storage::cache::GlobalBlockCache;
 
     let dir = tempdir().unwrap();
@@ -257,7 +337,10 @@ fn test_sstable_corruption() {
         let key = format!("key_{:02}", i);
         let value = format!("value_{}", i);
         builder
-            .add(key.as_bytes(), &LogRecord::new(key.as_bytes().to_vec(), value.as_bytes().to_vec()))
+            .add(
+                key.as_bytes(),
+                &LogRecord::new(key.as_bytes().to_vec(), value.as_bytes().to_vec()),
+            )
             .unwrap();
     }
 

@@ -100,7 +100,11 @@ pub fn create_bench_engine(config: &BenchmarkConfig, data_dir: &std::path::Path)
         .build()
         .expect("Invalid LsmConfig");
 
-    LsmEngine::new_from_config(&lsm_config, std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096))).expect("Failed to create LsmEngine")
+    LsmEngine::new_from_config(
+        &lsm_config,
+        std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+    )
+    .expect("Failed to create LsmEngine")
 }
 
 /// Generate deterministic test data

@@ -50,11 +50,8 @@ fn bench_write_amplification_leveled(c: &mut Criterion) {
                 .build()
                 .unwrap();
 
-            let mut engine = LsmEngine::new_from_config(
-                &config,
-                GlobalBlockCache::new(1, 4096),
-            )
-            .unwrap();
+            let mut engine =
+                LsmEngine::new_from_config(&config, GlobalBlockCache::new(1, 4096)).unwrap();
 
             // Write enough keys to trigger multiple flushes and compactions
             let num_keys = 10_000usize;
@@ -68,9 +65,7 @@ fn bench_write_amplification_leveled(c: &mut Criterion) {
             // Measure write amplification
             let wa = compute_write_amplification(&engine);
             if let Some(ratio) = wa {
-                println!(
-                    "  → Leveled write amplification: {ratio:.2}x (target < 10x)"
-                );
+                println!("  → Leveled write amplification: {ratio:.2}x (target < 10x)");
                 assert!(
                     ratio < 10.0,
                     "Leveled write amplification too high: {ratio:.2}x (expected < 10x)"
@@ -104,11 +99,8 @@ fn bench_write_amplification_size_tiered(c: &mut Criterion) {
                 .build()
                 .unwrap();
 
-            let mut engine = LsmEngine::new_from_config(
-                &config,
-                GlobalBlockCache::new(1, 4096),
-            )
-            .unwrap();
+            let mut engine =
+                LsmEngine::new_from_config(&config, GlobalBlockCache::new(1, 4096)).unwrap();
 
             let num_keys = 10_000usize;
 
@@ -121,9 +113,7 @@ fn bench_write_amplification_size_tiered(c: &mut Criterion) {
             // Measure write amplification
             let wa = compute_write_amplification(&engine);
             if let Some(ratio) = wa {
-                println!(
-                    "  → Size-Tiered write amplification: {ratio:.2}x (target < 3x)"
-                );
+                println!("  → Size-Tiered write amplification: {ratio:.2}x (target < 3x)");
                 assert!(
                     ratio < 3.0,
                     "Size-Tiered write amplification too high: {ratio:.2}x (expected < 3x)"

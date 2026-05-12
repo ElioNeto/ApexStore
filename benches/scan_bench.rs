@@ -62,7 +62,9 @@ fn bench_full_scan(c: &mut Criterion) {
                         .memtable_max_size(nk * 220)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 
@@ -110,7 +112,9 @@ fn bench_range_scan(c: &mut Criterion) {
                         .memtable_max_size(total_keys * 110 / 2)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 
@@ -170,7 +174,9 @@ fn bench_prefix_scan(c: &mut Criterion) {
                         .memtable_max_size(total_keys * 110 / 2)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 
@@ -219,7 +225,9 @@ fn bench_iteration_sorted(c: &mut Criterion) {
                         .memtable_max_size(nk * 220)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 
@@ -315,7 +323,9 @@ fn bench_scan_pagination(c: &mut Criterion) {
                         .memtable_max_size(total_keys * 110 / 2)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 
@@ -375,7 +385,9 @@ fn bench_sstable_layer_scan(c: &mut Criterion) {
                         .memtable_max_size(1024 * 1024)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 

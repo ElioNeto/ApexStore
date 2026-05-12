@@ -211,7 +211,9 @@ fn bench_many_sstables(c: &mut Criterion) {
                         .memtable_max_size(512 * 1024)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 

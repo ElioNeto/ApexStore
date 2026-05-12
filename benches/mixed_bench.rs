@@ -63,7 +63,9 @@ fn bench_ycsb_type_a(c: &mut Criterion) {
                         .memtable_max_size(nk * 220)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 
@@ -122,7 +124,9 @@ fn bench_ycsb_type_b(c: &mut Criterion) {
                         .bloom_false_positive_rate(0.001)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 
@@ -183,7 +187,9 @@ fn bench_ycsb_type_c(c: &mut Criterion) {
                         .bloom_false_positive_rate(0.001)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 
@@ -242,7 +248,9 @@ fn bench_workload_balanced(c: &mut Criterion) {
                         .block_cache_size_mb(256)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 
@@ -303,7 +311,9 @@ fn bench_workload_read_heavy(c: &mut Criterion) {
                         .bloom_false_positive_rate(0.001)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 
@@ -363,7 +373,9 @@ fn bench_workload_write_heavy(c: &mut Criterion) {
                         .block_cache_size_mb(128)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 

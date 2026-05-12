@@ -96,7 +96,9 @@ fn bench_batch_write(c: &mut Criterion) {
                         .memtable_max_size(bs * 220)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 
@@ -141,7 +143,9 @@ fn bench_memtable_flush(c: &mut Criterion) {
                         .memtable_max_size(ms)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 
@@ -239,7 +243,9 @@ fn bench_write_by_size(c: &mut Criterion) {
                         .memtable_max_size(16 * 1024 * 1024)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
+                        100, 4096,
+                    )),
                 )
                 .unwrap();
 

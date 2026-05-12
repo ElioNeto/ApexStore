@@ -4,9 +4,9 @@ pub mod version_set;
 
 use crate::core::log_record::LogRecord;
 use crate::core::table::Table;
+use crate::infra::error::Result;
 use crate::storage::cache::Cache;
 use crate::storage::wal::WriteAheadLog;
-use crate::infra::error::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -83,7 +83,7 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             compaction_threshold: config.compaction.min_compaction_threshold,
             max_tables_per_compaction: config.compaction.max_sstables,
         };
-        
+
         Self {
             block_size: config.storage.block_size,
             bloom_bits_per_key: 10,
@@ -236,27 +236,27 @@ impl<'a> StorageIterator for InternalMemTableIterator<'a> {
 impl<C: Cache> Engine<C> {
     // ========== pub(crate) accessors for internal crate use ==========
     // These methods are reserved for future use / external crate access
-    
+
     /// Returns the engine options.
     pub(crate) fn options(&self) -> &EngineOptions {
         &self.options
     }
-    
+
     /// Returns the write buffer limit.
     pub(crate) fn write_buffer_limit(&self) -> usize {
         self.options.write_buffer_size * self.options.max_write_buffer_number
     }
-    
+
     /// Returns the SSTable directory (for testing).
     pub(crate) fn sst_dir(&self) -> &PathBuf {
         &self._sst_dir
     }
-    
+
     /// Lock the core and return the guard.
     pub(crate) fn lock_core(&self) -> Result<std::sync::MutexGuard<'_, EngineCore<C>>> {
-        self.core.lock().map_err(|_| {
-            crate::infra::error::LsmError::LockPoisoned("engine core in lock_core")
-        })
+        self.core
+            .lock()
+            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in lock_core"))
     }
 }
 
@@ -285,8 +285,7 @@ fn compact_cf_core<C: Cache>(
 
     let mut all_metrics = CompactionMetrics::default();
     for group_indices in groups {
-        let (new_tables, metrics) =
-            core.compaction.compact(&group_indices, &tables, options)?;
+        let (new_tables, metrics) = core.compaction.compact(&group_indices, &tables, options)?;
         core.version_set
             .atomic_replace(cf, &group_indices, new_tables);
         all_metrics.bytes_read += metrics.bytes_read;
@@ -300,11 +299,15 @@ fn compact_cf_core<C: Cache>(
 
 impl<C: Cache> Engine<C> {
     /// Create a new engine with default options.
-    pub fn new_generic(options: EngineOptions, cache: C, dir_path: &std::path::Path) -> Result<Self> {
+    pub fn new_generic(
+        options: EngineOptions,
+        cache: C,
+        dir_path: &std::path::Path,
+    ) -> Result<Self> {
         // Create SSTable directory
         let sst_dir = dir_path.join("sstables");
         std::fs::create_dir_all(&sst_dir)?;
-        
+
         // Create storage config from options
         let storage_config = crate::infra::config::StorageConfig {
             block_size: options.block_size,
@@ -312,30 +315,30 @@ impl<C: Cache> Engine<C> {
             sparse_index_interval: 16,
             bloom_false_positive_rate: 0.01,
         };
-        
+
         // Create compaction with strategy from options
         let strategy_type = if options.compaction_options.compaction_threshold <= 4 {
             CompactionStrategyType::SizeTiered
         } else {
             CompactionStrategyType::Leveled
         };
-        
+
         let compaction_options = CompactionOptions {
             strategy_type,
             compaction_threshold: options.compaction_options.compaction_threshold,
             max_tables_per_compaction: options.compaction_options.max_tables_per_compaction,
         };
-        
+
         let compaction = Compaction::new(
             strategy_type,
             compaction_options,
             storage_config,
             sst_dir.clone(),
         );
-        
+
         let wal = WriteAheadLog::new(dir_path)?;
         let recovered_records = wal.recover()?;
-        
+
         // Build EngineCore with all mutable state
         let version_set = VersionSet::new(options.clone(), cache);
 
@@ -346,10 +349,10 @@ impl<C: Cache> Engine<C> {
             compaction,
             wal,
         };
-        
+
         // Replay WAL records into the core
         Self::replay_wal_records_core(&mut core, recovered_records)?;
-        
+
         let engine = Self {
             options: options.clone(),
             core: Arc::new(Mutex::new(core)),
@@ -358,17 +361,17 @@ impl<C: Cache> Engine<C> {
             _manifest: PathBuf::new(),
             _sst_dir: sst_dir,
         };
-        
+
         Ok(engine)
     }
-    
+
     /// Create a new engine from an `LsmConfig` (the app-level config).
     pub fn new_from_config(config: &crate::infra::config::LsmConfig, cache: C) -> Result<Self> {
         let options: EngineOptions = config.into();
         let dir_path = std::path::PathBuf::from(&config.core.dir_path);
         Self::new_generic(options, cache, &dir_path)
     }
-    
+
     /// Replay WAL records to reconstruct memtable state (operates on EngineCore directly).
     fn replay_wal_records_core(core: &mut EngineCore<C>, records: Vec<LogRecord>) -> Result<()> {
         for record in records {
@@ -389,12 +392,13 @@ impl<C: Cache> Engine<C> {
                 }
                 let last = mem.len() - 1;
                 mem[last].put(record.key.clone(), record.value.clone());
-                *core.memtable_bytes.entry(cf.to_string()).or_default() += record.key.len() + record.value.len();
+                *core.memtable_bytes.entry(cf.to_string()).or_default() +=
+                    record.key.len() + record.value.len();
             }
         }
         Ok(())
     }
-    
+
     /// Put a key-value pair into the specified column family.
     pub fn put_cf(&mut self, cf: &str, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
         let needs_compact;
@@ -406,7 +410,7 @@ impl<C: Cache> Engine<C> {
             let mut record = LogRecord::new(key.clone(), value.clone());
             record.column_family = Some(cf.to_string());
             core.wal.write_record(&record)?;
-            
+
             let mem = core.memtables.entry(cf.to_string()).or_default();
             if mem.is_empty() {
                 mem.push(MemTable::new());
@@ -414,19 +418,21 @@ impl<C: Cache> Engine<C> {
             let last = mem.len() - 1;
             mem[last].put(key.clone(), value.clone());
             *core.memtable_bytes.entry(cf.to_string()).or_default() += key.len() + value.len();
-            let write_buffer_limit = self.options.write_buffer_size * self.options.max_write_buffer_number;
-            needs_compact = if core.memtable_bytes.get(cf).copied().unwrap_or(0) >= write_buffer_limit {
-                self.flush_memtable_impl(cf, &mut core)?
-            } else {
-                false
-            };
+            let write_buffer_limit =
+                self.options.write_buffer_size * self.options.max_write_buffer_number;
+            needs_compact =
+                if core.memtable_bytes.get(cf).copied().unwrap_or(0) >= write_buffer_limit {
+                    self.flush_memtable_impl(cf, &mut core)?
+                } else {
+                    false
+                };
         } // core lock is dropped here
         if needs_compact {
             self.maybe_compact();
         }
         Ok(())
     }
-    
+
     pub fn set<K, V>(&mut self, key: K, value: V) -> Result<()>
     where
         K: Into<Vec<u8>>,
@@ -434,7 +440,7 @@ impl<C: Cache> Engine<C> {
     {
         self.put_cf("default", key.into(), value.into())
     }
-    
+
     pub fn delete_cf<K>(&mut self, cf: &str, key: K) -> Result<()>
     where
         K: Into<Vec<u8>>,
@@ -445,12 +451,12 @@ impl<C: Cache> Engine<C> {
             let mut core = self.core.lock().map_err(|_| {
                 crate::infra::error::LsmError::LockPoisoned("engine core in delete_cf")
             })?;
-            
+
             // Write tombstone to WAL first (before modifying memtable) for crash safety
             let mut record = LogRecord::tombstone(key.clone());
             record.column_family = Some(cf.to_string());
             core.wal.write_record(&record)?;
-            
+
             let mem = core.memtables.entry(cf.to_string()).or_default();
             if mem.is_empty() {
                 mem.push(MemTable::new());
@@ -458,34 +464,37 @@ impl<C: Cache> Engine<C> {
             let last = mem.len() - 1;
             mem[last].delete(key.clone());
             *core.memtable_bytes.entry(cf.to_string()).or_default() += key.len();
-            let write_buffer_limit = self.options.write_buffer_size * self.options.max_write_buffer_number;
-            needs_compact = if core.memtable_bytes.get(cf).copied().unwrap_or(0) >= write_buffer_limit {
-                self.flush_memtable_impl(cf, &mut core)?
-            } else {
-                false
-            };
+            let write_buffer_limit =
+                self.options.write_buffer_size * self.options.max_write_buffer_number;
+            needs_compact =
+                if core.memtable_bytes.get(cf).copied().unwrap_or(0) >= write_buffer_limit {
+                    self.flush_memtable_impl(cf, &mut core)?
+                } else {
+                    false
+                };
         }
         if needs_compact {
             self.maybe_compact();
         }
         Ok(())
     }
-    
+
     pub fn delete<K>(&mut self, key: K) -> Result<()>
     where
         K: Into<Vec<u8>>,
     {
         self.delete_cf("default", key)
     }
-    
+
     pub fn get_cf<K>(&self, cf: &str, key: K) -> Result<Option<Vec<u8>>>
     where
         K: AsRef<[u8]>,
     {
         let key = key.as_ref();
-        let core = self.core.lock().map_err(|_e| {
-            crate::infra::error::LsmError::LockPoisoned("engine core in get_cf")
-        })?;
+        let core = self
+            .core
+            .lock()
+            .map_err(|_e| crate::infra::error::LsmError::LockPoisoned("engine core in get_cf"))?;
         if let Some(memtables) = core.memtables.get(cf) {
             for mem in memtables.iter().rev() {
                 if let Some(v) = mem.data.get(key) {
@@ -495,18 +504,18 @@ impl<C: Cache> Engine<C> {
         }
         Ok(core.version_set.get(cf, key))
     }
-    
+
     pub fn get<K>(&self, key: K) -> Result<Option<Vec<u8>>>
     where
         K: AsRef<[u8]>,
     {
         self.get_cf("default", key)
     }
-    
+
     pub fn scan(&self) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         self.scan_cf("default", None, None, Some(DEFAULT_SCAN_LIMIT))
     }
-    
+
     pub fn scan_cf(
         &self,
         cf: &str,
@@ -514,27 +523,28 @@ impl<C: Cache> Engine<C> {
         upper: Option<&[u8]>,
         limit: Option<usize>,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        let core = self.core.lock().map_err(|_| {
-            crate::infra::error::LsmError::LockPoisoned("engine core in scan_cf")
-        })?;
+        let core = self
+            .core
+            .lock()
+            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in scan_cf"))?;
         let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
-        
+
         // 1. Memtables (newer first)
         if let Some(memtables) = core.memtables.get(cf) {
             for mem in memtables.iter().rev() {
                 iters.push(Box::new(InternalMemTableIterator::new(&mem.data)));
             }
         }
-        
+
         // 2. SSTables (from VersionSet) — skip non-intersecting ranges
         for sst_iter in core.version_set.table_iters_in_range(cf, lower, upper) {
             iters.push(Box::new(sst_iter));
         }
-        
+
         let mut merge_iter = MergeIterator::new(iters);
         let mut results = Vec::new();
         let limit = limit.unwrap_or(MAX_SCAN_LIMIT);
-        
+
         while merge_iter.is_valid() && results.len() < limit {
             if let Some(lower) = lower {
                 if merge_iter.key().as_ref() as &[u8] < lower {
@@ -553,10 +563,10 @@ impl<C: Cache> Engine<C> {
             ));
             merge_iter.next();
         }
-        
+
         Ok(results)
     }
-    
+
     pub fn scan_range(
         &self,
         cf: &str,
@@ -566,7 +576,7 @@ impl<C: Cache> Engine<C> {
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         self.scan_cf(cf, Some(start), Some(end), limit)
     }
-    
+
     #[allow(clippy::type_complexity)]
     pub fn search_prefix(
         &self,
@@ -579,9 +589,7 @@ impl<C: Cache> Engine<C> {
 
         // Start from prefix. When cursor is provided, use cursor as the lower bound
         // (cursor >= prefix since it was returned by a previous prefix search).
-        let start = cursor
-            .map(|c| c.as_bytes())
-            .or(Some(prefix.as_bytes()));
+        let start = cursor.map(|c| c.as_bytes()).or(Some(prefix.as_bytes()));
 
         // Request extra records to detect if there are more results.
         // When cursor is set, we need an additional +1 because the cursor
@@ -589,12 +597,7 @@ impl<C: Cache> Engine<C> {
         let scan_extra = if cursor.is_some() { 2 } else { 1 };
         let scan_limit = Some(limit + scan_extra);
 
-        let results = self.scan_cf(
-            "default",
-            start,
-            upper_bound.as_deref(),
-            scan_limit,
-        )?;
+        let results = self.scan_cf("default", start, upper_bound.as_deref(), scan_limit)?;
 
         // If cursor is set, skip the first result if it matches the cursor key
         let results: Vec<(Vec<u8>, Vec<u8>)> = results
@@ -620,60 +623,62 @@ impl<C: Cache> Engine<C> {
 
         Ok((results, new_cursor))
     }
-    
+
     pub fn keys(&self) -> Result<Vec<Vec<u8>>> {
-        let core = self.core.lock().map_err(|_| {
-            crate::infra::error::LsmError::LockPoisoned("engine core in keys")
-        })?;
+        let core = self
+            .core
+            .lock()
+            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in keys"))?;
         let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
-        
+
         if let Some(memtables) = core.memtables.get("default") {
             for mem in memtables.iter().rev() {
                 iters.push(Box::new(InternalMemTableIterator::new(&mem.data)));
             }
         }
-        
+
         for sst_iter in core.version_set.table_iters("default") {
             iters.push(Box::new(sst_iter));
         }
-        
+
         let mut merge_iter = MergeIterator::new(iters);
         let mut results = Vec::new();
-        
+
         while merge_iter.is_valid() && results.len() < MAX_SCAN_LIMIT {
             results.push((merge_iter.key().as_ref() as &[u8]).to_vec());
             merge_iter.next();
         }
-        
+
         Ok(results)
     }
-    
+
     pub fn count(&self) -> Result<usize> {
-        let core = self.core.lock().map_err(|_| {
-            crate::infra::error::LsmError::LockPoisoned("engine core in count")
-        })?;
+        let core = self
+            .core
+            .lock()
+            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in count"))?;
         let mut count = 0;
         let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
-        
+
         if let Some(memtables) = core.memtables.get("default") {
             for mem in memtables.iter().rev() {
                 count += mem.data.len();
             }
         }
-        
+
         for sst_iter in core.version_set.table_iters("default") {
             iters.push(Box::new(sst_iter));
         }
-        
+
         let mut merge_iter = MergeIterator::new(iters);
         while merge_iter.is_valid() {
             count += 1;
             merge_iter.next();
         }
-        
+
         Ok(count)
     }
-    
+
     /// Flush the oldest memtable for the given column family.
     /// Returns true if compaction should be triggered after the lock is released.
     /// Flush the current memtable to an SSTable.
@@ -692,15 +697,19 @@ impl<C: Cache> Engine<C> {
                 let table = Table::build(mem.data.into_iter().collect(), &self.options);
                 core.version_set.add_table(cf, table);
                 let bytes = core.memtable_bytes.get_mut(cf).ok_or_else(|| {
-                    crate::LsmError::InvalidArgument(format!("Column family {} not found in memtable_bytes", cf))
+                    crate::LsmError::InvalidArgument(format!(
+                        "Column family {} not found in memtable_bytes",
+                        cf
+                    ))
                 })?;
                 *bytes = 0;
-                
+
                 // ✅ FIX issue #107: Clear WAL while we hold the core lock
                 // ✅ FIX issue #122: Only remove records for the flushed CF,
                 // not the entire WAL (other CFs' data must survive).
-                core.wal.retain(|r| r.column_family.as_deref() != Some(cf))?;
-                
+                core.wal
+                    .retain(|r| r.column_family.as_deref() != Some(cf))?;
+
                 // Check if compaction might be needed after this flush
                 let threshold = self.options.compaction_options.compaction_threshold;
                 return Ok(core.version_set.table_count(cf) > threshold);
@@ -708,31 +717,32 @@ impl<C: Cache> Engine<C> {
         }
         Ok(false)
     }
-    
+
     pub fn compact_cf(&self, cf: &str) -> Result<Option<CompactionMetrics>> {
         let mut core = self.core.lock().map_err(|_| {
             crate::infra::error::LsmError::LockPoisoned("engine core in compact_cf")
         })?;
         compact_cf_core(&mut core, &self.options, cf)
     }
-    
+
     pub fn compact(&self) -> Result<Vec<(String, CompactionMetrics)>> {
         let mut results = Vec::new();
-        let core = self.core.lock().map_err(|_| {
-            crate::infra::error::LsmError::LockPoisoned("engine core in compact")
-        })?;
+        let core = self
+            .core
+            .lock()
+            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in compact"))?;
         let column_families = core.version_set.column_families();
         drop(core); // Release lock before calling compact_cf which will re-acquire
-        // Actually, we need the lock for compact_cf, so just call it per CF
+                    // Actually, we need the lock for compact_cf, so just call it per CF
         for cf in column_families {
             if let Some(metrics) = self.compact_cf(&cf)? {
                 results.push((cf, metrics));
             }
         }
-        
+
         Ok(results)
     }
-    
+
     /// Check if compaction should be triggered and run it in background
     pub fn maybe_compact(&self) {
         // Quick check to avoid unnecessary lock contention
@@ -793,8 +803,7 @@ impl<C: Cache> Engine<C> {
                             if tables.len() < core.compaction.options().compaction_threshold {
                                 return None;
                             }
-                            let groups =
-                                core.compaction.pick_compaction(&tables, &options);
+                            let groups = core.compaction.pick_compaction(&tables, &options);
                             if groups.is_empty() {
                                 return None;
                             }
@@ -880,13 +889,14 @@ impl<C: Cache> Engine<C> {
             }
         }
     }
-    
+
     pub fn stats(&self, cf: &str) -> Result<LsmStats> {
-        let core = self.core.lock().map_err(|_| {
-            crate::infra::error::LsmError::LockPoisoned("engine core in stats")
-        })?;
+        let core = self
+            .core
+            .lock()
+            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in stats"))?;
         let mut stats = LsmStats::default();
-        
+
         // Get stats from version set
         let vs_stats = core.version_set.stats(cf);
         stats.num_tables = vs_stats.num_tables;
@@ -897,26 +907,27 @@ impl<C: Cache> Engine<C> {
         stats.sst_records = vs_stats.sst_records;
         stats.max_levels_reached = vs_stats.max_levels_reached;
         stats.num_tables_at_max = vs_stats.num_tables_at_max;
-        
+
         // Memtable stats
         if let Some(memtables) = core.memtables.get(cf) {
             stats.mem_records = memtables.iter().map(|m| m.data.len()).sum();
             stats.mem_kb = core.memtable_bytes.get(cf).copied().unwrap_or(0) / 1024;
         }
-        
+
         // WAL stats
         stats.wal_kb = core.wal.size()? as usize / 1024;
-        
+
         Ok(stats)
     }
-    
+
     pub fn stats_all(&self) -> Result<LsmStats> {
-        let core = self.core.lock().map_err(|_| {
-            crate::infra::error::LsmError::LockPoisoned("engine core in stats_all")
-        })?;
+        let core = self
+            .core
+            .lock()
+            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in stats_all"))?;
         let mut combined = LsmStats::default();
         let column_families = core.version_set.column_families();
-        
+
         for cf in column_families {
             let vs_stats = core.version_set.stats(&cf);
             combined.num_tables += vs_stats.num_tables;
@@ -925,19 +936,19 @@ impl<C: Cache> Engine<C> {
             combined.sst_kb += vs_stats.sst_kb;
             combined.sst_files += vs_stats.sst_files;
             combined.sst_records += vs_stats.sst_records;
-            
+
             // Memtable stats per CF
             if let Some(memtables) = core.memtables.get(&cf) {
                 combined.mem_records += memtables.iter().map(|m| m.data.len()).sum::<usize>();
                 combined.mem_kb += core.memtable_bytes.get(&cf).copied().unwrap_or(0) / 1024;
             }
         }
-        
+
         combined.wal_kb = core.wal.size()? as usize / 1024;
-        
+
         Ok(combined)
     }
-    
+
     /// Calculate the upper bound for a prefix scan.
     /// Given prefix "ab", returns Some("ac") (incrementing the last byte).
     /// For empty prefix, returns None (scan everything).
@@ -945,9 +956,9 @@ impl<C: Cache> Engine<C> {
         if prefix.is_empty() {
             return None;
         }
-        
+
         let mut result = prefix.as_bytes().to_vec();
-        
+
         // Increment the last byte, handling overflow
         for i in (0..result.len()).rev() {
             if result[i] < 0xFF {
@@ -956,7 +967,7 @@ impl<C: Cache> Engine<C> {
             }
             result[i] = 0;
         }
-        
+
         // All bytes were 0xFF, so we need to extend
         result.push(0);
         Some(result)
@@ -972,10 +983,10 @@ impl<C: Cache> Drop for Engine<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use crate::core::engine::compaction::CompactionStrategy;
-    use std::collections::BTreeMap;
     use crate::storage::cache::NoopCache;
+    use std::collections::BTreeMap;
+    use tempfile::tempdir;
 
     #[test]
     fn test_prefix_end_basic() {
@@ -1028,64 +1039,78 @@ mod tests {
     #[test]
     fn test_search_prefix_non_ascii() {
         use crate::infra::config::LsmConfig;
-        
+
         // Create temp directory for engine storage
         let dir = tempdir().unwrap();
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
-        
-        let mut engine = Engine::new_from_config(&config, crate::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
-        
+
+        let mut engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
         // Insert some non-ASCII key-value pairs
         let test_pairs = vec![
             ("usuário:1", "value1"),
             ("usuário:2", "value2"),
             ("chave:3", "value3"),
         ];
-        
+
         for (key, value) in &test_pairs {
-            engine.set(key.as_bytes().to_vec(), value.as_bytes().to_vec()).unwrap();
+            engine
+                .set(key.as_bytes().to_vec(), value.as_bytes().to_vec())
+                .unwrap();
         }
-        
+
         // Search with prefix
-        let (results, _): (Vec<(Vec<u8>, Vec<u8>)>, Option<String>) = engine.search_prefix("usuário:", None, 10).unwrap();
+        let (results, _): (Vec<(Vec<u8>, Vec<u8>)>, Option<String>) =
+            engine.search_prefix("usuário:", None, 10).unwrap();
         assert_eq!(results.len(), 2);
     }
 
     #[test]
     fn test_search_prefix_unicode_chars() {
         use crate::infra::config::LsmConfig;
-        
+
         let dir = tempdir().unwrap();
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
-        
-        let mut engine = Engine::new_from_config(&config, crate::storage::cache::GlobalBlockCache::new(100, 4096)).unwrap();
-        
+
+        let mut engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
         // Insert with unicode prefix
         let test_pairs = vec![
             ("ção:1", "value1"),
             ("ção:2", "value2"),
             ("outro:3", "value3"),
         ];
-        
+
         for (key, value) in &test_pairs {
-            engine.set(key.as_bytes().to_vec(), value.as_bytes().to_vec()).unwrap();
+            engine
+                .set(key.as_bytes().to_vec(), value.as_bytes().to_vec())
+                .unwrap();
         }
-        
-        let (results, _): (Vec<(Vec<u8>, Vec<u8>)>, Option<String>) = engine.search_prefix("ção:", None, 10).unwrap();
+
+        let (results, _): (Vec<(Vec<u8>, Vec<u8>)>, Option<String>) =
+            engine.search_prefix("ção:", None, 10).unwrap();
         assert_eq!(results.len(), 2);
     }
 
     #[test]
     fn test_size_tiered_compaction_basic() {
         use crate::core::engine::compaction::*;
-        use crate::core::table::Table;
         use crate::core::engine::EngineOptions;
-        
+        use crate::core::table::Table;
+
         let strategy = SizeTieredCompaction::default();
         let options = EngineOptions::default();
-        
+
         // Create tables
         let mut tables = Vec::new();
         for i in 0..5 {
@@ -1097,25 +1122,30 @@ mod tests {
             }
             tables.push(Table::build(data, &options));
         }
-        
+
         let storage_config = crate::infra::config::StorageConfig::default();
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
-        let (new_tables, _metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
-        
-        assert!(!new_tables.is_empty(), "Should produce at least one new table");
+        let (new_tables, _metrics) = strategy
+            .execute(tables, &options, &storage_config, &output_dir)
+            .unwrap();
+
+        assert!(
+            !new_tables.is_empty(),
+            "Should produce at least one new table"
+        );
     }
 
     #[test]
     fn test_lazy_leveling_compaction_basic() {
         use crate::core::engine::compaction::*;
-        use crate::core::table::Table;
         use crate::core::engine::EngineOptions;
+        use crate::core::table::Table;
         use std::collections::BTreeMap;
-        
+
         let strategy = LazyLevelingCompaction::default();
         let options = EngineOptions::default();
-        
+
         // Create L0 tables (should use size-tiered)
         let mut tables = Vec::new();
         for i in 0..5 {
@@ -1129,29 +1159,34 @@ mod tests {
             table.level = 0;
             tables.push(table);
         }
-        
+
         // Pick tables to compact
         let _groups = strategy.pick_tables(&tables, &options);
-        
+
         // Execute compaction
         let storage_config = crate::infra::config::StorageConfig::default();
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
-        let (new_tables, _) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
-        
-        assert!(!new_tables.is_empty(), "Should produce at least one new table");
+        let (new_tables, _) = strategy
+            .execute(tables, &options, &storage_config, &output_dir)
+            .unwrap();
+
+        assert!(
+            !new_tables.is_empty(),
+            "Should produce at least one new table"
+        );
     }
 
     #[test]
     fn test_compaction_removes_tombstones() {
         use crate::core::engine::compaction::*;
-        use crate::core::table::Table;
         use crate::core::engine::EngineOptions;
+        use crate::core::table::Table;
         use std::collections::BTreeMap;
-        
+
         let strategy = SizeTieredCompaction::default();
         let options = EngineOptions::default();
-        
+
         // Create a table with tombstones (empty values)
         let mut data = BTreeMap::new();
         // Add some live data
@@ -1166,18 +1201,23 @@ mod tests {
             let value = Vec::new(); // tombstone
             data.insert(key, value);
         }
-        
+
         let table = Table::build(data, &options);
-        
+
         let storage_config = crate::infra::config::StorageConfig::default();
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
-        let (new_tables, _) = strategy.execute(vec![table], &options, &storage_config, &output_dir).unwrap();
-        
+        let (new_tables, _) = strategy
+            .execute(vec![table], &options, &storage_config, &output_dir)
+            .unwrap();
+
         // The new table should not contain tombstones
         if let Some(new_table) = new_tables.first() {
             for (_, value) in &new_table.data {
-                assert!(!value.is_empty(), "Tombstones should be removed during compaction");
+                assert!(
+                    !value.is_empty(),
+                    "Tombstones should be removed during compaction"
+                );
             }
         }
     }
@@ -1185,13 +1225,13 @@ mod tests {
     #[test]
     fn test_compaction_metrics() {
         use crate::core::engine::compaction::*;
-        use crate::core::table::Table;
         use crate::core::engine::EngineOptions;
+        use crate::core::table::Table;
         use std::collections::BTreeMap;
-        
+
         let strategy = SizeTieredCompaction::default();
         let options = EngineOptions::default();
-        
+
         // Create tables
         let mut tables = Vec::new();
         for i in 0..3 {
@@ -1203,12 +1243,14 @@ mod tests {
             }
             tables.push(Table::build(data, &options));
         }
-        
+
         let storage_config = crate::infra::config::StorageConfig::default();
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
-        let (_, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
-        
+        let (_, metrics) = strategy
+            .execute(tables, &options, &storage_config, &output_dir)
+            .unwrap();
+
         assert!(metrics.bytes_read > 0, "Should track bytes read");
         assert!(metrics.files_merged > 0, "Should track files merged");
         assert!(metrics.duration_ms > 0, "Duration should be positive");
@@ -1219,9 +1261,9 @@ mod tests {
         use crate::core::engine::compaction::SizeTieredCompaction;
         use crate::core::table::Table;
         use std::collections::BTreeMap;
-        
+
         let strategy = SizeTieredCompaction::default();
-        
+
         // Create tables of different sizes
         let mut tables = Vec::new();
         for i in 0..10 {
@@ -1234,10 +1276,10 @@ mod tests {
             }
             tables.push(Table::build(data, &EngineOptions::default()));
         }
-        
+
         let options = crate::core::engine::EngineOptions::default();
         let groups = strategy.pick_tables(&tables, &options);
-        
+
         // Should group small tables together
         assert!(!groups.is_empty(), "Should group tables by size");
     }
@@ -1245,48 +1287,60 @@ mod tests {
     #[test]
     fn test_atomic_replace_in_version_set() {
         use crate::storage::cache::NoopCache;
-        
+
         let options = crate::core::engine::EngineOptions::default();
         let cache = NoopCache;
         let mut vs = crate::core::engine::version_set::VersionSet::<NoopCache>::new(options, cache);
-        
+
         // Add some tables
         for i in 0..5 {
             let mut data = std::collections::BTreeMap::new();
-            data.insert(format!("key_{}", i).into_bytes(), format!("value_{}", i).into_bytes());
-            let table = crate::core::table::Table::build(data, &crate::core::engine::EngineOptions::default());
+            data.insert(
+                format!("key_{}", i).into_bytes(),
+                format!("value_{}", i).into_bytes(),
+            );
+            let table = crate::core::table::Table::build(
+                data,
+                &crate::core::engine::EngineOptions::default(),
+            );
             vs.add_table("default", table);
         }
-        
+
         assert_eq!(vs.table_count("default"), 5);
-        
+
         // Create new tables to replace some old ones
         let mut new_tables = Vec::new();
         for i in 0..2 {
             let mut data = std::collections::BTreeMap::new();
-            data.insert(format!("new_key_{}", i).into_bytes(), format!("new_value_{}", i).into_bytes());
-            new_tables.push(crate::core::table::Table::build(data, &crate::core::engine::EngineOptions::default()));
+            data.insert(
+                format!("new_key_{}", i).into_bytes(),
+                format!("new_value_{}", i).into_bytes(),
+            );
+            new_tables.push(crate::core::table::Table::build(
+                data,
+                &crate::core::engine::EngineOptions::default(),
+            ));
         }
-        
+
         // Replace tables at indices 0, 1, 2 with new tables
         vs.atomic_replace("default", &[0, 1, 2], new_tables);
-        
+
         assert_eq!(vs.table_count("default"), 4); // 5 - 3 + 2 = 4
     }
 
     #[test]
     fn test_1000_keys_with_multiple_compactions() {
         use crate::core::engine::compaction::*;
-        use crate::core::table::Table;
         use crate::core::engine::EngineOptions;
+        use crate::core::table::Table;
         use std::collections::BTreeMap;
-        
+
         let strategy = SizeTieredCompaction::default();
         let options = EngineOptions::default();
-        
+
         // Create tables with known sizes
         let mut tables = Vec::new();
-        
+
         for i in 0..5 {
             let mut data = BTreeMap::new();
             for j in 0..100 {
@@ -1296,12 +1350,14 @@ mod tests {
             }
             tables.push(Table::build(data, &options));
         }
-        
+
         let storage_config = crate::infra::config::StorageConfig::default();
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
-        let (_new_tables, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
-        
+        let (_new_tables, metrics) = strategy
+            .execute(tables, &options, &storage_config, &output_dir)
+            .unwrap();
+
         // Write amplification = bytes_written / bytes_read
         // For SizeTiered, should be < 3x
         if metrics.bytes_read > 0 {
@@ -1317,13 +1373,13 @@ mod tests {
     #[test]
     fn test_leveled_compaction_basic() {
         use crate::core::engine::compaction::*;
-        use crate::core::table::Table;
         use crate::core::engine::EngineOptions;
+        use crate::core::table::Table;
         use std::collections::BTreeMap;
-        
+
         let strategy = LeveledCompaction::default();
         let options = EngineOptions::default();
-        
+
         // Create L0 tables
         let mut tables = Vec::new();
         for i in 0..5 {
@@ -1337,17 +1393,22 @@ mod tests {
             table.level = 0;
             tables.push(table);
         }
-        
+
         let storage_config = crate::infra::config::StorageConfig::default();
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
-        let (new_tables, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
-        
-        assert!(!new_tables.is_empty(), "Should produce at least one new table");
+        let (new_tables, metrics) = strategy
+            .execute(tables, &options, &storage_config, &output_dir)
+            .unwrap();
+
+        assert!(
+            !new_tables.is_empty(),
+            "Should produce at least one new table"
+        );
         assert!(metrics.files_merged > 0, "Should track files merged");
         assert!(metrics.bytes_read > 0, "Should track bytes read");
         assert!(metrics.duration_ms > 0, "Duration should be positive");
-        
+
         // Check that new tables are at level 1
         for table in &new_tables {
             assert_eq!(table.level, 1, "Compacted tables should be at level 1");
@@ -1357,16 +1418,16 @@ mod tests {
     #[test]
     fn test_compaction_write_amplification_size_tiered() {
         use crate::core::engine::compaction::*;
-        use crate::core::table::Table;
         use crate::core::engine::EngineOptions;
+        use crate::core::table::Table;
         use std::collections::BTreeMap;
-        
+
         let strategy = SizeTieredCompaction::default();
         let options = EngineOptions::default();
-        
+
         // Create tables with known sizes
         let mut tables = Vec::new();
-        
+
         for i in 0..5 {
             let mut data = BTreeMap::new();
             for j in 0..100 {
@@ -1376,12 +1437,14 @@ mod tests {
             }
             tables.push(Table::build(data, &options));
         }
-        
+
         let storage_config = crate::infra::config::StorageConfig::default();
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
-        let (_new_tables, metrics) = strategy.execute(tables, &options, &storage_config, &output_dir).unwrap();
-        
+        let (_new_tables, metrics) = strategy
+            .execute(tables, &options, &storage_config, &output_dir)
+            .unwrap();
+
         // Write amplification = bytes_written / bytes_read
         // For SizeTiered, should be < 3x
         if metrics.bytes_read > 0 {
@@ -1460,11 +1523,15 @@ mod tests {
         // Write data to both "users" and "default" CFs
         let users_key = b"user:1".to_vec();
         let users_value = b"alice".to_vec();
-        engine.put_cf("users", users_key.clone(), users_value.clone()).unwrap();
+        engine
+            .put_cf("users", users_key.clone(), users_value.clone())
+            .unwrap();
 
         let default_key = b"default:1".to_vec();
         let default_value = b"bob".to_vec();
-        engine.put_cf("default", default_key.clone(), default_value.clone()).unwrap();
+        engine
+            .put_cf("default", default_key.clone(), default_value.clone())
+            .unwrap();
 
         // Verify both CFs have data before crash
         let result_users = engine.get_cf("users", &users_key).unwrap();
@@ -1524,9 +1591,7 @@ mod tests {
 
             // Write many keys to trigger flushes and compactions
             for i in 0..key_count {
-                engine
-                    .set(format!("k{}", i), vec![b'x'; 100])
-                    .unwrap();
+                engine.set(format!("k{}", i), vec![b'x'; 100]).unwrap();
             }
         } // engine dropped — simulating crash with active compaction state
 
@@ -1614,9 +1679,7 @@ mod tests {
 
             // Write keys to trigger flushes and potential compaction
             for i in 0..key_count {
-                engine
-                    .set(format!("k{}", i), vec![b'x'; 100])
-                    .unwrap();
+                engine.set(format!("k{}", i), vec![b'x'; 100]).unwrap();
             }
         } // engine dropped here — Drop::drop calls close() which joins the compaction thread
 
@@ -1664,7 +1727,10 @@ mod tests {
 
         // Reading an absent key should return None (bloom filter says no)
         let result = core.version_set.get("default", b"absent_key");
-        assert!(result.is_none(), "Absent key should return None via Bloom filter");
+        assert!(
+            result.is_none(),
+            "Absent key should return None via Bloom filter"
+        );
 
         // Reading a present key should succeed
         let result = core.version_set.get("default", b"present_key");
@@ -1698,7 +1764,11 @@ mod tests {
         // Verify cache stats by checking that clearing the cache still works
         core.version_set.clear_cache();
         let r3 = core.version_set.get("default", b"cached_key");
-        assert_eq!(r3, Some(b"cached_value".to_vec()), "Value still readable after cache clear");
+        assert_eq!(
+            r3,
+            Some(b"cached_value".to_vec()),
+            "Value still readable after cache clear"
+        );
     }
 
     // ── T8: scan_cf skips non-intersecting SSTables ──
@@ -1745,9 +1815,15 @@ mod tests {
         drop(core);
 
         // Scan range [b, n] — should only include keys from table 1 and 3 (table 2 is entirely after "n")
-        let results = engine.scan_cf("default", Some(b"b"), Some(b"n"), None).unwrap();
+        let results = engine
+            .scan_cf("default", Some(b"b"), Some(b"n"), None)
+            .unwrap();
         let keys: Vec<&[u8]> = results.iter().map(|(k, _)| k.as_slice()).collect();
-        assert_eq!(keys, vec![b"b", b"c", b"m"], "Should only return keys b, c, m from intersecting tables");
+        assert_eq!(
+            keys,
+            vec![b"b", b"c", b"m"],
+            "Should only return keys b, c, m from intersecting tables"
+        );
     }
 
     #[test]
@@ -1801,7 +1877,11 @@ mod tests {
         // Insert keys and flush to SSTable
         for i in 0..1000 {
             engine
-                .put_cf("default", format!("key_{:04}", i).into_bytes(), b"value_1234567890".to_vec())
+                .put_cf(
+                    "default",
+                    format!("key_{:04}", i).into_bytes(),
+                    b"value_1234567890".to_vec(),
+                )
                 .unwrap();
         }
         engine.flush_memtable().unwrap();
@@ -1843,7 +1923,11 @@ mod tests {
         // Insert 1000 keys
         for i in 0..1000 {
             engine
-                .put_cf("default", format!("key_{:04}", i).into_bytes(), b"value_1234567890".to_vec())
+                .put_cf(
+                    "default",
+                    format!("key_{:04}", i).into_bytes(),
+                    b"value_1234567890".to_vec(),
+                )
                 .unwrap();
         }
 
