@@ -33,10 +33,7 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.repo_token }}
-      run: |
-        if ! gh label list --repo ${{ github.repository }} --json name --jq '.[].name' | grep -q "^ci-failure$"; then
-          gh label create "ci-failure" --repo ${{ github.repository }} --description "CI workflow failure tracking" --color FF0000
-        fi
+      run: gh label create "ci-failure" --repo ${{ inputs.repository }} --description "CI workflow failure tracking" --color FF0000 --force 2>/dev/null || true
 
     - name: Manage CI Issues per job
       shell: bash
