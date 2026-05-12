@@ -17,7 +17,7 @@ jobs:
   benchmarks:
     name: Run Benchmarks
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
