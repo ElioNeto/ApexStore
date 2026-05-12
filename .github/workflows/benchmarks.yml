@@ -231,6 +231,10 @@ jobs:
         uses: ./.github/actions/ci-issue-manager
         with:
           workflow_name: "Benchmarks"
-          job_status: ${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}
-          job_name: "${{ join(needs.*.result, ', ') }}"
+          job_results: ${{ toJSON(needs) }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          server_url: ${{ github.server_url }}
+          run_id: ${{ github.run_id }}
+          ref_name: ${{ github.ref_name }}
+          sha: ${{ github.sha }}
