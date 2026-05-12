@@ -547,20 +547,17 @@ impl<C: Cache> Engine<C> {
 
         while merge_iter.is_valid() && results.len() < limit {
             if let Some(lower) = lower {
-                if merge_iter.key().as_ref() < lower {
+                if merge_iter.key().as_slice() < lower {
                     merge_iter.next();
                     continue;
                 }
             }
             if let Some(upper) = upper {
-                if merge_iter.key().as_ref() >= upper {
+                if merge_iter.key().as_slice() >= upper {
                     break;
                 }
             }
-            results.push((
-                merge_iter.key().as_ref().to_vec(),
-                merge_iter.value().to_vec(),
-            ));
+            results.push((merge_iter.key(), merge_iter.value().to_vec()));
             merge_iter.next();
         }
 
@@ -645,7 +642,7 @@ impl<C: Cache> Engine<C> {
         let mut results = Vec::new();
 
         while merge_iter.is_valid() && results.len() < MAX_SCAN_LIMIT {
-            results.push(merge_iter.key().as_ref().to_vec());
+            results.push(merge_iter.key());
             merge_iter.next();
         }
 

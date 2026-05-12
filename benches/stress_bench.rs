@@ -57,7 +57,7 @@ fn bench_large_dataset_1m(c: &mut Criterion) {
                 .block_cache_size_mb(512)
                 .build()
                 .unwrap(),
-            std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
         .unwrap();
 
@@ -107,7 +107,7 @@ fn bench_concurrent_access(c: &mut Criterion) {
                     .block_cache_size_mb(256)
                     .build()
                     .unwrap(),
-                std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
             )
             .unwrap();
 
@@ -164,7 +164,7 @@ fn bench_memory_pressure(c: &mut Criterion) {
                     .memtable_max_size(2 * 1024 * 1024)
                     .build()
                     .unwrap(),
-                std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
             )
             .unwrap();
 
@@ -211,9 +211,7 @@ fn bench_many_sstables(c: &mut Criterion) {
                         .memtable_max_size(512 * 1024)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
-                        100, 4096,
-                    )),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -265,7 +263,7 @@ fn bench_cache_thrashing(c: &mut Criterion) {
                     .block_cache_size_mb(cache_mb)
                     .build()
                     .unwrap(),
-                std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
             )
             .unwrap();
 
@@ -306,7 +304,7 @@ fn bench_key_updates(c: &mut Criterion) {
                 .block_cache_size_mb(256)
                 .build()
                 .unwrap(),
-            std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
         .unwrap();
 
@@ -344,7 +342,7 @@ fn bench_delete_operations(c: &mut Criterion) {
                 .block_cache_size_mb(256)
                 .build()
                 .unwrap(),
-            std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
         .unwrap();
 

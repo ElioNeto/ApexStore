@@ -102,7 +102,7 @@ pub fn create_bench_engine(config: &BenchmarkConfig, data_dir: &std::path::Path)
 
     LsmEngine::new_from_config(
         &lsm_config,
-        std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+        apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
     )
     .expect("Failed to create LsmEngine")
 }
@@ -140,7 +140,7 @@ pub fn create_test_records(
         .map(|i| {
             let key = generate_key(i, key_size);
             let value = generate_value(i, value_size);
-            apexstore::core::log_record::LogRecord::new(key, value)
+            apexstore::core::log_record::LogRecord::new(key.into_bytes(), value)
         })
         .collect()
 }

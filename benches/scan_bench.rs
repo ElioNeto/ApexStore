@@ -62,9 +62,7 @@ fn bench_full_scan(c: &mut Criterion) {
                         .memtable_max_size(nk * 220)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
-                        100, 4096,
-                    )),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -112,9 +110,7 @@ fn bench_range_scan(c: &mut Criterion) {
                         .memtable_max_size(total_keys * 110 / 2)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
-                        100, 4096,
-                    )),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -133,13 +129,14 @@ fn bench_range_scan(c: &mut Criterion) {
 
                 b.iter(|| {
                     let results = engine
-                        .scan_range(
-                            Some(start_key.as_str()),
-                            Some(end_key.as_str()),
-                            scan_size + 1000,
+                        .scan_cf(
+                            "default",
+                            Some(start_key.as_bytes()),
+                            Some(end_key.as_bytes()),
+                            Some(scan_size + 1000),
                         )
                         .unwrap();
-                    assert!(results.0.len() >= scan_size / 2);
+                    assert!(results.len() >= scan_size / 2);
                 });
 
                 drop(engine);
@@ -174,9 +171,7 @@ fn bench_prefix_scan(c: &mut Criterion) {
                         .memtable_max_size(total_keys * 110 / 2)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
-                        100, 4096,
-                    )),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -225,9 +220,7 @@ fn bench_iteration_sorted(c: &mut Criterion) {
                         .memtable_max_size(nk * 220)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
-                        100, 4096,
-                    )),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -275,7 +268,7 @@ fn bench_scan_with_limit(c: &mut Criterion) {
                     .memtable_max_size(total_keys * 110 / 2)
                     .build()
                     .unwrap(),
-                std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(100, 4096)),
+                apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
             )
             .unwrap();
 
@@ -287,8 +280,8 @@ fn bench_scan_with_limit(c: &mut Criterion) {
             }
 
             b.iter(|| {
-                let results = engine.scan_range(None, None, limit).unwrap();
-                assert!(results.0.len() <= limit);
+                let results = engine.scan_cf("default", None, None, Some(limit)).unwrap();
+                assert!(results.len() <= limit);
             });
 
             drop(engine);
@@ -323,9 +316,7 @@ fn bench_scan_pagination(c: &mut Criterion) {
                         .memtable_max_size(total_keys * 110 / 2)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
-                        100, 4096,
-                    )),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -341,14 +332,17 @@ fn bench_scan_pagination(c: &mut Criterion) {
                     let mut cursor: Option<String> = None;
                     let mut fetched = 0usize;
                     while fetched < num_pages * page_size && fetched <= total_keys {
+                        let start_key = cursor.as_ref().map(|c| c.as_bytes());
                         let results = engine
-                            .scan_range(cursor.as_deref(), None, page_size)
+                            .scan_cf("default", start_key, None, Some(page_size))
                             .unwrap();
-                        if results.0.is_empty() {
+                        if results.is_empty() {
                             break;
                         }
-                        fetched += results.0.len();
-                        cursor = results.1;
+                        fetched += results.len();
+                        cursor = results
+                            .last()
+                            .map(|(k, _)| String::from_utf8(k.clone()).unwrap());
                         if fetched >= num_pages * page_size {
                             break;
                         }
@@ -385,9 +379,7 @@ fn bench_sstable_layer_scan(c: &mut Criterion) {
                         .memtable_max_size(1024 * 1024)
                         .build()
                         .unwrap(),
-                    std::sync::Arc::new(apexstore::storage::cache::GlobalBlockCache::new(
-                        100, 4096,
-                    )),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
