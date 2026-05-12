@@ -557,10 +557,7 @@ impl<C: Cache> Engine<C> {
                     break;
                 }
             }
-            results.push((
-                merge_iter.key().to_vec(),
-                merge_iter.value().to_vec(),
-            ));
+            results.push((merge_iter.key().to_vec(), merge_iter.value().to_vec()));
             merge_iter.next();
         }
 

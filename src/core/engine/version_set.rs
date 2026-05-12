@@ -65,7 +65,8 @@ impl<C: Cache> VersionSet<C> {
         if let Some(cf_tables) = self.tables.get(cf) {
             'table_loop: for table in cf_tables.iter().rev() {
                 // Skip tables whose key range doesn't include the target key
-                if !table.min_key.is_empty() && !table.max_key.is_empty()
+                if !table.min_key.is_empty()
+                    && !table.max_key.is_empty()
                     && (key < table.min_key.as_slice() || key > table.max_key.as_slice())
                 {
                     continue;
