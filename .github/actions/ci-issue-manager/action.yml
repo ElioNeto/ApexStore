@@ -51,7 +51,6 @@ runs:
       run: |
         RUN_URL="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
 
-        # Parse each job from the JSON input and process separately
         echo '${{ inputs.job_results }}' | jq -c 'to_entries[]' | while IFS= read -r entry; do
           JOB_NAME=$(echo "$entry" | jq -r '.key')
           JOB_RESULT=$(echo "$entry" | jq -r '.value.result')
@@ -63,81 +62,65 @@ runs:
           echo "Processing job: $JOB_NAME (result: $JOB_RESULT)"
 
           if [ "$JOB_RESULT" = "failure" ] || [ "$JOB_RESULT" = "cancelled" ]; then
-            echo "  -> Job failed: $JOB_NAME"
-
-            # Fetch logs for this specific job
             FULL_LOG=$(gh run view "$RUN_ID" --log --job "$JOB_NAME" 2>/dev/null || echo "")
 
-            # --- Extract error sections ---
             ERROR_BLOCK=""
-
-            COMPILE_ERR=$(echo "$FULL_LOG" | grep -A 5 -E "^error\[E" | head -120)
+            COMPILE_ERR=$(echo "$FULL_LOG" | grep -A 5 -E '^error\[E' | head -120)
             if [ -n "$COMPILE_ERR" ]; then
               ERROR_BLOCK="${ERROR_BLOCK}
-        ### 📦 Compilation Errors
-
+        ### Compilation Errors
         \`\`\`
         ${COMPILE_ERR}
-        \`\`\`
-        "
+        \`\`\`"
             fi
 
             TEST_FAIL=$(echo "$FULL_LOG" | grep -B 2 -A 3 "FAILED" | head -80)
             if [ -n "$TEST_FAIL" ]; then
               ERROR_BLOCK="${ERROR_BLOCK}
-        ### 🧪 Test Failures
-
+        ### Test Failures
         \`\`\`
         ${TEST_FAIL}
-        \`\`\`
-        "
+        \`\`\`"
             fi
 
             PANIC_ERR=$(echo "$FULL_LOG" | grep -B 2 -A 5 "panicked at" | head -80)
             if [ -n "$PANIC_ERR" ]; then
               ERROR_BLOCK="${ERROR_BLOCK}
-        ### 💥 Panics
-
+        ### Panics
         \`\`\`
         ${PANIC_ERR}
-        \`\`\`
-        "
+        \`\`\`"
             fi
 
             GENERAL_ERR=$(echo "$FULL_LOG" | grep -B 1 -A 2 -E "^(Error|error):" | head -60)
             if [ -n "$GENERAL_ERR" ]; then
               ERROR_BLOCK="${ERROR_BLOCK}
-        ### ⚠️ General Errors
-
+        ### General Errors
         \`\`\`
         ${GENERAL_ERR}
-        \`\`\`
-        "
+        \`\`\`"
             fi
 
             TIMEOUT_ERR=$(echo "$FULL_LOG" | grep -B 2 -A 2 -i "timed out" | head -40)
             if [ -n "$TIMEOUT_ERR" ]; then
               ERROR_BLOCK="${ERROR_BLOCK}
-        ### ⏱️ Timeouts
-
+        ### Timeouts
         \`\`\`
         ${TIMEOUT_ERR}
-        \`\`\`
-        "
+        \`\`\`"
             fi
 
             if [ ${#ERROR_BLOCK} -gt 30000 ]; then
               ERROR_BLOCK="${ERROR_BLOCK:0:30000}
         ...
-        *[truncated — see full log at ${RUN_URL}]*"
+        [truncated]" 
             fi
 
-            # --- Analyze root cause ---
             ROOT_CAUSE="Unknown"
             ROOT_DETAIL="Could not automatically determine the root cause."
-            if echo "$FULL_LOG" | grep -q "^error\[E"; then
+            if echo "$FULL_LOG" | grep -q '^error\[E'; then
               ROOT_CAUSE="Compilation Error"
-              ROOT_DETAIL="$(echo "$FULL_LOG" | grep "^error\[E" | head -3)"
+              ROOT_DETAIL="$(echo "$FULL_LOG" | grep '^error\[E' | head -3)"
             elif echo "$FULL_LOG" | grep -q "panicked at"; then
               ROOT_CAUSE="Runtime Panic"
               ROOT_DETAIL="$(echo "$FULL_LOG" | grep -B 1 "panicked at" | head -6)"
@@ -152,37 +135,30 @@ runs:
               ROOT_DETAIL="$(echo "$FULL_LOG" | grep -i "cannot find\|not found" | head -5)"
             fi
 
-            # --- Build issue body ---
             ISSUE_TITLE="[CI-FAILURE] ${WORKFLOW_NAME}: ${JOB_NAME} failed"
-            BODY="## ❌ CI Failure — ${ROOT_CAUSE}
+            BODY="## CI Failure - ${ROOT_CAUSE}
 
-        **Workflow:** ${WORKFLOW_NAME}
-        **Failed Job:** ${JOB_NAME}
-        **Run:** [${RUN_ID}](${RUN_URL})
-        **Branch:** ${REF_NAME}
-        **Commit:** ${COMMIT_SHA}
+        Workflow: ${WORKFLOW_NAME}
+        Failed Job: ${JOB_NAME}
+        Run: ${RUN_URL}
+        Branch: ${REF_NAME}
+        Commit: ${COMMIT_SHA}
 
-        ---
+        ### Root Cause
 
-        ### 🔍 Root Cause
-
-        **${ROOT_CAUSE}**
+        ${ROOT_CAUSE}
 
         \`\`\`
         ${ROOT_DETAIL}
         \`\`\`
 
-        ---
-
-        ### 📋 Error Details
+        ### Error Details
 
         ${ERROR_BLOCK}
 
         ---
+        This issue was automatically created by the CI Issue Manager action."
 
-        *🤖 This issue was automatically created by the CI Issue Manager action.*"
-
-            # --- Create or update issue ---
             EXISTING=$(gh issue list \
               --repo "$REPO" \
               --label "ci-failure" \
@@ -192,25 +168,14 @@ runs:
               | head -1)
 
             if [ -n "$EXISTING" ]; then
-              echo "  -> Updating existing issue #$EXISTING"
-              gh issue comment "$EXISTING" \
-                --repo "$REPO" \
-                --body "❌ Failed again in run [${RUN_ID}](${RUN_URL}). Updated analysis:
+              gh issue comment "$EXISTING" --repo "$REPO" --body "Failed again: ${RUN_URL}
 
         ${BODY}"
             else
-              echo "  -> Creating new issue: ${ISSUE_TITLE}"
-              gh issue create \
-                --repo "$REPO" \
-                --title "$ISSUE_TITLE" \
-                --body "$BODY" \
-                --label "ci-failure"
+              gh issue create --repo "$REPO" --title "$ISSUE_TITLE" --body "$BODY" --label "ci-failure"
             fi
 
           elif [ "$JOB_RESULT" = "success" ] || [ "$JOB_RESULT" = "skipped" ]; then
-            echo "  -> Job succeeded/skipped: $JOB_NAME"
-
-            # Close related issue if it exists
             ISSUE_TITLE="[CI-FAILURE] ${WORKFLOW_NAME}: ${JOB_NAME} failed"
             EXISTING=$(gh issue list \
               --repo "$REPO" \
@@ -221,10 +186,7 @@ runs:
               | head -1)
 
             if [ -n "$EXISTING" ]; then
-              echo "  -> Closing issue #$EXISTING"
-              gh issue comment "$EXISTING" \
-                --repo "$REPO" \
-                --body "✅ Workflow **${WORKFLOW_NAME}** — job **${JOB_NAME}** succeeded. Issue closed automatically."
+              gh issue comment "$EXISTING" --repo "$REPO" --body "Workflow ${WORKFLOW_NAME} job ${JOB_NAME} succeeded. Closing automatically."
               gh issue close "$EXISTING" --repo "$REPO"
             fi
           fi
