@@ -110,11 +110,28 @@ jobs:
               echo "✅ format-benchmarks.sh succeeded"
               FORMAT_OK=true
             else
-              echo "⚠️  format-benchmarks.sh failed (exit code $?), using fallback parser" >&2
+              echo "⚠️  format-benchmarks.sh failed (exit code $?), falling back..." >&2
               cat /tmp/format_stderr.txt >&2
             fi
-          else
-            echo "⚠️  scripts/format-benchmarks.sh not found, using fallback parser" >&2
+          fi
+
+          # Direct OpenCode fallback (also used if the script is missing)
+          if [ "$FORMAT_OK" != "true" ] && command -v opencode &>/dev/null; then
+            echo "Trying direct OpenCode formatting..." >&2
+            if FORMATTED=$(opencode run --prompt "Format the following benchmark results as a clean Markdown summary table with columns: Benchmark, Metric, Value. Output ONLY the markdown." < bench_output.txt 2>/dev/null); then
+              echo "✅ OpenCode direct formatting succeeded"
+              {
+                echo "<!-- BENCHMARK_RESULTS_START -->"
+                echo "> 🤖 Auto-formatted by OpenCode AI — **${DATE}** — [View run](${RUN_URL})"
+                echo ""
+                echo "$FORMATTED"
+                echo ""
+                echo "<!-- BENCHMARK_RESULTS_END -->"
+              } > bench_block.txt
+              FORMAT_OK=true
+            else
+              echo "⚠️  Direct OpenCode failed, falling back to Perl parser" >&2
+            fi
           fi
 
           # Fallback: parse using Perl (handles multi-line Criterion output correctly)
