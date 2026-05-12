@@ -1,5 +1,5 @@
 name: 'CI Issue Manager'
-description: 'Automatically creates/closes issues on CI job failure/success'
+description: 'Automatically creates/closes issues on CI job failure/success, with log analysis'
 inputs:
   workflow_name:
     description: 'Name of the workflow'
@@ -57,7 +57,158 @@ runs:
         RUN_URL="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
 
         if [ "$JOB_STATUS" = "failure" ]; then
-          echo "Job failed - creating/updating issue..."
+          echo "Job failed - fetching logs for analysis..."
+
+          # ------------------------------------------------------------------
+          # 1. Fetch the full log
+          # ------------------------------------------------------------------
+          FULL_LOG=$(gh run view "$RUN_ID" --log 2>/dev/null || echo "")
+
+          # ------------------------------------------------------------------
+          # 2. Extract error sections
+          # ------------------------------------------------------------------
+          ERROR_BLOCK=""
+
+          # Rust compilation errors (error[E...] + 5 lines context)
+          COMPILE_ERR=$(echo "$FULL_LOG" | grep -A 5 -E "^error\[E" | head -120)
+          if [ -n "$COMPILE_ERR" ]; then
+            ERROR_BLOCK="${ERROR_BLOCK}
+        ## 📦 Compilation Errors
+
+        \`\`\`
+        ${COMPILE_ERR}
+        \`\`\`
+        "
+          fi
+
+          # Test failures (FAILED + 3 lines context)
+          TEST_FAIL=$(echo "$FULL_LOG" | grep -B 2 -A 3 "FAILED" | head -80)
+          if [ -n "$TEST_FAIL" ]; then
+            ERROR_BLOCK="${ERROR_BLOCK}
+        ## 🧪 Test Failures
+
+        \`\`\`
+        ${TEST_FAIL}
+        \`\`\`
+        "
+          fi
+
+          # Panics
+          PANIC_ERR=$(echo "$FULL_LOG" | grep -B 2 -A 5 "panicked at" | head -80)
+          if [ -n "$PANIC_ERR" ]; then
+            ERROR_BLOCK="${ERROR_BLOCK}
+        ## 💥 Panics
+
+        \`\`\`
+        ${PANIC_ERR}
+        \`\`\`
+        "
+          fi
+
+          # General errors (Error: / error: with context)
+          GENERAL_ERR=$(echo "$FULL_LOG" | grep -B 1 -A 2 -E "^(Error|error):" | head -60)
+          if [ -n "$GENERAL_ERR" ]; then
+            ERROR_BLOCK="${ERROR_BLOCK}
+        ## ⚠️ General Errors
+
+        \`\`\`
+        ${GENERAL_ERR}
+        \`\`\`
+        "
+          fi
+
+          # Timeouts
+          TIMEOUT_ERR=$(echo "$FULL_LOG" | grep -B 2 -A 2 -i "timed out" | head -40)
+          if [ -n "$TIMEOUT_ERR" ]; then
+            ERROR_BLOCK="${ERROR_BLOCK}
+        ## ⏱️ Timeouts
+
+        \`\`\`
+        ${TIMEOUT_ERR}
+        \`\`\`
+        "
+          fi
+
+          # cap total size (GitHub issue body max = 65536 chars)
+          if [ ${#ERROR_BLOCK} -gt 30000 ]; then
+            ERROR_BLOCK="${ERROR_BLOCK:0:30000}
+        ...
+        *[truncated — see full log at ${RUN_URL}]*"
+          fi
+
+          # ------------------------------------------------------------------
+          # 3. Analyze root cause
+          # ------------------------------------------------------------------
+          ROOT_CAUSE=""
+          ROOT_DETAIL=""
+          if echo "$FULL_LOG" | grep -q "^error\[E"; then
+            ROOT_CAUSE="Compilation Error"
+            FIRST_COMPILE=$(echo "$FULL_LOG" | grep "^error\[E" | head -3)
+            ROOT_DETAIL="The Rust compiler reported errors during build. First error(s):
+        \`\`\`
+        ${FIRST_COMPILE}
+        \`\`\`"
+          elif echo "$FULL_LOG" | grep -q "panicked at"; then
+            ROOT_CAUSE="Runtime Panic"
+            PANIC_SUMMARY=$(echo "$FULL_LOG" | grep -B 1 "panicked at" | head -6)
+            ROOT_DETAIL="A panic occurred at runtime:
+        \`\`\`
+        ${PANIC_SUMMARY}
+        \`\`\`"
+          elif echo "$FULL_LOG" | grep -q "FAILED"; then
+            ROOT_CAUSE="Test Failure"
+            FAIL_SUMMARY=$(echo "$FULL_LOG" | grep -B 1 "FAILED" | head -6)
+            ROOT_DETAIL="One or more tests failed:
+        \`\`\`
+        ${FAIL_SUMMARY}
+        \`\`\`"
+          elif echo "$FULL_LOG" | grep -q -i "timed out"; then
+            ROOT_CAUSE="Timeout"
+            ROOT_DETAIL="The job exceeded its time limit or an operation timed out."
+          elif echo "$FULL_LOG" | grep -q -i "cannot find\|not found"; then
+            ROOT_CAUSE="Missing Dependency or File"
+            MISSING=$(echo "$FULL_LOG" | grep -i "cannot find\|not found" | head -5)
+            ROOT_DETAIL="A required file or dependency was not found:
+        \`\`\`
+        ${MISSING}
+        \`\`\`"
+          else
+            ROOT_CAUSE="Unknown"
+            ROOT_DETAIL="Could not automatically determine the root cause. Check the full log for details."
+          fi
+
+          # ------------------------------------------------------------------
+          # 4. Build issue body
+          # ------------------------------------------------------------------
+          BODY="## ❌ CI Failure — ${ROOT_CAUSE}
+
+        **Workflow:** ${WORKFLOW_NAME}
+        **Job:** ${JOB_NAME}
+        **Run:** [${RUN_ID}](${RUN_URL})
+        **Branch:** ${REF_NAME}
+        **Commit:** ${COMMIT_SHA}
+
+        ---
+
+        ### 🔍 Root Cause Analysis
+
+        **${ROOT_CAUSE}**
+
+        ${ROOT_DETAIL}
+
+        ---
+
+        ### 📋 Error Details
+
+        ${ERROR_BLOCK}
+
+        ---
+
+        *🤖 This issue was automatically created by the CI Issue Manager action.*"
+
+          # ------------------------------------------------------------------
+          # 5. Create or update issue
+          # ------------------------------------------------------------------
           EXISTING=$(gh issue list \
             --repo "$REPO" \
             --label "ci-failure" \
@@ -70,11 +221,9 @@ runs:
             echo "Updating existing issue #$EXISTING"
             gh issue comment "$EXISTING" \
               --repo "$REPO" \
-              --body "$(printf '\u274c Job **%s** failed again in workflow **%s**.\n\nCheck run: %s' "$JOB_NAME" "$WORKFLOW_NAME" "$RUN_URL")"
+              --body "$(printf '❌ Job **%s** failed again in workflow **%s**.\n\n---\n\n%s' "$JOB_NAME" "$WORKFLOW_NAME" "$BODY")"
           else
             echo "Creating new issue"
-            BODY=$(printf '## \u274c CI Failure\n\n**Workflow:** %s\n**Job:** %s\n**Run:** %s\n**Branch:** %s\n**Commit:** %s\n\nThe job **%s** failed in workflow **%s**.' \
-              "$WORKFLOW_NAME" "$JOB_NAME" "$RUN_URL" "$REF_NAME" "$COMMIT_SHA" "$JOB_NAME" "$WORKFLOW_NAME")
             gh issue create \
               --repo "$REPO" \
               --title "$ISSUE_TITLE" \
@@ -96,7 +245,7 @@ runs:
             echo "Closing issue #$EXISTING"
             gh issue comment "$EXISTING" \
               --repo "$REPO" \
-              --body "$(printf '\u2705 Workflow **%s** succeeded. Issue closed automatically.' "$WORKFLOW_NAME")"
+              --body "✅ Workflow **${WORKFLOW_NAME}** succeeded. Issue closed automatically."
             gh issue close "$EXISTING" --repo "$REPO"
           else
             echo "No open issues for ${WORKFLOW_NAME} - nothing to close"
