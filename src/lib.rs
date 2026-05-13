@@ -9,3 +9,4 @@ pub mod storage;
 pub use crate::core::engine::{LsmEngine, LsmStats};
 pub use crate::infra::config::LsmConfig;
 pub use crate::infra::error::{LsmError, Result};
+pub use crate::infra::log::{LogLevel, UsageEntry, UsageLog};

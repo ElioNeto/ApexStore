@@ -164,74 +164,6 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
 // ── Main MCP loop ───────────────────────────────────────────────────────────
 
 async function main() {
-  // Send initialize response
-  send({
-    jsonrpc: "2.0",
-    id: null,
-    result: {
-      protocolVersion: "1.0",
-      capabilities: {
-        tools: {
-          run_ci_pipeline: {
-            description: "Run the local CI pipeline (workflow-agent)",
-            inputSchema: {
-              type: "object",
-              properties: {
-                workflow: {
-                  type: "string",
-                  description: "Workflow file path (default: .github/workflows/ci.yml)",
-                },
-              },
-            },
-          },
-          check_todos: {
-            description: "Verify TODOs in .task-state.json",
-            inputSchema: {
-              type: "object",
-              properties: {
-                state_file: {
-                  type: "string",
-                  description: "Path to task state file (default: .task-state.json)",
-                },
-              },
-            },
-          },
-          run_tests: {
-            description: "Run cargo tests",
-            inputSchema: {
-              type: "object",
-              properties: {
-                args: {
-                  type: "string",
-                  description: "Extra cargo test args (default: --all-features --workspace)",
-                },
-              },
-            },
-          },
-          run_clippy: {
-            description: "Run cargo clippy linter",
-            inputSchema: {
-              type: "object",
-              properties: {
-                args: {
-                  type: "string",
-                  description: "Extra cargo clippy args (default: --all-targets --all-features)",
-                },
-              },
-            },
-          },
-          check_format: {
-            description: "Check Rust code formatting (cargo fmt --check)",
-            inputSchema: {
-              type: "object",
-              properties: {},
-            },
-          },
-        },
-      },
-    },
-  });
-
   // Process requests
   while (true) {
     const line = await readLine();
@@ -244,7 +176,80 @@ async function main() {
       continue;
     }
 
-    if (req.method === "tools/list") {
+    if (req.method === "initialize") {
+      // Respond with the protocol version the client requested
+      const clientVersion = (req.params?.protocolVersion as string) || "2024-11-05";
+      send({
+        jsonrpc: "2.0",
+        id: req.id,
+        result: {
+          protocolVersion: clientVersion,
+          capabilities: {
+            tools: {
+              run_ci_pipeline: {
+                description: "Run the local CI pipeline (workflow-agent)",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    workflow: {
+                      type: "string",
+                      description: "Workflow file path (default: .github/workflows/ci.yml)",
+                    },
+                  },
+                },
+              },
+              check_todos: {
+                description: "Verify TODOs in .task-state.json",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    state_file: {
+                      type: "string",
+                      description: "Path to task state file (default: .task-state.json)",
+                    },
+                  },
+                },
+              },
+              run_tests: {
+                description: "Run cargo tests",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    args: {
+                      type: "string",
+                      description: "Extra cargo test args (default: --all-features --workspace)",
+                    },
+                  },
+                },
+              },
+              run_clippy: {
+                description: "Run cargo clippy linter",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    args: {
+                      type: "string",
+                      description: "Extra cargo clippy args (default: --all-targets --all-features)",
+                    },
+                  },
+                },
+              },
+              check_format: {
+                description: "Check Rust code formatting (cargo fmt --check)",
+                inputSchema: {
+                  type: "object",
+                  properties: {},
+                },
+              },
+            },
+          },
+          serverInfo: { name: "cicd-server", version: "1.0.0" },
+        },
+      });
+    } else if (req.method === "notifications/initialized") {
+      // Client confirmed initialization — nothing to do
+      continue;
+    } else if (req.method === "tools/list") {
       send({
         jsonrpc: "2.0",
         id: req.id,
@@ -331,16 +336,6 @@ async function main() {
           error: { code: -32000, message: err.message },
         });
       }
-    } else if (req.method === "initialize") {
-      send({
-        jsonrpc: "2.0",
-        id: req.id,
-        result: {
-          protocolVersion: "1.0",
-          serverInfo: { name: "cicd-server", version: "1.0.0" },
-          capabilities: { tools: {} },
-        },
-      });
     } else {
       send({ jsonrpc: "2.0", id: req.id, error: { code: -32601, message: `Method not found: ${req.method}` } });
     }

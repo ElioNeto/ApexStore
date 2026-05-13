@@ -401,6 +401,9 @@ impl<C: Cache> Engine<C> {
 
     /// Put a key-value pair into the specified column family.
     pub fn put_cf(&mut self, cf: &str, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+        let start = std::time::Instant::now();
+        let key_str = String::from_utf8_lossy(&key).into_owned();
+        let value_size = value.len();
         let needs_compact;
         {
             let mut core = self.core.lock().map_err(|_| {
@@ -427,7 +430,23 @@ impl<C: Cache> Engine<C> {
                     false
                 };
         } // core lock is dropped here
+        let elapsed = start.elapsed();
+        tracing::debug!(
+            target: "apexstore::engine",
+            operation = "put_cf",
+            cf = cf,
+            key = %key_str,
+            value_size = value_size,
+            duration_us = elapsed.as_micros() as u64,
+            needs_compact = needs_compact,
+        );
         if needs_compact {
+            tracing::info!(
+                target: "apexstore::engine",
+                operation = "put_cf.compact",
+                cf = cf,
+                "memtable full, triggering compaction"
+            );
             self.maybe_compact();
         }
         Ok(())
@@ -438,7 +457,16 @@ impl<C: Cache> Engine<C> {
         K: Into<Vec<u8>>,
         V: Into<Vec<u8>>,
     {
-        self.put_cf("default", key.into(), value.into())
+        let key_vec = key.into();
+        let value_vec = value.into();
+        tracing::info!(
+            target: "apexstore::engine",
+            operation = "set",
+            cf = "default",
+            key = %String::from_utf8_lossy(&key_vec),
+            value_size = value_vec.len(),
+        );
+        self.put_cf("default", key_vec, value_vec)
     }
 
     pub fn delete_cf<K>(&mut self, cf: &str, key: K) -> Result<()>
@@ -446,6 +474,8 @@ impl<C: Cache> Engine<C> {
         K: Into<Vec<u8>>,
     {
         let key = key.into();
+        let start = std::time::Instant::now();
+        let key_str = String::from_utf8_lossy(&key).into_owned();
         let needs_compact;
         {
             let mut core = self.core.lock().map_err(|_| {
@@ -473,6 +503,15 @@ impl<C: Cache> Engine<C> {
                     false
                 };
         }
+        let elapsed = start.elapsed();
+        tracing::info!(
+            target: "apexstore::engine",
+            operation = "delete_cf",
+            cf = cf,
+            key = %key_str,
+            duration_us = elapsed.as_micros() as u64,
+            needs_compact = needs_compact,
+        );
         if needs_compact {
             self.maybe_compact();
         }
@@ -483,7 +522,14 @@ impl<C: Cache> Engine<C> {
     where
         K: Into<Vec<u8>>,
     {
-        self.delete_cf("default", key)
+        let key_vec = key.into();
+        tracing::info!(
+            target: "apexstore::engine",
+            operation = "delete",
+            cf = "default",
+            key = %String::from_utf8_lossy(&key_vec),
+        );
+        self.delete_cf("default", key_vec)
     }
 
     pub fn get_cf<K>(&self, cf: &str, key: K) -> Result<Option<Vec<u8>>>
@@ -491,6 +537,8 @@ impl<C: Cache> Engine<C> {
         K: AsRef<[u8]>,
     {
         let key = key.as_ref();
+        let start = std::time::Instant::now();
+        let key_str = String::from_utf8_lossy(key).into_owned();
         let core = self
             .core
             .lock()
@@ -498,18 +546,62 @@ impl<C: Cache> Engine<C> {
         if let Some(memtables) = core.memtables.get(cf) {
             for mem in memtables.iter().rev() {
                 if let Some(v) = mem.data.get(key) {
+                    let elapsed = start.elapsed();
+                    tracing::debug!(
+                        target: "apexstore::engine",
+                        operation = "get_cf",
+                        cf = cf,
+                        key = %key_str,
+                        found = true,
+                        value_size = v.len(),
+                        duration_us = elapsed.as_micros() as u64,
+                        source = "memtable",
+                    );
                     return Ok(Some(v.clone()));
                 }
             }
         }
-        Ok(core.version_set.get(cf, key))
+        let result = core.version_set.get(cf, key);
+        let elapsed = start.elapsed();
+        match &result {
+            Some(v) => {
+                tracing::debug!(
+                    target: "apexstore::engine",
+                    operation = "get_cf",
+                    cf = cf,
+                    key = %key_str,
+                    found = true,
+                    value_size = v.len(),
+                    duration_us = elapsed.as_micros() as u64,
+                    source = "sstable",
+                );
+            }
+            None => {
+                tracing::debug!(
+                    target: "apexstore::engine",
+                    operation = "get_cf",
+                    cf = cf,
+                    key = %key_str,
+                    found = false,
+                    duration_us = elapsed.as_micros() as u64,
+                );
+            }
+        }
+        Ok(result)
     }
 
     pub fn get<K>(&self, key: K) -> Result<Option<Vec<u8>>>
     where
         K: AsRef<[u8]>,
     {
-        self.get_cf("default", key)
+        let key_bytes = key.as_ref().to_vec();
+        tracing::debug!(
+            target: "apexstore::engine",
+            operation = "get",
+            cf = "default",
+            key = %String::from_utf8_lossy(&key_bytes),
+        );
+        self.get_cf("default", key_bytes)
     }
 
     pub fn scan(&self) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
@@ -523,6 +615,7 @@ impl<C: Cache> Engine<C> {
         upper: Option<&[u8]>,
         limit: Option<usize>,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let start = std::time::Instant::now();
         let core = self
             .core
             .lock()
@@ -561,6 +654,20 @@ impl<C: Cache> Engine<C> {
             merge_iter.next();
         }
 
+        let elapsed = start.elapsed();
+        let lower_str = lower.map(|b| String::from_utf8_lossy(b).into_owned());
+        let upper_str = upper.map(|b| String::from_utf8_lossy(b).into_owned());
+        tracing::debug!(
+            target: "apexstore::engine",
+            operation = "scan_cf",
+            cf = cf,
+            limit = limit,
+            results = results.len(),
+            duration_us = elapsed.as_micros() as u64,
+            lower = %lower_str.as_deref().unwrap_or(""),
+            upper = %upper_str.as_deref().unwrap_or(""),
+        );
+
         Ok(results)
     }
 
@@ -581,6 +688,7 @@ impl<C: Cache> Engine<C> {
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<String>)> {
+        let start_time = std::time::Instant::now();
         // Calculate upper bound for prefix scan
         let upper_bound = Self::prefix_end(prefix);
 
@@ -618,10 +726,23 @@ impl<C: Cache> Engine<C> {
             None
         };
 
+        let elapsed = start_time.elapsed();
+        tracing::debug!(
+            target: "apexstore::engine",
+            operation = "search_prefix",
+            prefix = %prefix,
+            cursor = %cursor.unwrap_or(""),
+            limit = limit,
+            results = results.len(),
+            has_more = has_more,
+            duration_us = elapsed.as_micros() as u64,
+        );
+
         Ok((results, new_cursor))
     }
 
     pub fn keys(&self) -> Result<Vec<Vec<u8>>> {
+        let start = std::time::Instant::now();
         let core = self
             .core
             .lock()
@@ -646,10 +767,19 @@ impl<C: Cache> Engine<C> {
             merge_iter.next();
         }
 
+        let elapsed = start.elapsed();
+        tracing::debug!(
+            target: "apexstore::engine",
+            operation = "keys",
+            count = results.len(),
+            duration_us = elapsed.as_micros() as u64,
+        );
+
         Ok(results)
     }
 
     pub fn count(&self) -> Result<usize> {
+        let start = std::time::Instant::now();
         let core = self
             .core
             .lock()
@@ -673,6 +803,14 @@ impl<C: Cache> Engine<C> {
             merge_iter.next();
         }
 
+        let elapsed = start.elapsed();
+        tracing::debug!(
+            target: "apexstore::engine",
+            operation = "count",
+            count = count,
+            duration_us = elapsed.as_micros() as u64,
+        );
+
         Ok(count)
     }
 
@@ -681,16 +819,25 @@ impl<C: Cache> Engine<C> {
     /// Flush the current memtable to an SSTable.
     /// Public wrapper used by benchmarks and tests.
     pub fn flush_memtable(&self) -> Result<()> {
+        let start = std::time::Instant::now();
         let mut core = self.core.lock().map_err(|_| {
             crate::infra::error::LsmError::LockPoisoned("engine core in flush_memtable")
         })?;
         self.flush_memtable_impl("default", &mut core)?;
+        let elapsed = start.elapsed();
+        tracing::info!(
+            target: "apexstore::engine",
+            operation = "flush_memtable",
+            cf = "default",
+            duration_us = elapsed.as_micros() as u64,
+        );
         Ok(())
     }
 
     fn flush_memtable_impl(&self, cf: &str, core: &mut EngineCore<C>) -> Result<bool> {
         if let Some(memtables) = core.memtables.get_mut(cf) {
             if let Some(mem) = memtables.pop() {
+                let records = mem.data.len();
                 let table = Table::build(mem.data.into_iter().collect(), &self.options);
                 core.version_set.add_table(cf, table);
                 let bytes = core.memtable_bytes.get_mut(cf).ok_or_else(|| {
@@ -707,6 +854,14 @@ impl<C: Cache> Engine<C> {
                 core.wal
                     .retain(|r| r.column_family.as_deref() != Some(cf))?;
 
+                tracing::info!(
+                    target: "apexstore::engine",
+                    operation = "flush_memtable_impl",
+                    cf = cf,
+                    records = records,
+                    "memtable flushed to SSTable",
+                );
+
                 // Check if compaction might be needed after this flush
                 let threshold = self.options.compaction_options.compaction_threshold;
                 return Ok(core.version_set.table_count(cf) > threshold);
@@ -716,13 +871,48 @@ impl<C: Cache> Engine<C> {
     }
 
     pub fn compact_cf(&self, cf: &str) -> Result<Option<CompactionMetrics>> {
+        let start = std::time::Instant::now();
         let mut core = self.core.lock().map_err(|_| {
             crate::infra::error::LsmError::LockPoisoned("engine core in compact_cf")
         })?;
-        compact_cf_core(&mut core, &self.options, cf)
+        let result = compact_cf_core(&mut core, &self.options, cf);
+        let elapsed = start.elapsed();
+        match &result {
+            Ok(Some(metrics)) => {
+                tracing::info!(
+                    target: "apexstore::engine",
+                    operation = "compact_cf",
+                    cf = cf,
+                    files_merged = metrics.files_merged,
+                    bytes_read = metrics.bytes_read,
+                    bytes_written = metrics.bytes_written,
+                    duration_us = elapsed.as_micros() as u64,
+                    "compaction completed",
+                );
+            }
+            Ok(None) => {
+                tracing::debug!(
+                    target: "apexstore::engine",
+                    operation = "compact_cf",
+                    cf = cf,
+                    "no compaction needed",
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: "apexstore::engine",
+                    operation = "compact_cf",
+                    cf = cf,
+                    error = %e,
+                    "compaction failed",
+                );
+            }
+        }
+        result
     }
 
     pub fn compact(&self) -> Result<Vec<(String, CompactionMetrics)>> {
+        let start = std::time::Instant::now();
         let mut results = Vec::new();
         let core = self
             .core
@@ -736,6 +926,14 @@ impl<C: Cache> Engine<C> {
                 results.push((cf, metrics));
             }
         }
+
+        let elapsed = start.elapsed();
+        tracing::info!(
+            target: "apexstore::engine",
+            operation = "compact",
+            cfs_compacted = results.len(),
+            duration_us = elapsed.as_micros() as u64,
+        );
 
         Ok(results)
     }
