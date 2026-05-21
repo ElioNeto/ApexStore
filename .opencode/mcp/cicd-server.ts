@@ -34,18 +34,56 @@ function send(msg: JsonRpcResponse): void {
   process.stdout.write(line + "\n");
 }
 
+// ── Line-buffered stdin reader ───────────────────────────────────────────────
+//
+// The original implementation used a one-shot listener that was removed after
+// the first line.  When the client piped multiple messages in a single chunk
+// (e.g. initialize + notifications/initialized + tools/list), only the first
+// was processed and the rest were silently dropped — causing "failed to get
+// tools" because the tools/list request never arrived.
+//
+// This version maintains a persistent buffer and resolves complete lines one
+// at a time via a queue of pending promises.
+
+let stdinBuffer = "";
+let stdinResolvers: Array<(line: string | null) => void> = [];
+
+function flushLines(): void {
+  while (stdinResolvers.length > 0) {
+    const nl = stdinBuffer.indexOf("\n");
+    if (nl === -1) break; // no complete line yet
+    const line = stdinBuffer.slice(0, nl).trim();
+    stdinBuffer = stdinBuffer.slice(nl + 1);
+    const resolve = stdinResolvers.shift()!;
+    resolve(line || null); // skip empty lines
+  }
+}
+
+process.stdin.on("data", (chunk: Buffer) => {
+  stdinBuffer += chunk.toString();
+  flushLines();
+});
+
+process.stdin.on("end", () => {
+  // If there's remaining content, flush it as the last line
+  if (stdinBuffer.trim()) {
+    for (const resolve of stdinResolvers) {
+      resolve(stdinBuffer.trim());
+    }
+    stdinResolvers = [];
+    stdinBuffer = "";
+  }
+  // Resolve any remaining pending promises with null (end-of-stream)
+  for (const resolve of stdinResolvers) {
+    resolve(null);
+  }
+  stdinResolvers = [];
+});
+
 function readLine(): Promise<string | null> {
   return new Promise((resolve) => {
-    const onData = (chunk: Buffer) => {
-      const lines = chunk.toString().split("\n");
-      const line = lines[0]?.trim();
-      if (line) {
-        process.stdin.removeListener("data", onData);
-        resolve(line);
-      }
-    };
-    process.stdin.on("data", onData);
-    process.stdin.on("end", () => resolve(null));
+    stdinResolvers.push(resolve);
+    flushLines(); // in case data arrived before the promise was set up
   });
 }
 
