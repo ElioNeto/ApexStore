@@ -179,8 +179,13 @@ fn bench_memory_pressure(c: &mut Criterion) {
                 engine.set(key, value).unwrap();
             }
 
-            let read_keys_count = if std::env::var("CI").is_ok() { 1_000 } else { 10_000 };
-            let benchmark_keys: Vec<String> = (0..read_keys_count).map(|i| generate_key(i, 10)).collect();
+            let read_keys_count = if std::env::var("CI").is_ok() {
+                1_000
+            } else {
+                10_000
+            };
+            let benchmark_keys: Vec<String> =
+                (0..read_keys_count).map(|i| generate_key(i, 10)).collect();
 
             b.iter(|| {
                 for key in benchmark_keys.iter() {
@@ -273,7 +278,11 @@ fn bench_cache_thrashing(c: &mut Criterion) {
             )
             .unwrap();
 
-            let total_keys = if std::env::var("CI").is_ok() { 10_000 } else { 100_000 };
+            let total_keys = if std::env::var("CI").is_ok() {
+                10_000
+            } else {
+                100_000
+            };
             for i in 0..total_keys {
                 let key = generate_key(i, 10);
                 let value = generate_value(i, 100);

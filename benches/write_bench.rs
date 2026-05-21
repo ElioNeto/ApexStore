@@ -190,42 +190,38 @@ fn bench_sstable_flush(c: &mut Criterion) {
     let flush_mb = (records * 110) as f64 / 1_000_000.0;
     group.throughput(Throughput::Bytes((records * 110) as u64));
 
-    group.bench_with_input(
-        BenchmarkId::from_parameter(records),
-        &records,
-        |b, &_r| {
-            let (temp_dir, data_dir) = setup_temp_dir("sstable_flush");
-            let mut engine = apexstore::LsmEngine::new_from_config(
-                &LsmConfig::builder()
-                    .dir_path(data_dir.clone())
-                    .memtable_max_size(10 * 1024 * 1024)
-                    .build()
-                    .unwrap(),
-                apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
-            )
-            .unwrap();
+    group.bench_with_input(BenchmarkId::from_parameter(records), &records, |b, &_r| {
+        let (temp_dir, data_dir) = setup_temp_dir("sstable_flush");
+        let mut engine = apexstore::LsmEngine::new_from_config(
+            &LsmConfig::builder()
+                .dir_path(data_dir.clone())
+                .memtable_max_size(10 * 1024 * 1024)
+                .build()
+                .unwrap(),
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
 
-            let records = _r;
-            let keys: Vec<String> = (0..records).map(|i| generate_key(i, 10)).collect();
-            let values: Vec<Vec<u8>> = (0..records).map(|i| generate_value(i, 100)).collect();
+        let records = _r;
+        let keys: Vec<String> = (0..records).map(|i| generate_key(i, 10)).collect();
+        let values: Vec<Vec<u8>> = (0..records).map(|i| generate_value(i, 100)).collect();
 
-            b.iter(|| {
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
-            });
+        b.iter(|| {
+            for (key, value) in keys.iter().zip(values.iter()) {
+                engine.set(key.clone(), value.clone()).unwrap();
+            }
+        });
 
-            let flush_start = std::time::Instant::now();
-            engine.flush_memtable().unwrap();
-            let flush_duration = flush_start.elapsed().as_secs_f64();
+        let flush_start = std::time::Instant::now();
+        engine.flush_memtable().unwrap();
+        let flush_duration = flush_start.elapsed().as_secs_f64();
 
-            println!("Flush time: {:.3}s for ~{:.1}MB", flush_duration, flush_mb);
-            println!("Throughput: {:.2} MB/s", flush_mb / flush_duration);
+        println!("Flush time: {:.3}s for ~{:.1}MB", flush_duration, flush_mb);
+        println!("Throughput: {:.2} MB/s", flush_mb / flush_duration);
 
-            drop(engine);
-            drop(temp_dir);
-        },
-    );
+        drop(engine);
+        drop(temp_dir);
+    });
 
     group.finish();
 }
@@ -235,7 +231,13 @@ fn bench_write_by_size(c: &mut Criterion) {
     let configs: &[(usize, usize)] = if std::env::var("CI").is_ok() {
         &[(10, 100), (100, 10000)]
     } else {
-        &[(10usize, 10), (10, 100), (100, 100), (100, 1000), (100, 10000)]
+        &[
+            (10usize, 10),
+            (10, 100),
+            (100, 100),
+            (100, 1000),
+            (100, 10000),
+        ]
     };
 
     for (key_size, value_size) in configs {
