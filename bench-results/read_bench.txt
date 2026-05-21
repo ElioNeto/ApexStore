@@ -1,0 +1,89 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `bench` profile [optimized] target(s) in 2.27s
+     Running benches/read_bench.rs (target/release/deps/read_bench-e18e5bad523b2dc3)
+Gnuplot not found, using plotters backend
+Benchmarking read_memtable/1000
+Benchmarking read_memtable/1000: Warming up for 1.0000 s
+Benchmarking read_memtable/1000: Collecting 10 samples in estimated 3.0182 s (6545 iterations)
+Benchmarking read_memtable/1000: Analyzing
+read_memtable/1000      time:   [397.95 µs 420.86 µs 446.89 µs]
+                        thrpt:  [2.2377 Melem/s 2.3761 Melem/s 2.5129 Melem/s]
+                 change:
+                        time:   [-14.804% -5.1883% +4.4851%] (p = 0.38 > 0.05)
+                        thrpt:  [-4.2926% +5.4722% +17.377%]
+                        No change in performance detected.
+
+Benchmarking read_memtable/10000
+Benchmarking read_memtable/10000: Warming up for 1.0000 s
+Benchmarking read_memtable/10000: Collecting 10 samples in estimated 3.0247 s (6050 iterations)
+Benchmarking read_memtable/10000: Analyzing
+read_memtable/10000     time:   [447.89 µs 472.35 µs 504.57 µs]
+                        thrpt:  [19.819 Melem/s 21.171 Melem/s 22.327 Melem/s]
+                 change:
+                        time:   [-16.414% -5.7145% +5.7419%] (p = 0.39 > 0.05)
+                        thrpt:  [-5.4301% +6.0609% +19.637%]
+                        No change in performance detected.
+
+Benchmarking read_sstable_cold/1000
+Benchmarking read_sstable_cold/1000: Warming up for 1.0000 s
+Benchmarking read_sstable_cold/1000: Collecting 10 samples in estimated 3.0067 s (11k iterations)
+Benchmarking read_sstable_cold/1000: Analyzing
+read_sstable_cold/1000  time:   [270.55 µs 289.35 µs 309.24 µs]
+                        thrpt:  [3.2338 Melem/s 3.4561 Melem/s 3.6961 Melem/s]
+                 change:
+                        time:   [-7.2687% -0.4050% +6.9134%] (p = 0.91 > 0.05)
+                        thrpt:  [-6.4664% +0.4066% +7.8384%]
+                        No change in performance detected.
+
+Benchmarking read_sstable_cold/10000
+Benchmarking read_sstable_cold/10000: Warming up for 1.0000 s
+Benchmarking read_sstable_cold/10000: Collecting 10 samples in estimated 3.0095 s (11k iterations)
+Benchmarking read_sstable_cold/10000: Analyzing
+read_sstable_cold/10000 time:   [259.58 µs 280.96 µs 300.58 µs]
+                        thrpt:  [33.269 Melem/s 35.592 Melem/s 38.524 Melem/s]
+                 change:
+                        time:   [-11.330% -4.3927% +3.4567%] (p = 0.28 > 0.05)
+                        thrpt:  [-3.3412% +4.5945% +12.777%]
+                        No change in performance detected.
+
+Benchmarking read_sstable_warm/1000
+Benchmarking read_sstable_warm/1000: Warming up for 1.0000 s
+Benchmarking read_sstable_warm/1000: Collecting 10 samples in estimated 3.0116 s (9460 iterations)
+Benchmarking read_sstable_warm/1000: Analyzing
+read_sstable_warm/1000  time:   [305.91 µs 322.20 µs 343.41 µs]
+                        thrpt:  [2.9119 Melem/s 3.1036 Melem/s 3.2689 Melem/s]
+                 change:
+                        time:   [+57.218% +68.753% +80.204%] (p = 0.00 < 0.05)
+                        thrpt:  [-44.507% -40.742% -36.394%]
+                        Performance has regressed.
+
+Benchmarking read_sstable_warm/10000
+Benchmarking read_sstable_warm/10000: Warming up for 1.0000 s
+Benchmarking read_sstable_warm/10000: Collecting 10 samples in estimated 3.0078 s (8085 iterations)
+Benchmarking read_sstable_warm/10000: Analyzing
+read_sstable_warm/10000 time:   [321.67 µs 463.61 µs 924.29 µs]
+                        thrpt:  [10.819 Melem/s 21.570 Melem/s 31.088 Melem/s]
+                 change:
+                        time:   [+23.943% +225.63% +625.83%] (p = 0.20 > 0.05)
+                        thrpt:  [-86.223% -69.291% -19.317%]
+                        No change in performance detected.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+
+Benchmarking bloom_filter/10000
+Benchmarking bloom_filter/10000: Warming up for 1.0000 s
+Benchmarking bloom_filter/10000: Collecting 10 samples in estimated 3.2123 s (715 iterations)
+Benchmarking bloom_filter/10000: Analyzing
+bloom_filter/10000      time:   [4.1006 ms 5.6263 ms 8.3053 ms]
+                        thrpt:  [1.2040 Melem/s 1.7774 Melem/s 2.4386 Melem/s]
+                 change:
+                        time:   [+82.386% +121.01% +184.77%] (p = 0.00 < 0.05)
+                        thrpt:  [-64.884% -54.753% -45.171%]
+                        Performance has regressed.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+
+Benchmarking bloom_filter/100000
+Benchmarking bloom_filter/100000: Warming up for 1.0000 s

@@ -18,8 +18,8 @@ use std::collections::btree_map;
 /// Wraps a `BTreeMap::Range` iterator to provide the `StorageIterator` interface.
 /// Keys are automatically sorted by the BTreeMap.
 pub struct MemTableIterator<'a> {
-    inner: btree_map::Range<'a, String, LogRecord>,
-    current: Option<(&'a String, &'a LogRecord)>,
+    inner: btree_map::Range<'a, Vec<u8>, LogRecord>,
+    current: Option<(&'a Vec<u8>, &'a LogRecord)>,
 }
 
 impl<'a> MemTableIterator<'a> {
@@ -27,8 +27,8 @@ impl<'a> MemTableIterator<'a> {
     ///
     /// # Arguments
     /// * `data` - Reference to the BTreeMap backing the MemTable
-    pub fn new(data: &'a btree_map::BTreeMap<String, LogRecord>) -> Self {
-        let mut inner = data.range::<String, _>(..); // Full range
+    pub fn new(data: &'a btree_map::BTreeMap<Vec<u8>, LogRecord>) -> Self {
+        let mut inner = data.range::<Vec<u8>, _>(..); // Full range
         let current = inner.next();
         Self { inner, current }
     }
@@ -38,8 +38,8 @@ impl<'a> MemTableIterator<'a> {
     /// # Arguments
     /// * `data` - Reference to the BTreeMap backing the MemTable
     /// * `start_key` - The key to start iteration from (inclusive)
-    pub fn new_from(data: &'a btree_map::BTreeMap<String, LogRecord>, start_key: &str) -> Self {
-        let mut inner = data.range::<String, _>(start_key.to_string()..); // Range from start_key to end
+    pub fn new_from(data: &'a btree_map::BTreeMap<Vec<u8>, LogRecord>, start_key: &[u8]) -> Self {
+        let mut inner = data.range::<Vec<u8>, _>(start_key.to_vec()..); // Range from start_key to end
         let current = inner.next();
         Self { inner, current }
     }
@@ -49,20 +49,17 @@ impl<'a> StorageIterator for MemTableIterator<'a> {
     type KeyType = KeySlice<'a>;
 
     fn key(&self) -> Self::KeyType {
-        KeySlice::new(
-            self.current
-                .expect("key() called on invalid iterator")
-                .0
-                .as_bytes(),
-        )
+        match self.current {
+            Some((k, _)) => KeySlice::new(k.as_slice()),
+            None => KeySlice::new(&[]), // Caller should check is_valid() first
+        }
     }
 
     fn value(&self) -> &[u8] {
-        &self
-            .current
-            .expect("value() called on invalid iterator")
-            .1
-            .value
+        match self.current {
+            Some((_, r)) => &r.value,
+            None => &[], // Caller should check is_valid() first
+        }
     }
 
     fn is_valid(&self) -> bool {
@@ -76,7 +73,7 @@ impl<'a> StorageIterator for MemTableIterator<'a> {
     fn seek(&mut self, key: &[u8]) {
         // We need to iterate until we find a key >= seek target
         while let Some((current_key, _)) = self.current {
-            if current_key.as_bytes() >= key {
+            if current_key.as_slice() >= key {
                 // Found a key >= seek target
                 return;
             }
@@ -90,31 +87,31 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    fn create_test_record(key: &str, value: &[u8]) -> LogRecord {
-        LogRecord::new(key.to_string(), value.to_vec())
+    fn create_test_record(key: &[u8], value: &[u8]) -> LogRecord {
+        LogRecord::new(key.to_vec(), value.to_vec())
     }
 
-    fn create_test_memtable() -> BTreeMap<String, LogRecord> {
+    fn create_test_memtable() -> BTreeMap<Vec<u8>, LogRecord> {
         let mut map = BTreeMap::new();
         map.insert(
-            "key_001".to_string(),
-            create_test_record("key_001", b"value_001"),
+            b"key_001".to_vec(),
+            create_test_record(b"key_001", b"value_001"),
         );
         map.insert(
-            "key_010".to_string(),
-            create_test_record("key_010", b"value_010"),
+            b"key_010".to_vec(),
+            create_test_record(b"key_010", b"value_010"),
         );
         map.insert(
-            "key_020".to_string(),
-            create_test_record("key_020", b"value_020"),
+            b"key_020".to_vec(),
+            create_test_record(b"key_020", b"value_020"),
         );
         map.insert(
-            "key_030".to_string(),
-            create_test_record("key_030", b"value_030"),
+            b"key_030".to_vec(),
+            create_test_record(b"key_030", b"value_030"),
         );
         map.insert(
-            "key_100".to_string(),
-            create_test_record("key_100", b"value_100"),
+            b"key_100".to_vec(),
+            create_test_record(b"key_100", b"value_100"),
         );
         map
     }
@@ -147,11 +144,10 @@ mod tests {
         let mut iter = MemTableIterator::new(&map);
 
         let mut count = 0;
-        let expected_keys = ["key_001", "key_010", "key_020", "key_030", "key_100"];
+        let expected_keys = [b"key_001", b"key_010", b"key_020", b"key_030", b"key_100"];
 
         while iter.is_valid() {
-            let key = String::from_utf8(iter.key().to_vec()).unwrap();
-            assert_eq!(key, expected_keys[count]);
+            assert_eq!(iter.key().as_slice(), expected_keys[count]);
             count += 1;
             iter.next();
         }
@@ -236,8 +232,8 @@ mod tests {
     fn test_iterator_single_entry() {
         let mut map = BTreeMap::new();
         map.insert(
-            "only_key".to_string(),
-            create_test_record("only_key", b"only_value"),
+            b"only_key".to_vec(),
+            create_test_record(b"only_key", b"only_value"),
         );
 
         let mut iter = MemTableIterator::new(&map);
@@ -254,7 +250,7 @@ mod tests {
         let map = create_test_memtable();
 
         // Start from key_020
-        let mut iter = MemTableIterator::new_from(&map, "key_020");
+        let mut iter = MemTableIterator::new_from(&map, b"key_020");
 
         assert!(iter.is_valid());
         assert_eq!(iter.key().as_slice(), b"key_020");
@@ -275,16 +271,16 @@ mod tests {
     fn test_iterator_deleted_records() {
         let mut map = BTreeMap::new();
         map.insert(
-            "key_001".to_string(),
-            create_test_record("key_001", b"value_001"),
+            b"key_001".to_vec(),
+            create_test_record(b"key_001", b"value_001"),
         );
         map.insert(
-            "key_002".to_string(),
-            LogRecord::tombstone("key_002".to_string()),
+            b"key_002".to_vec(),
+            LogRecord::tombstone(b"key_002".to_vec()),
         );
         map.insert(
-            "key_003".to_string(),
-            create_test_record("key_003", b"value_003"),
+            b"key_003".to_vec(),
+            create_test_record(b"key_003", b"value_003"),
         );
 
         let mut iter = MemTableIterator::new(&map);

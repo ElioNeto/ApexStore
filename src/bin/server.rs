@@ -79,14 +79,20 @@ async fn main() -> std::io::Result<()> {
     println!("   Bloom Filter FP Rate: {}", bloom_false_positive_rate);
     println!();
 
-    let engine = match LsmEngine::new(config) {
+    let engine = match LsmEngine::new_from_config(
+        &config,
+        apexstore::storage::cache::GlobalBlockCache::new(64, 4096),
+    ) {
         Ok(engine) => engine,
         Err(e) => {
             eprintln!("❌ Error initializing LSM Engine: {}", e);
             eprintln!(
                 "💡 Tip: if you don't need to recover unflushed writes, rename/delete wal.log and try again."
             );
-            return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                e.to_string() as String,
+            ));
         }
     };
 

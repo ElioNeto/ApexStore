@@ -2,6 +2,26 @@ use crate::infra::error::{LsmError, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Top-level configuration for the ApexStore LSM engine.
+///
+/// Groups configuration into three categories: [`CoreConfig`], [`StorageConfig`],
+/// and [`CompactionConfig`].
+///
+/// # Usage example
+///
+/// ```rust
+/// use apexstore::LsmConfig;
+///
+/// let config = LsmConfig::builder()
+///     .dir_path("/tmp/apexdata")
+///     .memtable_max_size(8 * 1024 * 1024)  // 8 MiB
+///     .block_size(8192)                     // 8 KiB blocks
+///     .block_cache_size_mb(128)             // 128 MiB cache
+///     .build()
+///     .unwrap();
+///
+/// assert_eq!(config.core.memtable_max_size, 8 * 1024 * 1024);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LsmConfig {
     #[serde(default)]
@@ -47,6 +67,7 @@ pub enum CompactionStrategy {
     #[default]
     SizeTiered,
     Leveled,
+    LazyLeveling,
 }
 
 impl Default for CoreConfig {

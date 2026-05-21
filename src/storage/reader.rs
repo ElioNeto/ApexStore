@@ -6,6 +6,7 @@ use crate::storage::block::Block;
 use crate::storage::builder::{BlockMeta, MetaBlock};
 use crate::storage::cache::GlobalBlockCache;
 use bloomfilter::Bloom;
+use crc32fast::Hasher as Crc32Hasher;
 use lz4_flex::decompress_size_prepended;
 use parking_lot::Mutex;
 use std::collections::hash_map::DefaultHasher;
@@ -103,8 +104,8 @@ impl SstableReader {
     ///
     /// This method is lock-free and very fast. It should be called before `get()`
     /// to avoid unnecessary I/O for keys that definitely don't exist.
-    pub fn might_contain(&self, key: &str) -> bool {
-        self.bloom_filter.check(key.as_bytes())
+    pub fn might_contain(&self, key: &[u8]) -> bool {
+        self.bloom_filter.check(key)
     }
 
     /// Retrieve a value by key using sparse index and Bloom filter
@@ -112,14 +113,14 @@ impl SstableReader {
     /// # Thread Safety
     /// This method can be safely called concurrently from multiple threads.
     /// Locks are held only during cache access and file I/O.
-    pub fn get(&self, key: &str) -> Result<Option<LogRecord>> {
+    pub fn get(&self, key: &[u8]) -> Result<Option<LogRecord>> {
         // Fast rejection using Bloom filter (no lock needed)
         if !self.might_contain(key) {
             return Ok(None);
         }
 
         // Read block by offset (no lock needed - immutable metadata)
-        let block_meta = match self.read_block_by_key(key.as_bytes()) {
+        let block_meta = match self.read_block_by_key(key) {
             Some(meta) => meta,
             None => return Ok(None),
         };
@@ -131,28 +132,46 @@ impl SstableReader {
         let block = Block::decode(&block_data)?;
 
         // Linear scan within the block to find the key (no lock needed)
-        Self::search_in_block(&block, key.as_bytes())
+        Self::search_in_block(&block, key)
     }
 
-    /// Search for a key within a decoded block
+    /// Extract the key at a given offset within a block's data.
+    /// Returns `None` if the offset is invalid or the key extends past the data.
+    fn extract_key_at_offset(data: &[u8], offset: usize) -> Option<&[u8]> {
+        if offset + 2 > data.len() {
+            return None;
+        }
+        let key_len = u16::from_le_bytes([data[offset], data[offset + 1]]) as usize;
+        if offset + 2 + key_len > data.len() {
+            return None;
+        }
+        Some(&data[offset + 2..offset + 2 + key_len])
+    }
+
+    /// Search for a key within a decoded block using binary search.
+    ///
+    /// Entries in a block are stored in sorted key order, and `block.offsets`
+    /// contains the sorted offset list.  This method uses `binary_search_by`
+    /// to achieve **O(log n)** lookup instead of the previous linear scan.
     pub(crate) fn search_in_block(block: &Block, key: &[u8]) -> Result<Option<LogRecord>> {
-        // Access block data through pub(crate) fields
-        for &offset in &block.offsets {
+        let idx = block.offsets.binary_search_by(|&offset| {
             let offset = offset as usize;
-            if offset + 2 > block.data.len() {
-                break;
+            match Self::extract_key_at_offset(&block.data, offset) {
+                Some(entry_key) => entry_key.cmp(key),
+                // Data corruption — treat as "less" to continue search;
+                // the CRC32 check at block level should have caught this earlier.
+                None => std::cmp::Ordering::Less,
             }
+        });
 
-            // Read key length
-            let key_len = u16::from_le_bytes([block.data[offset], block.data[offset + 1]]) as usize;
-            if offset + 2 + key_len + 2 > block.data.len() {
-                break;
-            }
+        match idx {
+            Ok(pos) => {
+                let offset = block.offsets[pos] as usize;
 
-            // Read key
-            let entry_key = &block.data[offset + 2..offset + 2 + key_len];
+                // Read key length
+                let key_len =
+                    u16::from_le_bytes([block.data[offset], block.data[offset + 1]]) as usize;
 
-            if entry_key == key {
                 // Read value length
                 let val_len_offset = offset + 2 + key_len;
                 let val_len = u16::from_le_bytes([
@@ -160,8 +179,11 @@ impl SstableReader {
                     block.data[val_len_offset + 1],
                 ]) as usize;
 
+                // Bounds check (should never fail if extract_key_at_offset succeeded)
                 if val_len_offset + 2 + val_len > block.data.len() {
-                    break;
+                    return Err(LsmError::CorruptedData(
+                        "Block entry extends past block data".to_string(),
+                    ));
                 }
 
                 // Read value
@@ -169,11 +191,10 @@ impl SstableReader {
 
                 // Decode the LogRecord from value
                 let record: LogRecord = decode(entry_value)?;
-                return Ok(Some(record));
+                Ok(Some(record))
             }
+            Err(_) => Ok(None),
         }
-
-        Ok(None)
     }
 
     /// Scan all records in the SSTable (for compaction)
@@ -209,8 +230,8 @@ impl SstableReader {
     /// This method can be safely called concurrently from multiple threads.
     pub fn scan_range(
         &self,
-        start: Option<&str>,
-        end: Option<&str>,
+        start: Option<&[u8]>,
+        end: Option<&[u8]>,
     ) -> Result<Vec<(Vec<u8>, LogRecord)>> {
         let mut records = Vec::new();
 
@@ -220,7 +241,7 @@ impl SstableReader {
             // and then step back by 1 to get the block that could contain start_key.
             let idx = self.metadata.blocks.partition_point(|block| {
                 // Use bytes comparison to avoid String allocation
-                block.first_key.as_slice() <= start_key.as_bytes()
+                block.first_key.as_slice() <= start_key
             });
             if idx == 0 {
                 0
@@ -237,7 +258,7 @@ impl SstableReader {
             // Check if we've passed the end key
             if let Some(end_key) = end {
                 // If the block's first key is >= end, we're done with this SSTable
-                if block_meta.first_key.as_slice() >= end_key.as_bytes() {
+                if block_meta.first_key.as_slice() >= end_key {
                     break;
                 }
             }
@@ -264,14 +285,14 @@ impl SstableReader {
 
                 // Check start filter (exclusive start for pagination)
                 if let Some(start_key) = start {
-                    if key.as_slice() <= start_key.as_bytes() {
+                    if key.as_slice() <= start_key {
                         continue;
                     }
                 }
 
                 // Check end filter
                 if let Some(end_key) = end {
-                    if key.as_slice() >= end_key.as_bytes() {
+                    if key.as_slice() >= end_key {
                         // Keys in a block are sorted, so we can break early
                         break;
                     }
@@ -374,14 +395,33 @@ impl SstableReader {
     }
 
     fn read_and_decompress_block(&self, block_meta: &BlockMeta) -> Result<Vec<u8>> {
-        // Read compressed block (lock held only during I/O)
-        let compressed_block = {
+        // Read compressed block + CRC32 (lock held only during I/O)
+        let (compressed_block, stored_crc32) = {
             let mut file = self.file.lock();
             file.seek(SeekFrom::Start(block_meta.offset))?;
-            let mut compressed_block = vec![0u8; block_meta.size as usize];
+            let compressed_size = block_meta.size as usize - 4; // exclude CRC32 bytes
+            let mut compressed_block = vec![0u8; compressed_size];
             file.read_exact(&mut compressed_block)?;
-            compressed_block
+
+            // Read CRC32 (4 bytes)
+            let mut crc32_bytes = [0u8; 4];
+            file.read_exact(&mut crc32_bytes)?;
+            let stored_crc32 = u32::from_le_bytes(crc32_bytes);
+
+            (compressed_block, stored_crc32)
         };
+
+        // Verify CRC32 of compressed data
+        let mut hasher = Crc32Hasher::new();
+        hasher.update(&compressed_block);
+        let computed_crc32 = hasher.finalize();
+
+        if computed_crc32 != stored_crc32 {
+            return Err(LsmError::CorruptedData(format!(
+                "CRC32 mismatch at offset {}: expected {:08x}, got {:08x}",
+                block_meta.offset, stored_crc32, computed_crc32
+            )));
+        }
 
         // Decompress block (no lock - CPU intensive work)
         let decompressed = decompress_size_prepended(&compressed_block).map_err(|e| {
@@ -419,5 +459,74 @@ impl SstableReader {
 
         // Candidate block is idx - 1
         self.metadata.blocks.get(idx - 1).cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::log_record::LogRecord;
+    use crate::infra::config::StorageConfig;
+    use crate::storage::builder::SstableBuilder;
+    use std::io::{Seek, SeekFrom, Write};
+    use tempfile::tempdir;
+
+    fn create_test_record(key: &[u8], value: &[u8]) -> LogRecord {
+        LogRecord::new(key.to_vec(), value.to_vec())
+    }
+
+    #[test]
+    fn test_sstable_data_corruption_detected() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("corruption_test.sst");
+        let config = StorageConfig::default();
+
+        // Build an SSTable with some data
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut builder = SstableBuilder::new(path.clone(), config.clone(), timestamp).unwrap();
+
+        for i in 0..10 {
+            let key = format!("key_{:02}", i);
+            let value = format!("value_{}", i);
+            builder
+                .add(
+                    key.as_bytes(),
+                    &create_test_record(key.as_bytes(), value.as_bytes()),
+                )
+                .unwrap();
+        }
+
+        let path = builder.finish().unwrap();
+
+        // Open the SSTable for reading
+        let reader =
+            SstableReader::open(path.clone(), config, GlobalBlockCache::new(100, 4096)).unwrap();
+
+        // Corrupt the first data block by writing junk after the magic number
+        {
+            let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            file.seek(SeekFrom::Start(8)).unwrap();
+            // Write garbage to corrupt the compressed data (but not the CRC32)
+            let garbage = vec![0xFF; 20];
+            file.write_all(&garbage).unwrap();
+        }
+
+        // Try to read a key that would be in the corrupted block
+        let result = reader.get(b"key_00");
+
+        // Should get CorruptedData error due to CRC32 mismatch
+        match result {
+            Err(LsmError::CorruptedData(msg)) => {
+                assert!(
+                    msg.contains("CRC32 mismatch"),
+                    "Expected CRC32 mismatch error, got: {}",
+                    msg
+                );
+            }
+            other => panic!("Expected CorruptedData error, got: {:?}", other),
+        }
     }
 }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn create_test_record(key: &str, value: &[u8]) -> LogRecord {
-    LogRecord::new(key.to_string(), value.to_vec())
+    LogRecord::new(key.as_bytes().to_vec(), value.to_vec())
 }
 
 fn create_test_cache(config: &StorageConfig) -> Arc<GlobalBlockCache> {
@@ -37,12 +37,12 @@ fn test_sstable_v2_roundtrip_small() -> Result<()> {
     let reader = SstableReader::open(path, config, cache)?;
 
     for (key, expected_value) in &test_data {
-        let record = reader.get(key)?.expect("Key should exist");
+        let record = reader.get(key.as_bytes())?.expect("Key should exist");
         assert_eq!(record.value, expected_value.as_bytes());
     }
 
     // Verify non-existent keys
-    assert!(reader.get("missing_key")?.is_none());
+    assert!(reader.get(b"missing_key")?.is_none());
 
     Ok(())
 }
@@ -69,7 +69,7 @@ fn test_sstable_v2_roundtrip_large() -> Result<()> {
     let reader = SstableReader::open(path, config, cache)?;
 
     for (key, expected_value) in &test_data {
-        let record = reader.get(key)?.expect("Key should exist");
+        let record = reader.get(key.as_bytes())?.expect("Key should exist");
         assert_eq!(record.value, expected_value.as_bytes());
     }
 
@@ -107,7 +107,7 @@ fn test_sstable_v2_multiple_blocks() -> Result<()> {
     // Verify all records are readable
     for i in 0..100 {
         let key = format!("key_{:04}", i);
-        let record = reader.get(&key)?;
+        let record = reader.get(key.as_bytes())?;
         assert!(record.is_some(), "Key {} should exist", key);
     }
 
@@ -136,14 +136,14 @@ fn test_sstable_v2_bloom_filter_effectiveness() -> Result<()> {
     for i in 0..500 {
         let key = format!("existing_key_{:04}", i);
         assert!(
-            reader.might_contain(&key),
+            reader.might_contain(key.as_bytes()),
             "Existing key should pass Bloom filter"
         );
     }
 
     // Count false positives for non-existent keys
     let false_positives = (1000..1500)
-        .filter(|i| reader.might_contain(&format!("nonexistent_{}", i)))
+        .filter(|i| reader.might_contain(format!("nonexistent_{}", i).as_bytes()))
         .count();
 
     // With 1% FP rate and 500 checks, statistically expect ~5 false positives
@@ -183,31 +183,31 @@ fn test_sstable_v2_boundary_keys() -> Result<()> {
     let reader = SstableReader::open(path, config, cache)?;
 
     // Test exact boundary keys
-    assert!(reader.get("aaa")?.is_some(), "First key should exist");
-    assert!(reader.get("zzz")?.is_some(), "Last key should exist");
+    assert!(reader.get(b"aaa")?.is_some(), "First key should exist");
+    assert!(reader.get(b"zzz")?.is_some(), "Last key should exist");
 
     // Test keys before first
     assert!(
-        reader.get("000")?.is_none(),
+        reader.get(b"000")?.is_none(),
         "Key before first should not exist"
     );
     assert!(
-        reader.get("aa")?.is_none(),
+        reader.get(b"aa")?.is_none(),
         "Key before first should not exist"
     );
 
     // Test keys after last
     assert!(
-        reader.get("zzzz")?.is_none(),
+        reader.get(b"zzzz")?.is_none(),
         "Key after last should not exist"
     );
 
     // Test keys between boundaries
     assert!(
-        reader.get("bbb")?.is_none(),
+        reader.get(b"bbb")?.is_none(),
         "Non-existent key should not exist"
     );
-    assert!(reader.get("mmm")?.is_some(), "Middle key should exist");
+    assert!(reader.get(b"mmm")?.is_some(), "Middle key should exist");
 
     Ok(())
 }
@@ -274,7 +274,7 @@ fn test_sstable_v2_large_values() -> Result<()> {
 
     for i in 0..10 {
         let key = format!("key_{}", i);
-        let record = reader.get(&key)?.expect("Key should exist");
+        let record = reader.get(key.as_bytes())?.expect("Key should exist");
         assert_eq!(record.value.len(), 8000, "Value size should be 8KB");
         assert_eq!(record.value, large_value, "Value content should match");
     }
@@ -308,7 +308,7 @@ fn test_sstable_v2_cache_effectiveness() -> Result<()> {
     for _ in 0..3 {
         for i in 0..50 {
             let key = format!("key_{:03}", i);
-            let record = reader.get(&key)?;
+            let record = reader.get(key.as_bytes())?;
             assert!(record.is_some(), "Key should exist");
         }
     }
@@ -335,11 +335,11 @@ fn test_sstable_v2_empty_key() -> Result<()> {
     let reader = SstableReader::open(path, config, cache)?;
 
     // Should be able to read empty key
-    let record = reader.get("")?.expect("Empty key should exist");
+    let record = reader.get(b"")?.expect("Empty key should exist");
     assert_eq!(record.value, b"empty_key_value");
 
     // Normal key should also work
-    let record = reader.get("normal_key")?.expect("Normal key should exist");
+    let record = reader.get(b"normal_key")?.expect("Normal key should exist");
     assert_eq!(record.value, b"normal_value");
 
     Ok(())
@@ -369,8 +369,8 @@ fn test_sstable_v2_unicode_keys() -> Result<()> {
     let reader = SstableReader::open(path, config, cache)?;
 
     // Verify all unicode keys are readable
-    for key in &unicode_keys {
-        let record = reader.get(key)?;
+    for &key in &unicode_keys {
+        let record = reader.get(key.as_bytes())?;
         assert!(record.is_some(), "Unicode key '{}' should exist", key);
         if let Some(r) = record {
             let expected = format!("{}_value", key);

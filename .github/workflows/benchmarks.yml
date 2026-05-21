@@ -15,20 +15,30 @@ env:
 
 jobs:
   benchmarks:
-    name: Run Benchmarks
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - bench: write_bench
+            name: Write
+          - bench: read_bench
+            name: Read
+          - bench: scan_bench
+            name: Scan
+          - bench: mixed_bench
+            name: Mixed
+          - bench: stress_bench
+            name: Stress
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -36,47 +46,118 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-bench-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-bench-
 
-      - name: Build benchmarks
-        run: cargo build --benches --release
+      - name: Build benchmark
+        run: cargo build --bench ${{ matrix.bench }} --release
 
-      - name: Run benchmarks (CI mode)
+      - name: Run benchmark (CI mode)
         run: |
-          cargo bench \
-            --bench write_bench \
-            --bench read_bench \
-            --bench scan_bench \
-            --bench mixed_bench \
-            --bench stress_bench \
-            -- --noplot 2>&1 | tee bench_output.txt
+          cargo bench --bench ${{ matrix.bench }} -- --noplot 2>&1 | tee bench_output.txt
           exit ${PIPESTATUS[0]}
         continue-on-error: true
         env:
           CI: true
 
-      - name: Upload benchmark results
+      - name: Upload results artifact
+        run: |
+          cp bench_output.txt "bench_output_${{ matrix.bench }}.txt"
+        shell: bash
+
+      - name: Upload results artifact
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-results
-          path: |
-            bench_output.txt
-            target/criterion
+          name: bench-results-${{ matrix.bench }}
+          path: bench_output_${{ matrix.bench }}.txt
           retention-days: 30
 
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-bench-lint-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bench-lint-
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+  update-readme:
+    name: Update README with results
+    if: github.event_name != 'pull_request'
+    needs: [benchmarks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install OpenCode CLI
+        id: install_opencode
+        run: |
+          if command -v opencode &>/dev/null; then
+            echo "OpenCode already installed at $(which opencode)"
+            echo "cache-hit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Installing OpenCode..."
+            curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/main/install.sh | bash
+            if [ -f "$HOME/.opencode/bin/opencode" ]; then
+              echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+            elif [ -f "/usr/local/bin/opencode" ]; then
+              : # already in PATH
+            fi
+            echo "cache-hit=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bench-results-*
+          merge-multiple: true
+
+      - name: Combine benchmark outputs
+        run: |
+          # Each matrix runner produces bench_output_<bench>.txt; combine them in order
+          for f in \
+            bench_output_write_bench.txt \
+            bench_output_read_bench.txt \
+            bench_output_scan_bench.txt \
+            bench_output_mixed_bench.txt \
+            bench_output_stress_bench.txt; do
+            if [ -f "$f" ]; then
+              SECTION="=== $(echo "$f" | sed 's/bench_output_//; s/.txt//') ==="
+              echo "$SECTION" >> bench_combined.txt
+              cat "$f" >> bench_combined.txt
+              echo "" >> bench_combined.txt
+            fi
+          done
+          cp bench_combined.txt bench_output.txt
+          echo "--- Combined output ---"
+          wc -l bench_output.txt
+
       - name: Generate benchmark summary
-        if: github.event_name != 'pull_request'
         run: |
           DATE=$(date -u '+%Y-%m-%d %H:%M UTC')
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          # Guard: abort gracefully if bench output is missing or empty
           if [ ! -s bench_output.txt ]; then
             {
               echo "<!-- BENCHMARK_RESULTS_START -->"
-              echo "> \u26a0\ufe0f CI on **${DATE}** — benchmark produced no results. [View run](${RUN_URL})"
+              echo "> ⚠️ CI on **${DATE}** — benchmark produced no results. [View run](${RUN_URL})"
               echo ""
               echo "<!-- BENCHMARK_RESULTS_END -->"
             } > bench_block.txt
@@ -87,23 +168,88 @@ jobs:
             exit 0
           fi
 
-          # Format results into a categorised Markdown table
-          python3 scripts/format_bench.py
-
-          TABLE=$(cat bench_table.txt)
-
-          {
-            echo "<!-- BENCHMARK_RESULTS_START -->"
-            echo "> \U0001f916 Auto-updated by CI on **${DATE}** — [View run](${RUN_URL})"
-            echo ""
+          FORMAT_OK=false
+          if python3 scripts/format_bench.py; then
+            TABLE=$(cat bench_table.txt)
             if [ -n "$TABLE" ]; then
-              echo "$TABLE"
+              {
+                echo "<!-- BENCHMARK_RESULTS_START -->"
+                echo "> 🤖 Auto-updated by CI on **${DATE}** — [View run](${RUN_URL})"
+                echo ""
+                echo "$TABLE"
+                echo ""
+                echo "<!-- BENCHMARK_RESULTS_END -->"
+              } > bench_block.txt
             else
-              echo "*No results parsed — check the [run artifacts](${RUN_URL}).*"
+              {
+                echo "<!-- BENCHMARK_RESULTS_START -->"
+                echo "> 🤖 Auto-updated by CI on **${DATE}** — [View run](${RUN_URL})"
+                echo ""
+                echo "*No results parsed — check the [run artifacts](${RUN_URL}).*"
+                echo ""
+                echo "<!-- BENCHMARK_RESULTS_END -->"
+              } > bench_block.txt
             fi
-            echo ""
-            echo "<!-- BENCHMARK_RESULTS_END -->"
-          } > bench_block.txt
+            FORMAT_OK=true
+          else
+            echo "⚠️  Python formatter failed (exit code $?), trying alternatives..." >&2
+          fi
+
+          if [ "$FORMAT_OK" != "true" ] && command -v opencode &>/dev/null; then
+            echo "Trying direct OpenCode formatting..." >&2
+            if FORMATTED=$(opencode run --prompt "Format the following benchmark results as a clean Markdown summary table with columns: Benchmark, Metric, Value. Output ONLY the markdown." < bench_output.txt 2>/dev/null); then
+              echo "✅ OpenCode direct formatting succeeded"
+              {
+                echo "<!-- BENCHMARK_RESULTS_START -->"
+                echo "> 🤖 Auto-formatted by OpenCode AI — **${DATE}** — [View run](${RUN_URL})"
+                echo ""
+                echo "$FORMATTED"
+                echo ""
+                echo "<!-- BENCHMARK_RESULTS_END -->"
+              } > bench_block.txt
+              FORMAT_OK=true
+            else
+              echo "⚠️  Direct OpenCode failed, falling back to Perl parser" >&2
+            fi
+          fi
+
+          if [ "$FORMAT_OK" != "true" ]; then
+            ROWS=$(perl -ne '
+              if (/^([a-zA-Z]\S+(?:\/\S+)?)\s*$/) {
+                $name = $1;
+              }
+              elsif (/^([a-zA-Z]\S+(?:\/\S+)?)\s+time:\s+\[([^\]]+)\]/) {
+                $name = $1;
+                my @vals = split(/\s+/, $2);
+                my $median = "$vals[2] $vals[3]";
+                $median =~ s/^\s+|\s+$//g;
+                print "| `$name` | $median |\n";
+                $name = "";
+              }
+              elsif ($name && /^\s+time:\s+\[([^\]]+)\]/) {
+                my @vals = split(/\s+/, $1);
+                my $median = "$vals[2] $vals[3]";
+                $median =~ s/^\s+|\s+$//g;
+                print "| `$name` | $median |\n";
+                $name = "";
+              }
+            ' bench_output.txt)
+
+            {
+              echo "<!-- BENCHMARK_RESULTS_START -->"
+              echo "> 🤖 Auto-updated by CI on **${DATE}** — [View run](${RUN_URL})"
+              echo ""
+              if [ -n "$ROWS" ]; then
+                echo "| Benchmark | Mediana |"
+                echo "|-----------|--------|"
+                echo "$ROWS"
+              else
+                echo "*Nenhum resultado parseado — verifique os [artefatos do run](${RUN_URL}).*"
+              fi
+              echo ""
+              echo "<!-- BENCHMARK_RESULTS_END -->"
+            } > bench_block.txt
+          fi
 
           perl -i -0pe '
             my $block = do { open my $f, "bench_block.txt" or die; local $/; <$f> };
@@ -111,7 +257,6 @@ jobs:
           ' README.md
 
       - name: Commit updated README
-        if: github.event_name != 'pull_request'
         run: |
           git config user.name "ElioNeto"
           git config user.email "netoo.elio@hotmail.com"
@@ -128,8 +273,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run clippy on benchmarks
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Format check
-        run: cargo fmt --all -- --check
+  report-status:
+    if: always()
+    needs: [benchmarks, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report job status
+        uses: ./.github/actions/ci-issue-manager
+        with:
+          workflow_name: "Benchmarks"
+          job_results: ${{ toJSON(needs) }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          server_url: ${{ github.server_url }}
+          run_id: ${{ github.run_id }}
+          ref_name: ${{ github.ref_name }}
+          sha: ${{ github.sha }}

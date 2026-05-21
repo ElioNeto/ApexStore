@@ -13,22 +13,16 @@ use thiserror::Error;
 ///   errors converted automatically via `#[from]`.
 /// - **Storage format** (`InvalidSstableFormat`, `CorruptedData`,
 ///   `DecompressionFailed`, `WalCorruption`) — structural problems in on-disk files.
-/// - **Engine semantics** (`KeyNotFound`, `CompactionFailed`, `LockPoisoned`,
+/// - **Engine semantics** (`NotFound`, `CompactionFailed`, `LockPoisoned`,
 ///   `ConcurrentModification`) — logical errors arising from engine operations.
 /// - **Configuration** (`Invalid*`, `ConfigValidation`) — parameter
 ///   validation failures raised at startup.
 ///
 /// # Variant history
 ///
-/// | Removed variant       | Reason |
-/// |-----------------------|--------|
-/// | `NotFound`            | Exact duplicate of `KeyNotFound` — same Display text, zero call sites |
-/// | `InvalidSstable`      | Context-free alias for `InvalidSstableFormat(String)` — zero call sites |
-/// | `SerializationFailed(String)` | Replaced by `JsonError(#[from] serde_json::Error)` |
-/// | `DeserializationFailed(String)` | Replaced by `JsonError(#[from] serde_json::Error)` |
-///
-/// `Serialization(#[from] bincode::Error)` was renamed to `Codec` to match
-/// the `infra::codec` module name.
+/// See [`CHANGELOG.md`](https://github.com/ElioNeto/ApexStore/blob/main/CHANGELOG.md)
+/// under `[Unreleased]` → `Removed` / `Changed` for the full history of removed
+/// variants and renames (issue #92).
 #[derive(Error, Debug)]
 pub enum LsmError {
     // -------------------------------------------------------------------------
@@ -66,14 +60,17 @@ pub enum LsmError {
     // -------------------------------------------------------------------------
     // Engine semantics
     // -------------------------------------------------------------------------
-    #[error("Key not found")]
-    KeyNotFound,
+    #[error("Key not found: {0}")]
+    NotFound(String),
 
     #[error("Compaction failed: {0}")]
     CompactionFailed(String),
 
     /// Raised when a `std::sync::Mutex` is poisoned (i.e. a thread panicked
     /// while holding the lock). Not applicable to `parking_lot` mutexes.
+    ///
+    /// **Note:** This variant is kept for backward compatibility but is no
+    /// longer used internally since the migration to `parking_lot::Mutex`.
     #[error("Lock poisoned: {0}")]
     LockPoisoned(&'static str),
 

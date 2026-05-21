@@ -1,22 +1,88 @@
 use crate::storage::cache::Cache;
+use lru::LruCache;
+use parking_lot::Mutex;
+use std::num::NonZeroUsize;
+use std::sync::Arc;
+
+/// Statistics returned by `VersionSet::stats()`.
+pub struct VersionStats {
+    pub num_tables: usize,
+    pub total_size: usize,
+    pub total_records: usize,
+    pub sst_kb: usize,
+    pub sst_files: usize,
+    pub sst_records: usize,
+    pub max_levels_reached: usize,
+    pub num_tables_at_max: usize,
+}
 
 pub struct VersionSet<C: Cache> {
     _cache: std::marker::PhantomData<C>,
+    /// Key-value cache for table lookups. Caches individual key-value results
+    /// so repeated reads for the same key bypass table iteration.
+    kv_cache: Arc<Mutex<LruCache<Vec<u8>, Vec<u8>>>>,
     tables: std::collections::HashMap<String, Vec<crate::core::table::Table>>,
 }
 
 impl<C: Cache> VersionSet<C> {
-    pub fn new(_options: crate::core::engine::EngineOptions, _cache: C) -> Self {
+    pub fn new(options: crate::core::engine::EngineOptions, _cache: C) -> Self {
+        // Derive KV cache capacity from block cache size (rough estimate: entry ~200 bytes)
+        let kv_capacity = (options.block_cache_size_mb * 1024 * 1024 / 200).max(1000);
+        let kv_capacity =
+            NonZeroUsize::new(kv_capacity).expect("kv_capacity >= 1000, NonZeroUsize is safe");
         Self {
             _cache: std::marker::PhantomData,
+            kv_cache: Arc::new(Mutex::new(LruCache::new(kv_capacity))),
             tables: std::collections::HashMap::new(),
         }
     }
 
+    /// Check if a key is cached.
+    pub fn get_cached(&self, key: &[u8]) -> Option<Vec<u8>> {
+        let mut cache = self.kv_cache.lock();
+        cache.get(key).cloned()
+    }
+
+    /// Store a key-value pair in the cache.
+    pub fn put_cached(&self, key: Vec<u8>, value: Vec<u8>) {
+        let mut cache = self.kv_cache.lock();
+        cache.put(key, value);
+    }
+
+    /// Clear the entire KV cache. Should be called after compaction or flush
+    /// to prevent stale results.
+    pub fn clear_cache(&self) {
+        self.kv_cache.lock().clear();
+    }
+
     pub fn get(&self, cf: &str, key: &[u8]) -> Option<Vec<u8>> {
+        // 1. Check KV cache first — avoids table iteration entirely for hot keys
+        if let Some(cached) = self.get_cached(key) {
+            return Some(cached);
+        }
+
         if let Some(cf_tables) = self.tables.get(cf) {
-            for table in cf_tables.iter().rev() {
+            'table_loop: for table in cf_tables.iter().rev() {
+                // Skip tables whose key range doesn't include the target key
+                if !table.min_key.is_empty()
+                    && !table.max_key.is_empty()
+                    && (key < table.min_key.as_slice() || key > table.max_key.as_slice())
+                {
+                    continue;
+                }
+
+                // Use cached bloom filter to avoid I/O
+                if let Some(ref bloom_filter) = table.bloom_filter {
+                    if !bloom_filter.check(key) {
+                        // Bloom filter says key definitely does not exist -> skip
+                        continue 'table_loop;
+                    }
+                    // Bloom says key might exist, fall through to BTreeMap lookup
+                }
+
                 if let Some(val) = table.data.get(key) {
+                    // 2. Populate cache after successful read
+                    self.put_cached(key.to_vec(), val.clone());
                     return Some(val.clone());
                 }
             }
@@ -53,6 +119,8 @@ impl<C: Cache> VersionSet<C> {
 
     pub fn add_table(&mut self, cf: &str, table: crate::core::table::Table) {
         self.tables.entry(cf.to_string()).or_default().push(table);
+        // New table means previously cached entries might have been superseded
+        self.clear_cache();
     }
 
     pub fn current_version(&self) -> crate::core::version::Version<C> {
@@ -70,6 +138,45 @@ impl<C: Cache> VersionSet<C> {
             .unwrap_or_default()
     }
 
+    /// Return table iterators whose [min_key, max_key] intersect the given range.
+    /// This avoids creating unnecessary iterators for tables that cannot
+    /// contain any key in the query range.
+    pub fn table_iters_in_range(
+        &self,
+        cf: &str,
+        lower: Option<&[u8]>,
+        upper: Option<&[u8]>,
+    ) -> Vec<crate::core::table::TableIterator<'_>> {
+        self.tables
+            .get(cf)
+            .map(|v| {
+                v.iter()
+                    .rev()
+                    .filter(|t| {
+                        // Skip tables that have no range metadata (treat as always included)
+                        if t.min_key.is_empty() || t.max_key.is_empty() {
+                            return true;
+                        }
+                        // Table's max_key is before the query lower bound → no intersection
+                        if let Some(lower) = lower {
+                            if t.max_key.as_slice() < lower {
+                                return false;
+                            }
+                        }
+                        // Table's min_key is at or after the query upper bound → no intersection
+                        if let Some(upper) = upper {
+                            if t.min_key.as_slice() >= upper {
+                                return false;
+                            }
+                        }
+                        true
+                    })
+                    .map(|t| t.iter())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn record_count(&self, cf: &str) -> usize {
         self.tables
             .get(cf)
@@ -77,7 +184,9 @@ impl<C: Cache> VersionSet<C> {
     }
 
     pub fn drain_tables(&mut self, cf: &str) -> Vec<crate::core::table::Table> {
-        self.tables.remove(cf).unwrap_or_default()
+        let result = self.tables.remove(cf).unwrap_or_default();
+        self.clear_cache();
+        result
     }
 
     pub fn remove_and_add_table(&mut self, cf: &str, new_table: crate::core::table::Table) {
@@ -85,5 +194,94 @@ impl<C: Cache> VersionSet<C> {
         let entry = self.tables.entry(cf.to_string()).or_default();
         entry.clear();
         entry.push(new_table);
+    }
+
+    /// Get all tables for a column family (without draining)
+    pub fn get_tables(&self, cf: &str) -> Vec<crate::core::table::Table> {
+        self.tables.get(cf).map_or_else(Vec::new, |v| v.clone())
+    }
+
+    /// Atomically replace specific tables with new ones.
+    ///
+    /// New tables are inserted at the position of the first (minimum-index) removed table,
+    /// preserving the invariant that tables in the Vec are ordered oldest-first.
+    /// This prevents stale-data reads when flushes add tables during three-phase
+    /// compaction's Phase 2 (I/O without core lock), because the compacted result
+    /// is placed BEFORE the flushed tables in the Vec. Since `get()` iterates in
+    /// reverse (`.rev()`), flushed tables (newer data) are checked first.
+    pub fn atomic_replace(
+        &mut self,
+        cf: &str,
+        indices: &[usize],
+        new_tables: Vec<crate::core::table::Table>,
+    ) {
+        if let Some(tables) = self.tables.get_mut(cf) {
+            if new_tables.is_empty() {
+                // Only removing — no insertion needed
+                let mut sorted_indices: Vec<usize> = indices.to_vec();
+                sorted_indices.sort_unstable_by(|a, b| b.cmp(a));
+                for &idx in &sorted_indices {
+                    if idx < tables.len() {
+                        tables.remove(idx);
+                    }
+                }
+                return;
+            }
+
+            // The insertion point: where the first (oldest) removed table was
+            let insert_at = indices.iter().min().copied().unwrap_or(0);
+
+            // Sort indices in descending order to remove from end without invalidating indices
+            let mut sorted_indices: Vec<usize> = indices.to_vec();
+            sorted_indices.sort_unstable_by(|a, b| b.cmp(a));
+
+            // Remove old tables
+            for &idx in &sorted_indices {
+                if idx < tables.len() {
+                    tables.remove(idx);
+                }
+            }
+
+            // Insert new tables at the position of the first removed table,
+            // rather than appending at the end. This ensures that tables added
+            // by flushes during Phase 2 (which are appended) remain AFTER the
+            // compacted result, so they are checked first by `get()`'s `.rev()`.
+            let insert_at = insert_at.min(tables.len());
+            let _ = tables.splice(insert_at..insert_at, new_tables);
+        }
+    }
+
+    /// Return statistics about the tables in a column family.
+    pub fn stats(&self, cf: &str) -> VersionStats {
+        let mut stats = VersionStats {
+            num_tables: 0,
+            total_size: 0,
+            total_records: 0,
+            sst_kb: 0,
+            sst_files: 0,
+            sst_records: 0,
+            max_levels_reached: 0,
+            num_tables_at_max: 0,
+        };
+
+        if let Some(cf_tables) = self.tables.get(cf) {
+            stats.num_tables = cf_tables.len();
+            stats.sst_files = cf_tables.len();
+            stats.sst_records = cf_tables.iter().map(|t| t.data.len()).sum();
+            stats.total_records = stats.sst_records;
+            // Estimate size: sum of key+value lengths across all tables
+            stats.total_size = cf_tables
+                .iter()
+                .map(|t| t.data.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>())
+                .sum();
+            stats.sst_kb = stats.total_size / 1024;
+        }
+
+        stats
+    }
+
+    /// Get list of all column families
+    pub fn column_families(&self) -> Vec<String> {
+        self.tables.keys().cloned().collect()
     }
 }

@@ -6,12 +6,16 @@
 
 ## Projeto
 
-> Nome do projeto, objetivo principal e contexto de negócio em 2-3 frases.
+**ApexStore** é um storage engine LSM-tree embarcado de alta performance em Rust, com formato SSTable V2, compressão LZ4 e Bloom Filters. Oferece API HTTP (actix-web), CLI e TUI (ratatui). Ideal para aplicações que precisam de key-value store embarcada com baixa latência e alta throughput.
 
 ## Stack
 
-> Liste as tecnologias principais: linguagem, framework, banco de dados, infra.
-> Exemplo: Node.js 20 + TypeScript, Fastify, PostgreSQL, Docker.
+- **Linguagem:** Rust 2021 edition
+- **Framework Web:** actix-web 4 (API REST)
+- **TUI:** ratatui + crossterm
+- **Formato de armazenamento:** SSTable V2 com LZ4, CRC32, Bloom Filters
+- **Infra:** GitHub Actions (CI/CD), Docker (opcional)
+- **Ferramentas:** cargo (build, test, clippy, fmt, doc, audit)
 
 <!-- AUTO-GENERATED:START -->
 ## Regras gerais
@@ -86,36 +90,59 @@ cargo audit
 
 ## Comandos úteis
 
-> Preencha com os comandos exatos do projeto. O agente usará estes comandos diretamente.
-
 ```bash
-# Instalar dependências
-npm install
+# Instalar dependências (scripts CI)
+cd scripts && npm install
 
-# Rodar testes
-npm test
+# Build (release)
+cargo build --release
 
-# Lint
-npm run lint
+# Testes
+cargo test --all-features --workspace
 
-# Build
-npm run build
+# Lint (clippy)
+cargo clippy --all-targets --all-features -- -D warnings
 
-# Dev
-npm run dev
+# Formatação
+cargo fmt --all -- --check
+
+# Documentação
+cargo doc --no-deps --all-features
+
+# Auditoria de segurança
+cargo audit
+
+# Pipeline CI local
+npx tsx scripts/workflow-agent.ts .github/workflows/ci.yml
+
+# Verificar TODOs
+npx tsx scripts/check-todos.ts .task-state.json
+
+# Benchmarks
+cargo bench
 ```
 
 ## Convenções
 
-> Preencha com as convenções do projeto.
-
 - **Commits**: Conventional Commits (`feat`, `fix`, `chore`, `docs`, `refactor`)
 - **Branches**: `feat/<slug>`, `fix/<slug>`, `chore/<slug>`
-- **Naming**: camelCase para variáveis/funções, PascalCase para classes/tipos
+- **Naming**: snake_case para variáveis/funções, PascalCase para tipos/structs/enums
 - **Testes**: arquivos `*.test.ts` ao lado do módulo testado
-- **Estrutura de pastas**: descreva aqui
+- **Estrutura de pastas**: 
+  - `src/` — código fonte (lib, bin, core, api, cli, tui)
+  - `benches/` — benchmarks criterion
+  - `tests/` — testes de integração
+  - `scripts/` — utilitários (CI, formatação)
+  - `.github/` — workflows e actions
 
 ## Contexto de domínio
 
-> Glossário de termos do negócio que o agente precisa entender para implementar corretamente.
-> Exemplo: "Pedido" = entidade central; "Fulfillment" = processo de separação e envio.
+- **LSM-Tree**: Estrutura de dados Log-Structured Merge-Tree. Escritas vão para um memtable (WAL + skiplist), flush em SSTables no nível L0, e compaction periódica mergeia níveis inferiores.
+- **SSTable V2**: Formato de arquivo sorted string table com header (magic, version), bloom filter, blocks de dados indexados, e trailer com metadados e CRC32.
+- **Memtable**: Buffer em memória (WAL + skiplist) que acumula escritas antes de flush para SSTable.
+- **Compaction**: Processo de merge de SSTables de níveis inferiores para manter a estrutura em árvore e limitar amplificação de leitura/escrita.
+- **Bloom Filter**: Filtro probabilístico que acelera buscas evitando ler SSTables que não contêm a chave.
+- **WAL (Write-Ahead Log)**: Log de escrita antecipada para garantir durabilidade e recovery.
+- **Block Cache**: Cache LRU de blocos de dados desserializados para acelerar leituras repetidas.
+- **MergeIterator**: Iterador que mergeia múltiplos iteradores ordenados (de diferentes SSTables/memtables) em um único stream ordenado.
+- **Column Family**: Namespace isolado de key-value dentro do banco (similar a "tabela").

@@ -1,0 +1,36 @@
+name: CI / Workflow Validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  validate-workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/actionlint-action@v1
+
+  report-status:
+    if: always()
+    needs: [validate-workflows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report job status
+        uses: ./.github/actions/ci-issue-manager
+        with:
+          workflow_name: "CI / Workflow Validation"
+          job_results: ${{ toJSON(needs) }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          server_url: ${{ github.server_url }}
+          run_id: ${{ github.run_id }}
+          ref_name: ${{ github.ref_name }}
+          sha: ${{ github.sha }}

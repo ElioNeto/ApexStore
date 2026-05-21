@@ -4,6 +4,7 @@ use crate::infra::config::StorageConfig;
 use crate::infra::error::{LsmError, Result};
 use crate::storage::block::Block;
 use bloomfilter::Bloom;
+use crc32fast::Hasher as Crc32Hasher;
 use lz4_flex::compress_prepend_size;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -103,19 +104,24 @@ impl SstableBuilder {
         let uncompressed_size = encoded.len() as u32;
 
         let compressed = compress_prepend_size(&encoded);
-        let compressed_size = compressed.len() as u32;
+
+        // Calculate CRC32 of the compressed data
+        let mut hasher = Crc32Hasher::new();
+        hasher.update(&compressed);
+        let crc32 = hasher.finalize();
 
         self.writer.write_all(&compressed)?;
+        self.writer.write_all(&crc32.to_le_bytes())?;
 
         let block_meta = BlockMeta {
             first_key,
             offset: self.current_offset,
-            size: compressed_size,
+            size: (compressed.len() as u32) + 4, // includes CRC32 bytes
             uncompressed_size,
         };
 
         self.block_metas.push(block_meta);
-        self.current_offset += compressed_size as u64;
+        self.current_offset += (compressed.len() as u64) + 4;
 
         self.current_block = Block::from_config(&self.config);
 
@@ -155,8 +161,16 @@ impl SstableBuilder {
         let meta_block = MetaBlock {
             blocks: self.block_metas,
             bloom_filter_data: bloom_bytes,
-            min_key: self.first_key.unwrap(),
-            max_key: self.last_key.unwrap(),
+            min_key: self.first_key.ok_or_else(|| {
+                LsmError::InvalidSstableFormat(
+                    "No records in SSTable, cannot determine min key".to_string(),
+                )
+            })?,
+            max_key: self.last_key.ok_or_else(|| {
+                LsmError::InvalidSstableFormat(
+                    "No records in SSTable, cannot determine max key".to_string(),
+                )
+            })?,
             record_count: self.record_count,
             timestamp: self.timestamp,
         };
@@ -195,8 +209,8 @@ impl SstableBuilder {
 mod tests {
     use super::*;
 
-    fn create_test_record(key: &str, value: &[u8]) -> LogRecord {
-        LogRecord::new(key.to_string(), value.to_vec())
+    fn create_test_record(key: &[u8], value: &[u8]) -> LogRecord {
+        LogRecord::new(key.to_vec(), value.to_vec())
     }
 
     #[test]
@@ -208,13 +222,13 @@ mod tests {
         let mut builder = SstableBuilder::new(path.clone(), config, 123).unwrap();
 
         builder
-            .add(b"key1", &create_test_record("key1", b"value1"))
+            .add(b"key1", &create_test_record(b"key1", b"value1"))
             .unwrap();
         builder
-            .add(b"key2", &create_test_record("key2", b"value2"))
+            .add(b"key2", &create_test_record(b"key2", b"value2"))
             .unwrap();
         builder
-            .add(b"key3", &create_test_record("key3", b"value3"))
+            .add(b"key3", &create_test_record(b"key3", b"value3"))
             .unwrap();
 
         let result_path = builder.finish().unwrap();
@@ -237,7 +251,7 @@ mod tests {
             let key = format!("key_{:03}", i);
             let value = vec![b'x'; 20];
             builder
-                .add(key.as_bytes(), &create_test_record(&key, &value))
+                .add(key.as_bytes(), &create_test_record(key.as_bytes(), &value))
                 .unwrap();
         }
 
@@ -267,7 +281,10 @@ mod tests {
 
         let large_value = vec![b'x'; 1000];
         builder
-            .add(b"large_key", &create_test_record("large_key", &large_value))
+            .add(
+                b"large_key",
+                &create_test_record(b"large_key", &large_value),
+            )
             .unwrap();
 
         let result = builder.finish();

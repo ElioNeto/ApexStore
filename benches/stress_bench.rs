@@ -7,9 +7,9 @@ fn configure_criterion() -> Criterion {
     let mut c = Criterion::default();
     if std::env::var("CI").is_ok() {
         c = c
-            .sample_size(10)
-            .warm_up_time(std::time::Duration::from_secs(1))
-            .measurement_time(std::time::Duration::from_secs(3));
+            .sample_size(5)
+            .warm_up_time(std::time::Duration::from_millis(500))
+            .measurement_time(std::time::Duration::from_secs(1));
     }
     c
 }
@@ -50,13 +50,14 @@ fn bench_large_dataset_1m(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::from_parameter("1m_keys"), &(), |b, &_| {
         let (temp_dir, data_dir) = setup_temp_dir("large_1m");
-        let mut engine = apexstore::LsmEngine::new(
-            LsmConfig::builder()
+        let mut engine = apexstore::LsmEngine::new_from_config(
+            &LsmConfig::builder()
                 .dir_path(data_dir.clone())
                 .memtable_max_size(16 * 1024 * 1024)
                 .block_cache_size_mb(512)
                 .build()
                 .unwrap(),
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
         .unwrap();
 
@@ -90,7 +91,7 @@ fn bench_concurrent_access(c: &mut Criterion) {
     use std::sync::{Arc, Mutex};
 
     let thread_count: Vec<usize> = if std::env::var("CI").is_ok() {
-        vec![1, 2]
+        vec![1]
     } else {
         vec![1, 2, 4]
     };
@@ -99,13 +100,14 @@ fn bench_concurrent_access(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(threads), &threads, |b, _t| {
             let (temp_dir, data_dir) = setup_temp_dir("concurrent");
-            let mut engine = apexstore::LsmEngine::new(
-                LsmConfig::builder()
+            let mut engine = apexstore::LsmEngine::new_from_config(
+                &LsmConfig::builder()
                     .dir_path(data_dir.clone())
                     .memtable_max_size(16 * 1024 * 1024)
                     .block_cache_size_mb(256)
                     .build()
                     .unwrap(),
+                apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
             )
             .unwrap();
 
@@ -149,6 +151,11 @@ fn bench_concurrent_access(c: &mut Criterion) {
 
 /// Benchmark with memory pressure (small memtable)
 fn bench_memory_pressure(c: &mut Criterion) {
+    let num_keys = if std::env::var("CI").is_ok() {
+        10_000usize
+    } else {
+        100_000usize
+    };
     let mut group = c.benchmark_group("memory_pressure");
 
     group.bench_with_input(
@@ -156,22 +163,29 @@ fn bench_memory_pressure(c: &mut Criterion) {
         &(),
         |b, &_| {
             let (temp_dir, data_dir) = setup_temp_dir("memory_pressure");
-            let mut engine = apexstore::LsmEngine::new(
-                LsmConfig::builder()
+            let mut engine = apexstore::LsmEngine::new_from_config(
+                &LsmConfig::builder()
                     .dir_path(data_dir.clone())
                     .memtable_max_size(2 * 1024 * 1024)
                     .build()
                     .unwrap(),
+                apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
             )
             .unwrap();
 
-            for i in 0..100_000 {
+            for i in 0..num_keys {
                 let key = generate_key(i, 10);
                 let value = generate_value(i, 100);
                 engine.set(key, value).unwrap();
             }
 
-            let benchmark_keys: Vec<String> = (0..10_000).map(|i| generate_key(i, 10)).collect();
+            let read_keys_count = if std::env::var("CI").is_ok() {
+                1_000
+            } else {
+                10_000
+            };
+            let benchmark_keys: Vec<String> =
+                (0..read_keys_count).map(|i| generate_key(i, 10)).collect();
 
             b.iter(|| {
                 for key in benchmark_keys.iter() {
@@ -190,7 +204,7 @@ fn bench_memory_pressure(c: &mut Criterion) {
 /// Benchmark with many SSTables (thousands of layers)
 fn bench_many_sstables(c: &mut Criterion) {
     let sstable_counts: Vec<usize> = if std::env::var("CI").is_ok() {
-        vec![10, 50]
+        vec![10]
     } else {
         vec![10, 50, 100]
     };
@@ -202,12 +216,13 @@ fn bench_many_sstables(c: &mut Criterion) {
             &(),
             |b, &_sc| {
                 let (temp_dir, data_dir) = setup_temp_dir(&format!("many_sst_{}", sstable_count));
-                let mut engine = apexstore::LsmEngine::new(
-                    LsmConfig::builder()
+                let mut engine = apexstore::LsmEngine::new_from_config(
+                    &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(512 * 1024)
                         .build()
                         .unwrap(),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -242,7 +257,7 @@ fn bench_many_sstables(c: &mut Criterion) {
 /// Benchmark cache thrashing scenario
 fn bench_cache_thrashing(c: &mut Criterion) {
     let cache_sizes: Vec<usize> = if std::env::var("CI").is_ok() {
-        vec![16, 64]
+        vec![64]
     } else {
         vec![16, 64, 128]
     };
@@ -252,17 +267,22 @@ fn bench_cache_thrashing(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(cache_mb), &(), |b, &_cm| {
             let (temp_dir, data_dir) =
                 setup_temp_dir(format!("cache_thrash_{}", cache_mb).as_str());
-            let mut engine = apexstore::LsmEngine::new(
-                LsmConfig::builder()
+            let mut engine = apexstore::LsmEngine::new_from_config(
+                &LsmConfig::builder()
                     .dir_path(data_dir.clone())
                     .memtable_max_size(16 * 1024 * 1024)
                     .block_cache_size_mb(cache_mb)
                     .build()
                     .unwrap(),
+                apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
             )
             .unwrap();
 
-            let total_keys = 100_000;
+            let total_keys = if std::env::var("CI").is_ok() {
+                10_000
+            } else {
+                100_000
+            };
             for i in 0..total_keys {
                 let key = generate_key(i, 10);
                 let value = generate_value(i, 100);
@@ -292,13 +312,14 @@ fn bench_key_updates(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::from_parameter("10k_keys"), &(), |b, &_| {
         let (temp_dir, data_dir) = setup_temp_dir("key_updates");
-        let mut engine = apexstore::LsmEngine::new(
-            LsmConfig::builder()
+        let mut engine = apexstore::LsmEngine::new_from_config(
+            &LsmConfig::builder()
                 .dir_path(data_dir.clone())
                 .memtable_max_size(64 * 1024 * 1024)
                 .block_cache_size_mb(256)
                 .build()
                 .unwrap(),
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
         .unwrap();
 
@@ -329,13 +350,14 @@ fn bench_delete_operations(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::from_parameter("10k_keys"), &(), |b, &_| {
         let (temp_dir, data_dir) = setup_temp_dir("delete_ops");
-        let mut engine = apexstore::LsmEngine::new(
-            LsmConfig::builder()
+        let mut engine = apexstore::LsmEngine::new_from_config(
+            &LsmConfig::builder()
                 .dir_path(data_dir.clone())
                 .memtable_max_size(64 * 1024 * 1024)
                 .block_cache_size_mb(256)
                 .build()
                 .unwrap(),
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
         .unwrap();
 

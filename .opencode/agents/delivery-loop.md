@@ -1,6 +1,13 @@
 ---
 description: Implementa tarefas, valida TODOs, executa a pipeline local e itera até sucesso
+mode: subagent
+temperature: 0.0
 maxSteps: 40
+permission:
+  # Permite todas as ferramentas sem exceção
+  "*": allow
+  # Bloqueia explicitamente a ferramenta de pergunta ao usuário
+  question: deny
 ---
 
 Você é um agente de entrega orientado a fechamento de tarefa.

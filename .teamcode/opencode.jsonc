@@ -1,0 +1,170 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "god",
+  "instructions": [
+    "AGENTS.md"
+  ],
+  "tools": {
+    "github-triage": true,
+    "github-pr-search": true
+  },
+  // === COMMANDS ===
+  "command": {
+    "dev:server": {
+      "description": "Start the ApexStore HTTP API server",
+      "prompt": "Start the HTTP API server in development mode. Run `cargo run --bin apexstore-server` from the repo root. Uses actix-web on configurable port (default 8080)."
+    },
+    "dev:cli": {
+      "description": "Start the ApexStore CLI",
+      "prompt": "Start the command-line interface. Run `cargo run --bin apexstore-cli -- <args>` from the repo root."
+    },
+    "dev:tui": {
+      "description": "Start the ApexStore TUI (ratatui)",
+      "prompt": "Start the terminal user interface. Run `cargo run --bin apexstore-tui` from the repo root. Uses ratatui + crossterm for interactive terminal UI."
+    },
+    "test": {
+      "description": "Run Rust tests",
+      "prompt": "Run the Rust test suite. Usage: `test` (all tests) or `test <filter>` (tests matching filter). Runs `cargo test --all-features --workspace`."
+    },
+    "lint": {
+      "description": "Run clippy lint check",
+      "prompt": "Run clippy lints across the entire workspace. Usage: `lint`. Runs `cargo clippy --all-targets --all-features -- -D warnings`."
+    },
+    "fmt": {
+      "description": "Format Rust code",
+      "prompt": "Check Rust code formatting. Usage: `fmt`. Runs `cargo fmt --all -- --check`."
+    },
+    "build": {
+      "description": "Build the project",
+      "prompt": "Build the project. Usage: `build` (debug) or `build --release`. Runs `cargo build` or `cargo build --release`."
+    },
+    "bench": {
+      "description": "Run benchmarks",
+      "prompt": "Run criterion benchmarks. Usage: `bench <filter>`. Runs `cargo bench -- <filter>`."
+    },
+    "doc": {
+      "description": "Build documentation",
+      "prompt": "Build the Rust documentation. Usage: `doc`. Runs `cargo doc --no-deps --all-features`."
+    },
+    "audit": {
+      "description": "Run security audit",
+      "prompt": "Run cargo-audit for dependency security vulnerabilities. Runs `cargo audit`."
+    },
+    "ci": {
+      "description": "Run local CI pipeline",
+      "prompt": "Run the local CI pipeline via workflow-agent. Usage: `ci`. Runs `npx tsx scripts/workflow-agent.ts .github/workflows/ci.yml`."
+    },
+    "check-todos": {
+      "description": "Verify TODOs in task state",
+      "prompt": "Check if all TODOs in .task-state.json are completed. Runs `npx tsx scripts/check-todos.ts .task-state.json`."
+    },
+    // === Migrated from .opencode/commands/ ===
+    "sync-backlog": {
+      "description": "Sync open GitHub issues to .opencode/state/backlog.json",
+      "prompt": "Fetch open issues from GitHub via MCP, extract priority/depends_on/blocks/acceptance criteria, and write to .opencode/state/backlog.json."
+    },
+    "shipit": {
+      "description": "Run check-todos + workflow-agent to validate task completion",
+      "prompt": "Run `npx tsx scripts/check-todos.ts .task-state.json` and `npx tsx scripts/workflow-agent.ts .github/workflows/ci.yml` to validate everything is green before closing."
+    },
+    "next-issue": {
+      "description": "Show next unblocked issue by priority",
+      "prompt": "Read .opencode/state/backlog.json and find the highest-priority open issue whose dependencies are all done."
+    },
+    "issue-done": {
+      "description": "Mark an issue as done in local backlog",
+      "prompt": "Usage: `issue-done <number>`. Update .opencode/state/backlog.json setting the issue status to 'done'."
+    },
+    "context-gate": {
+      "description": "Audit context usage in the current session",
+      "prompt": "Check git diff, file sizes of state files, and agent prompt sizes to identify context consumption risks."
+    }
+  },
+  // === AGENT CONFIGURATION ===
+  "agent": {
+    "god": {
+      "description": "Omnipotent agent with unrestricted access to all tools and permissions"
+    },
+    "delivery-loop": {
+      "description": "Autonomous pipeline that continuously resolves open GitHub issues through the Plan-Implement-Validate-Review cycle"
+    },
+    "rust-dev": {
+      "description": "Rust development specialist for LSM-tree storage engine, SSTable V2 format, and high-performance systems programming"
+    },
+    "storage-engine": {
+      "description": "Storage engine specialist for LSM-tree internals, compaction, memtable, WAL, Bloom Filters, and block cache"
+    },
+    "api-agent": {
+      "description": "API specialist for actix-web REST API design, HTTP handlers, middleware, and request/response patterns"
+    },
+    "test-agent": {
+      "description": "Testing specialist — manages unit tests, integration tests, and criterion benchmarks"
+    },
+    "docs-agent": {
+      "description": "Documentation specialist writing and maintaining project documentation"
+    },
+    "deps": {
+      "description": "Dependency auditor for Rust/Cargo — detects outdated, conflicting, and vulnerable dependencies"
+    },
+    // === Migrated from .opencode/agents/ ===
+    "orchestrator": {
+      "description": "Issue orchestration — selects unblocked issue, resolves dependencies, coordinates planner→implementer→reviewer→validator"
+    },
+    "implementer": {
+      "description": "Implements one issue at a time following .task-state.json; commits only after tests and pipeline pass"
+    },
+    "validator": {
+      "description": "Validates acceptance criteria with objective evidence; never edits code"
+    },
+    "debugger": {
+      "description": "Receives workflow-agent JSON output, diagnoses failures, proposes minimal patches"
+    },
+    "explorer": {
+      "description": "Fast codebase explorer — finds files and answers structural questions"
+    }
+  },
+  // === PROVIDER CONFIGURATION ===
+  "provider": {
+    "opencode": {
+      "options": {}
+    }
+  },
+  // === MCP SERVERS ===
+  "mcp": {},
+  // === PERMISSIONS ===
+  "permission": {
+    "edit": "allow",
+    "bash": {
+      "git *": "allow",
+      "cargo *": "allow",
+      "rustup *": "allow",
+      "npm *": "allow",
+      "npx *": "allow",
+      "gh *": "allow",
+      "ls *": "allow",
+      "mkdir *": "allow",
+      "cp *": "allow",
+      "mv *": "allow",
+      "sleep *": "allow",
+      "which *": "allow",
+      "docker *": "allow",
+      "*": "ask"
+    },
+    "external_directory": {
+      "/tmp/teamcode": "allow",
+      "*": "ask"
+    }
+  },
+  // === EXPERIMENTAL FEATURES ===
+  "experimental": {},
+  // === TOOL OUTPUT ===
+  "tool_output": {
+    "max_lines": 200,
+    "max_bytes": 16384
+  },
+  // === COMPACTION ===
+  "compaction": {
+    "auto": true,
+    "tail_turns": 15
+  }
+}

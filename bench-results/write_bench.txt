@@ -1,0 +1,115 @@
+    Finished `bench` profile [optimized] target(s) in 0.66s
+     Running benches/write_bench.rs (target/release/deps/write_bench-3ae7e31f702ac6c5)
+Gnuplot not found, using plotters backend
+Benchmarking write_single/10
+Benchmarking write_single/10: Warming up for 1.0000 s
+Benchmarking write_single/10: Collecting 10 samples in estimated 3.0428 s (3685 iterations)
+Benchmarking write_single/10: Analyzing
+write_single/10         time:   [873.49 µs 936.86 µs 1.0402 ms]
+                        thrpt:  [9.3886 KiB/s 10.424 KiB/s 11.180 KiB/s]
+                 change:
+                        time:   [-59.152% -46.984% -33.479%] (p = 0.00 < 0.05)
+                        thrpt:  [+50.329% +88.624% +144.81%]
+                        Performance has improved.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking write_single/100
+Benchmarking write_single/100: Warming up for 1.0000 s
+Benchmarking write_single/100: Collecting 10 samples in estimated 3.0003 s (3300 iterations)
+Benchmarking write_single/100: Analyzing
+write_single/100        time:   [893.78 µs 907.03 µs 917.87 µs]
+                        thrpt:  [106.39 KiB/s 107.67 KiB/s 109.26 KiB/s]
+                 change:
+                        time:   [-82.649% -76.449% -64.066%] (p = 0.00 < 0.05)
+                        thrpt:  [+178.29% +324.61% +476.34%]
+                        Performance has improved.
+Benchmarking write_single/1024
+Benchmarking write_single/1024: Warming up for 1.0000 s
+Benchmarking write_single/1024: Collecting 10 samples in estimated 3.0398 s (3355 iterations)
+Benchmarking write_single/1024: Analyzing
+write_single/1024       time:   [827.56 µs 841.65 µs 865.93 µs]
+                        thrpt:  [1.1278 MiB/s 1.1603 MiB/s 1.1801 MiB/s]
+                 change:
+                        time:   [-47.441% -45.777% -44.098%] (p = 0.00 < 0.05)
+                        thrpt:  [+78.885% +84.425% +90.262%]
+                        Performance has improved.
+Benchmarking write_single/10240
+Benchmarking write_single/10240: Warming up for 1.0000 s
+Benchmarking write_single/10240: Collecting 10 samples in estimated 3.0191 s (3300 iterations)
+Benchmarking write_single/10240: Analyzing
+write_single/10240      time:   [908.43 µs 926.24 µs 945.75 µs]
+                        thrpt:  [10.326 MiB/s 10.543 MiB/s 10.750 MiB/s]
+                 change:
+                        time:   [-41.045% -39.390% -37.382%] (p = 0.00 < 0.05)
+                        thrpt:  [+59.700% +64.990% +69.620%]
+                        Performance has improved.
+
+Benchmarking write_batch_1000/1000
+Benchmarking write_batch_1000/1000: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 3.0s. You may wish to increase target time to 9.3s.
+Benchmarking write_batch_1000/1000: Collecting 10 samples in estimated 9.2703 s (10 iterations)
+Benchmarking write_batch_1000/1000: Analyzing
+write_batch_1000/1000   time:   [877.47 ms 887.24 ms 900.47 ms]
+                        thrpt:  [119.30 KiB/s 121.07 KiB/s 122.42 KiB/s]
+                 change:
+                        time:   [-63.924% -53.238% -38.444%] (p = 0.00 < 0.05)
+                        thrpt:  [+62.455% +113.85% +177.19%]
+                        Performance has improved.
+Found 2 outliers among 10 measurements (20.00%)
+  1 (10.00%) high mild
+  1 (10.00%) high severe
+
+Benchmarking write_batch_10000/10000
+Benchmarking write_batch_10000/10000: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 3.0s. You may wish to increase target time to 82.5s.
+Benchmarking write_batch_10000/10000: Collecting 10 samples in estimated 82.487 s (10 iterations)
+Benchmarking write_batch_10000/10000: Analyzing
+write_batch_10000/10000 time:   [8.5079 s 8.7016 s 8.9039 s]
+                        thrpt:  [120.65 KiB/s 123.45 KiB/s 126.26 KiB/s]
+                 change:
+                        time:   [-54.555% -50.330% -45.729%] (p = 0.00 < 0.05)
+                        thrpt:  [+84.260% +101.33% +120.05%]
+                        Performance has improved.
+
+Benchmarking write_batch_100000/100000
+Benchmarking write_batch_100000/100000: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 3.0s. You may wish to increase target time to 896.9s.
+Benchmarking write_batch_100000/100000: Collecting 10 samples in estimated 896.94 s (10 iterations)
+Benchmarking write_batch_100000/100000: Analyzing
+write_batch_100000/100000
+                        time:   [88.553 s 89.763 s 91.000 s]
+                        thrpt:  [118.05 KiB/s 119.67 KiB/s 121.31 KiB/s]
+                 change:
+                        time:   [+57378% +58684% +60076%] (p = 0.00 < 0.05)
+                        thrpt:  [-99.834% -99.830% -99.826%]
+                        Performance has regressed.
+
+Benchmarking memtable_flush_8/8
+Benchmarking memtable_flush_8/8: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 3.0s. You may wish to increase target time to 376.9s.
+Benchmarking memtable_flush_8/8: Collecting 10 samples in estimated 376.89 s (10 iterations)
+Benchmarking memtable_flush_8/8: Analyzing
+memtable_flush_8/8      time:   [33.272 s 33.804 s 34.418 s]
+                        thrpt:  [238.01 KiB/s 242.34 KiB/s 246.21 KiB/s]
+                 change:
+                        time:   [+55160% +61035% +71217%] (p = 0.00 < 0.05)
+                        thrpt:  [-99.860% -99.836% -99.819%]
+                        Performance has regressed.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking sstable_flush/100000
+Benchmarking sstable_flush/100000: Warming up for 1.0000 s
+Flush time: 0.017s for ~10MB
+Throughput: 575.62 MB/s
+
+Warning: Unable to complete 10 samples in 3.0s. You may wish to increase target time to 919.7s.
+Benchmarking sstable_flush/100000: Collecting 10 samples in estimated 919.73 s (10 iterations)
+Flush time: 0.018s for ~10MB
+Throughput: 568.90 MB/s
+Flush time: 0.014s for ~10MB
+Throughput: 726.59 MB/s

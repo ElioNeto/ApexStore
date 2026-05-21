@@ -1,0 +1,34 @@
+{
+  "issues": [
+    {
+      "number": 131,
+      "priority": "low",
+      "title": "[CI-FAILURE] CI / PR Validation: clippy failed",
+      "status": "completed",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "Root cause of clippy CI failure identified and documented",
+        "All clippy warnings/errors fixed with minimal changes",
+        "cargo clippy --all-targets --all-features -- -D warnings passes cleanly",
+        "cargo test --all-features --workspace still passes"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 130,
+      "priority": "low",
+      "title": "[CI-FAILURE] Benchmarks: benchmarks failed",
+      "status": "completed",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "Root cause of benchmarks CI failure identified and documented",
+        "Root cause fixed with minimal code/config change",
+        "cargo build --benches --release compiles without errors",
+        "cargo bench -- --noplot passes locally with CI=true"
+      ],
+      "fetched_body": true
+    }
+  ]
+}

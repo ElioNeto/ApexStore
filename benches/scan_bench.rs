@@ -7,9 +7,9 @@ fn configure_criterion() -> Criterion {
     let mut c = Criterion::default();
     if std::env::var("CI").is_ok() {
         c = c
-            .sample_size(10)
-            .warm_up_time(std::time::Duration::from_secs(1))
-            .measurement_time(std::time::Duration::from_secs(3));
+            .sample_size(5)
+            .warm_up_time(std::time::Duration::from_millis(500))
+            .measurement_time(std::time::Duration::from_secs(1));
     }
     c
 }
@@ -56,12 +56,13 @@ fn bench_full_scan(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("full_scan");
-                let mut engine = apexstore::LsmEngine::new(
-                    LsmConfig::builder()
+                let mut engine = apexstore::LsmEngine::new_from_config(
+                    &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(nk * 220)
                         .build()
                         .unwrap(),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -73,7 +74,7 @@ fn bench_full_scan(c: &mut Criterion) {
                 }
 
                 b.iter(|| {
-                    let results = engine.scan_cf("default", None, None, None).unwrap();
+                    let results = engine.scan_cf("default", None, None, Some(nk)).unwrap();
                     assert_eq!(results.len(), nk);
                 });
 
@@ -88,9 +89,9 @@ fn bench_full_scan(c: &mut Criterion) {
 
 fn bench_range_scan(c: &mut Criterion) {
     let is_ci = std::env::var("CI").is_ok();
-    let total_keys = if is_ci { 100_000usize } else { 1_000_000usize };
+    let total_keys = if is_ci { 10_000usize } else { 1_000_000usize };
     let scan_sizes: Vec<usize> = if is_ci {
-        vec![100, 1_000]
+        vec![100]
     } else {
         vec![100, 1_000, 10_000, 100_000]
     };
@@ -103,12 +104,13 @@ fn bench_range_scan(c: &mut Criterion) {
             &scan_size,
             |b, &_ss| {
                 let (temp_dir, data_dir) = setup_temp_dir("range_scan");
-                let mut engine = apexstore::LsmEngine::new(
-                    LsmConfig::builder()
+                let mut engine = apexstore::LsmEngine::new_from_config(
+                    &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(total_keys * 110 / 2)
                         .build()
                         .unwrap(),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -127,13 +129,14 @@ fn bench_range_scan(c: &mut Criterion) {
 
                 b.iter(|| {
                     let results = engine
-                        .scan_range(
-                            Some(start_key.as_str()),
-                            Some(end_key.as_str()),
-                            scan_size + 1000,
+                        .scan_cf(
+                            "default",
+                            Some(start_key.as_bytes()),
+                            Some(end_key.as_bytes()),
+                            Some(scan_size + 1000),
                         )
                         .unwrap();
-                    assert!(results.0.len() >= scan_size / 2);
+                    assert!(results.len() >= scan_size / 2);
                 });
 
                 drop(engine);
@@ -162,12 +165,13 @@ fn bench_prefix_scan(c: &mut Criterion) {
             &prefix_size,
             |b, &_ps| {
                 let (temp_dir, data_dir) = setup_temp_dir("prefix_scan");
-                let mut engine = apexstore::LsmEngine::new(
-                    LsmConfig::builder()
+                let mut engine = apexstore::LsmEngine::new_from_config(
+                    &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(total_keys * 110 / 2)
                         .build()
                         .unwrap(),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -210,12 +214,13 @@ fn bench_iteration_sorted(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("iteration_sorted");
-                let mut engine = apexstore::LsmEngine::new(
-                    LsmConfig::builder()
+                let mut engine = apexstore::LsmEngine::new_from_config(
+                    &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(nk * 220)
                         .build()
                         .unwrap(),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -227,7 +232,7 @@ fn bench_iteration_sorted(c: &mut Criterion) {
                 }
 
                 b.iter(|| {
-                    let results = engine.scan_cf("default", None, None, None).unwrap();
+                    let results = engine.scan_cf("default", None, None, Some(nk)).unwrap();
                     for i in 1..results.len() {
                         assert!(results[i - 1].0 <= results[i].0);
                     }
@@ -245,9 +250,9 @@ fn bench_iteration_sorted(c: &mut Criterion) {
 
 fn bench_scan_with_limit(c: &mut Criterion) {
     let is_ci = std::env::var("CI").is_ok();
-    let total_keys = if is_ci { 100_000usize } else { 1_000_000usize };
+    let total_keys = if is_ci { 10_000usize } else { 1_000_000usize };
     let limits: Vec<usize> = if is_ci {
-        vec![10, 100, 1_000]
+        vec![10, 100]
     } else {
         vec![10, 100, 1_000, 10_000]
     };
@@ -257,12 +262,13 @@ fn bench_scan_with_limit(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(limit), &limit, |b, &_l| {
             let (temp_dir, data_dir) = setup_temp_dir("scan_limit");
-            let mut engine = apexstore::LsmEngine::new(
-                LsmConfig::builder()
+            let mut engine = apexstore::LsmEngine::new_from_config(
+                &LsmConfig::builder()
                     .dir_path(data_dir.clone())
                     .memtable_max_size(total_keys * 110 / 2)
                     .build()
                     .unwrap(),
+                apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
             )
             .unwrap();
 
@@ -274,8 +280,8 @@ fn bench_scan_with_limit(c: &mut Criterion) {
             }
 
             b.iter(|| {
-                let results = engine.scan_range(None, None, limit).unwrap();
-                assert!(results.0.len() <= limit);
+                let results = engine.scan_cf("default", None, None, Some(limit)).unwrap();
+                assert!(results.len() <= limit);
             });
 
             drop(engine);
@@ -304,12 +310,13 @@ fn bench_scan_pagination(c: &mut Criterion) {
             |b, &_np| {
                 let page_size = 100usize;
                 let (temp_dir, data_dir) = setup_temp_dir("scan_pagination");
-                let mut engine = apexstore::LsmEngine::new(
-                    LsmConfig::builder()
+                let mut engine = apexstore::LsmEngine::new_from_config(
+                    &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(total_keys * 110 / 2)
                         .build()
                         .unwrap(),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -325,14 +332,17 @@ fn bench_scan_pagination(c: &mut Criterion) {
                     let mut cursor: Option<String> = None;
                     let mut fetched = 0usize;
                     while fetched < num_pages * page_size && fetched <= total_keys {
+                        let start_key = cursor.as_ref().map(|c| c.as_bytes());
                         let results = engine
-                            .scan_range(cursor.as_deref(), None, page_size)
+                            .scan_cf("default", start_key, None, Some(page_size))
                             .unwrap();
-                        if results.0.is_empty() {
+                        if results.is_empty() {
                             break;
                         }
-                        fetched += results.0.len();
-                        cursor = results.1;
+                        fetched += results.len();
+                        cursor = results
+                            .last()
+                            .map(|(k, _)| String::from_utf8(k.clone()).unwrap());
                         if fetched >= num_pages * page_size {
                             break;
                         }
@@ -350,7 +360,7 @@ fn bench_scan_pagination(c: &mut Criterion) {
 
 fn bench_sstable_layer_scan(c: &mut Criterion) {
     let layer_counts: Vec<usize> = if std::env::var("CI").is_ok() {
-        vec![1, 3, 10]
+        vec![1]
     } else {
         vec![1, 3, 10, 30]
     };
@@ -363,12 +373,13 @@ fn bench_sstable_layer_scan(c: &mut Criterion) {
             |b, &_lc| {
                 let keys_per_layer = 10_000usize;
                 let (temp_dir, data_dir) = setup_temp_dir("sstable_layer");
-                let mut engine = apexstore::LsmEngine::new(
-                    LsmConfig::builder()
+                let mut engine = apexstore::LsmEngine::new_from_config(
+                    &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(1024 * 1024)
                         .build()
                         .unwrap(),
+                    apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
                 )
                 .unwrap();
 
@@ -382,7 +393,9 @@ fn bench_sstable_layer_scan(c: &mut Criterion) {
                 }
 
                 b.iter(|| {
-                    let results = engine.scan_cf("default", None, None, None).unwrap();
+                    let results = engine
+                        .scan_cf("default", None, None, Some(keys_per_layer * layer_count))
+                        .unwrap();
                     assert!(results.len() >= keys_per_layer);
                 });
 

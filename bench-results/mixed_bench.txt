@@ -1,0 +1,48 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on artifact directory
+    Finished `bench` profile [optimized] target(s) in 1.99s
+     Running benches/mixed_bench.rs (target/release/deps/mixed_bench-8ba7e2b9ec9206b0)
+Gnuplot not found, using plotters backend
+Benchmarking ycsb_type_a/10000
+Benchmarking ycsb_type_a/10000: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 3.0s. You may wish to increase target time to 7.9s.
+Benchmarking ycsb_type_a/10000: Collecting 10 samples in estimated 7.9158 s (10 iterations)
+Benchmarking ycsb_type_a/10000: Analyzing
+ycsb_type_a/10000       time:   [840.30 ms 906.14 ms 976.88 ms]
+                        thrpt:  [1.0237 Kelem/s 1.1036 Kelem/s 1.1901 Kelem/s]
+                 change:
+                        time:   [+83564% +91534% +101189%] (p = 0.00 < 0.05)
+                        thrpt:  [-99.901% -99.891% -99.880%]
+                        Performance has regressed.
+
+Benchmarking ycsb_type_b/10000
+Benchmarking ycsb_type_b/10000: Warming up for 1.0000 s
+
+Warning: Unable to complete 10 samples in 3.0s. You may wish to increase target time to 4.3s or enable flat sampling.
+Benchmarking ycsb_type_b/10000: Collecting 10 samples in estimated 4.3353 s (55 iterations)
+Benchmarking ycsb_type_b/10000: Analyzing
+ycsb_type_b/10000       time:   [79.256 ms 83.625 ms 86.480 ms]
+                        thrpt:  [11.563 Kelem/s 11.958 Kelem/s 12.617 Kelem/s]
+                 change:
+                        time:   [+9500.8% +10290% +11043%] (p = 0.00 < 0.05)
+                        thrpt:  [-99.103% -99.038% -98.958%]
+                        Performance has regressed.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) low mild
+
+Benchmarking ycsb_type_c/10000
+Benchmarking ycsb_type_c/10000: Warming up for 1.0000 s
+Benchmarking ycsb_type_c/10000: Collecting 10 samples in estimated 3.0057 s (7645 iterations)
+Benchmarking ycsb_type_c/10000: Analyzing
+ycsb_type_c/10000       time:   [388.21 µs 400.42 µs 410.99 µs]
+                        thrpt:  [2.4331 Melem/s 2.4974 Melem/s 2.5759 Melem/s]
+                 change:
+                        time:   [+15.605% +19.777% +23.677%] (p = 0.00 < 0.05)
+                        thrpt:  [-19.144% -16.512% -13.498%]
+                        Performance has regressed.
+
+Benchmarking ycsb_type_c/100000
+Benchmarking ycsb_type_c/100000: Warming up for 1.0000 s

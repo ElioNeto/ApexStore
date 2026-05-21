@@ -45,10 +45,10 @@ impl ApiToken {
     ) -> Self {
         let id = uuid::Uuid::new_v4().to_string();
         let token_hash = hash_token(raw_token);
-        let created_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let created_at = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(d) => d.as_nanos(),
+            Err(e) => panic!("SystemTime error: {}", e),
+        };
 
         Self {
             id,
@@ -63,10 +63,10 @@ impl ApiToken {
     /// Check if token has expired
     pub fn is_expired(&self) -> bool {
         if let Some(expires_at) = self.expires_at {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
+            let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+                Ok(d) => d.as_nanos(),
+                Err(e) => panic!("SystemTime error: {}", e),
+            };
             now > expires_at
         } else {
             false

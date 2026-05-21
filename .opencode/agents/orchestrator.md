@@ -2,7 +2,7 @@
 description: Seleciona issue desbloqueada, resolve dependências recursivamente, coordena planner→implementer→reviewer→validator.
 mode: primary
 temperature: 0.0
-maxSteps: 16
+maxSteps: 160
 permission:
   read: allow
   list: allow

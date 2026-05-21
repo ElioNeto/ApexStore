@@ -1,0 +1,254 @@
+name: 'CI Issue Manager'
+description: 'Automatically creates/closes issues on CI job failure/success, with log analysis'
+inputs:
+  workflow_name:
+    description: 'Name of the workflow'
+    required: true
+  job_results:
+    description: 'JSON object mapping job names to their results (from toJSON(needs))'
+    required: true
+  repo_token:
+    description: 'GitHub token for API access'
+    required: true
+  repository:
+    description: 'Repository in owner/repo format'
+    required: true
+  server_url:
+    description: 'GitHub server URL'
+    required: true
+    default: 'https://github.com'
+  run_id:
+    description: 'ID of the current workflow run'
+    required: true
+  ref_name:
+    description: 'Branch or tag name'
+    required: true
+  sha:
+    description: 'Commit SHA'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Ensure ci-failure label exists
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.repo_token }}
+      run: gh label create "ci-failure" --repo ${{ inputs.repository }} --description "CI workflow failure tracking" --color FF0000 --force 2>/dev/null || true
+
+    - name: Manage CI Issues per job
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.repo_token }}
+        WORKFLOW_NAME: ${{ inputs.workflow_name }}
+        REPO: ${{ inputs.repository }}
+        SERVER_URL: ${{ inputs.server_url }}
+        RUN_ID: ${{ inputs.run_id }}
+        REF_NAME: ${{ inputs.ref_name }}
+        COMMIT_SHA: ${{ inputs.sha }}
+      run: |
+        RUN_URL="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
+
+        # Parse job results safely — avoid pipefail crash if jq fails
+        JOB_ENTRIES=$(echo '${{ inputs.job_results }}' | jq -c 'to_entries[]' 2>/dev/null || echo "")
+
+        if [ -z "$JOB_ENTRIES" ]; then
+          echo "::warning::Failed to parse job_results, creating fallback issue"
+          gh issue create \
+            --repo "$REPO" \
+            --title "[CI-FAILURE] ${WORKFLOW_NAME} failed" \
+            --body "## CI Failure
+
+        Workflow: ${WORKFLOW_NAME}
+        Run: ${RUN_URL}
+        Branch: ${REF_NAME}
+        Commit: ${COMMIT_SHA}
+
+        The CI issue manager could not parse the job results. See the workflow run for details.
+
+        ---
+        This issue was automatically created by the CI Issue Manager action." \
+            --label "ci-failure" \
+            2>/dev/null || true
+          exit 0
+        fi
+
+        echo "$JOB_ENTRIES" | while IFS= read -r entry; do
+          JOB_NAME=$(echo "$entry" | jq -r '.key')
+          JOB_RESULT=$(echo "$entry" | jq -r '.value.result')
+
+          if [ -z "$JOB_NAME" ] || [ "$JOB_NAME" = "null" ]; then
+            continue
+          fi
+
+          echo "Processing job: $JOB_NAME (result: $JOB_RESULT)"
+
+          if [ "$JOB_RESULT" = "failure" ] || [ "$JOB_RESULT" = "cancelled" ]; then
+            # Fetch logs — try multiple strategies
+            FULL_LOG=""
+
+            # Strategy 1: --job with needs key (works for some gh versions)
+            FULL_LOG=$(gh run view "$RUN_ID" --log --job "$JOB_NAME" 2>/dev/null || true)
+
+            # Strategy 2: If result is too small, get the numeric job ID via API
+            LOG_LINES=$(printf '%s' "$FULL_LOG" | wc -l 2>/dev/null || echo "0")
+            if [ "${LOG_LINES:-0}" -lt 5 ]; then
+              echo "::debug::Strategy 1 returned few lines, trying API for job: $JOB_NAME"
+              JOBS_JSON=$(gh api "/repos/${REPO}/actions/runs/${RUN_ID}/jobs" 2>/dev/null || echo '{"jobs":[]}')
+              NUMERIC_ID=$(echo "$JOBS_JSON" | jq -r --arg name "$JOB_NAME" '
+                def normalize: gsub("[^a-zA-Z0-9]"; "") | ascii_downcase;
+                first(
+                  .jobs[] | select(.name == $name) | .id,
+                  .jobs[] | select(.name | ascii_downcase == ($name | ascii_downcase)) | .id,
+                  .jobs[] | select(.name | ascii_downcase | contains($name | ascii_downcase)) | .id,
+                  .jobs[] | select(.steps[]?.name | ascii_downcase | contains($name | ascii_downcase)) | .id,
+                  .jobs[] | select(normalize(.name) == normalize($name)) | .id,
+                  .jobs[] | select(normalize(.name) | contains(normalize($name))) | .id
+                ) // empty
+              ' 2>/dev/null || echo "")
+              if [ -n "$NUMERIC_ID" ]; then
+                echo "::debug::Found numeric job ID $NUMERIC_ID for $JOB_NAME"
+                FULL_LOG=$(gh run view "$RUN_ID" --log --job "$NUMERIC_ID" 2>/dev/null || true)
+              fi
+            fi
+
+            # Strategy 3: Last resort — get all logs
+            LOG_LINES=$(printf '%s' "$FULL_LOG" | wc -l 2>/dev/null || echo "0")
+            if [ "${LOG_LINES:-0}" -lt 5 ]; then
+              echo "::warning::Strategies 1-2 failed, fetching all logs for job: $JOB_NAME"
+              FULL_LOG=$(gh run view "$RUN_ID" --log 2>/dev/null || true)
+              # Limit to last 500 lines to avoid huge payloads
+              FULL_LOG=$(printf '%s' "$FULL_LOG" | tail -500 || true)
+              # Try to filter by job prefix if logs are mixed
+              FILTERED=$(printf '%s' "$FULL_LOG" | grep "^\[$JOB_NAME[/ ]" 2>/dev/null || true)
+              if [ -n "$FILTERED" ]; then
+                FULL_LOG="$FILTERED"
+              fi
+            fi
+
+            ERROR_BLOCK=""
+            COMPILE_ERR=$(echo "$FULL_LOG" | grep -A 5 -E '^error\[E' | head -120 || true)
+            if [ -n "$COMPILE_ERR" ]; then
+              ERROR_BLOCK="${ERROR_BLOCK}
+        ### Compilation Errors
+        \`\`\`
+        ${COMPILE_ERR}
+        \`\`\`"
+            fi
+
+            TEST_FAIL=$(echo "$FULL_LOG" | grep -B 2 -A 3 "FAILED" | head -80 || true)
+            if [ -n "$TEST_FAIL" ]; then
+              ERROR_BLOCK="${ERROR_BLOCK}
+        ### Test Failures
+        \`\`\`
+        ${TEST_FAIL}
+        \`\`\`"
+            fi
+
+            PANIC_ERR=$(echo "$FULL_LOG" | grep -B 2 -A 5 "panicked at" | head -80 || true)
+            if [ -n "$PANIC_ERR" ]; then
+              ERROR_BLOCK="${ERROR_BLOCK}
+        ### Panics
+        \`\`\`
+        ${PANIC_ERR}
+        \`\`\`"
+            fi
+
+            GENERAL_ERR=$(echo "$FULL_LOG" | grep -B 1 -A 2 -E "^(Error|error):" | head -60 || true)
+            if [ -n "$GENERAL_ERR" ]; then
+              ERROR_BLOCK="${ERROR_BLOCK}
+        ### General Errors
+        \`\`\`
+        ${GENERAL_ERR}
+        \`\`\`"
+            fi
+
+            TIMEOUT_ERR=$(echo "$FULL_LOG" | grep -B 2 -A 2 -i "timed out" | head -40 || true)
+            if [ -n "$TIMEOUT_ERR" ]; then
+              ERROR_BLOCK="${ERROR_BLOCK}
+        ### Timeouts
+        \`\`\`
+        ${TIMEOUT_ERR}
+        \`\`\`"
+            fi
+
+            if [ ${#ERROR_BLOCK} -gt 30000 ]; then
+              ERROR_BLOCK="${ERROR_BLOCK:0:30000}
+        ...
+        [truncated]" 
+            fi
+
+            ROOT_CAUSE="Unknown"
+            ROOT_DETAIL="Could not automatically determine the root cause."
+            if echo "$FULL_LOG" | grep -q '^error\[E'; then
+              ROOT_CAUSE="Compilation Error"
+              ROOT_DETAIL="$(echo "$FULL_LOG" | grep '^error\[E' | head -3 || true)"
+            elif echo "$FULL_LOG" | grep -q "panicked at"; then
+              ROOT_CAUSE="Runtime Panic"
+              ROOT_DETAIL="$(echo "$FULL_LOG" | grep -B 1 "panicked at" | head -6 || true)"
+            elif echo "$FULL_LOG" | grep -q "FAILED"; then
+              ROOT_CAUSE="Test Failure"
+              ROOT_DETAIL="$(echo "$FULL_LOG" | grep -B 1 "FAILED" | head -6 || true)"
+            elif echo "$FULL_LOG" | grep -q -i "timed out"; then
+              ROOT_CAUSE="Timeout"
+              ROOT_DETAIL="The job exceeded its time limit."
+            elif echo "$FULL_LOG" | grep -q -i "cannot find\|not found"; then
+              ROOT_CAUSE="Missing Dependency"
+              ROOT_DETAIL="$(echo "$FULL_LOG" | grep -i "cannot find\|not found" | head -5 || true)"
+            fi
+
+            ISSUE_TITLE="[CI-FAILURE] ${WORKFLOW_NAME}: ${JOB_NAME} failed"
+            BODY="## CI Failure - ${ROOT_CAUSE}
+
+        Workflow: ${WORKFLOW_NAME}
+        Failed Job: ${JOB_NAME}
+        Run: ${RUN_URL}
+        Branch: ${REF_NAME}
+        Commit: ${COMMIT_SHA}
+
+        ### Root Cause
+
+        ${ROOT_CAUSE}
+
+        \`\`\`
+        ${ROOT_DETAIL}
+        \`\`\`
+
+        ### Error Details
+
+        ${ERROR_BLOCK}
+
+        ---
+        This issue was automatically created by the CI Issue Manager action."
+
+            EXISTING=$(gh issue list \
+              --repo "$REPO" \
+              --label "ci-failure" \
+              --state open \
+              --json title,number \
+              --jq ".[] | select(.title == \"${ISSUE_TITLE}\") | .number" \
+              | head -1)
+
+            if [ -n "$EXISTING" ]; then
+              gh issue comment "$EXISTING" --repo "$REPO" --body "Failed again: ${RUN_URL}
+
+        ${BODY}"
+            else
+              gh issue create --repo "$REPO" --title "$ISSUE_TITLE" --body "$BODY" --label "ci-failure"
+            fi
+
+          elif [ "$JOB_RESULT" = "success" ] || [ "$JOB_RESULT" = "skipped" ]; then
+            ISSUE_TITLE="[CI-FAILURE] ${WORKFLOW_NAME}: ${JOB_NAME} failed"
+            EXISTING=$(gh issue list \
+              --repo "$REPO" \
+              --label "ci-failure" \
+              --state open \
+              --json title,number \
+              --jq ".[] | select(.title == \"${ISSUE_TITLE}\") | .number" \
+              | head -1)
+
+            if [ -n "$EXISTING" ]; then
+              gh issue comment "$EXISTING" --repo "$REPO" --body "Workflow ${WORKFLOW_NAME} job ${JOB_NAME} succeeded. Closing automatically."
+              gh issue close "$EXISTING" --repo "$REPO"
+            fi
+          fi
+        done

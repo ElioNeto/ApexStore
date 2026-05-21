@@ -3,7 +3,7 @@ use crate::storage::iterator::MemTableIterator;
 use std::collections::BTreeMap;
 
 pub struct MemTable {
-    pub(crate) data: BTreeMap<String, LogRecord>,
+    pub(crate) data: BTreeMap<Vec<u8>, LogRecord>,
     pub(crate) size_bytes: usize,
     pub(crate) max_size_bytes: usize,
 }
@@ -31,12 +31,12 @@ impl MemTable {
         self.size_bytes >= self.max_size_bytes
     }
 
-    pub fn get(&self, key: &str) -> Option<LogRecord> {
+    pub fn get(&self, key: &[u8]) -> Option<LogRecord> {
         self.data.get(key).cloned()
     }
 
     /// Returns a StorageIterator over all entries (backward compatible)
-    pub fn iter_ordered(&self) -> impl Iterator<Item = (&String, &LogRecord)> {
+    pub fn iter_ordered(&self) -> impl Iterator<Item = (&Vec<u8>, &LogRecord)> {
         self.data.iter()
     }
 
@@ -69,7 +69,7 @@ impl MemTable {
     ///     iter.next();
     /// }
     /// ```
-    pub fn iter_from(&self, start_key: &str) -> MemTableIterator<'_> {
+    pub fn iter_from(&self, start_key: &[u8]) -> MemTableIterator<'_> {
         MemTableIterator::new_from(&self.data, start_key)
     }
 
@@ -93,9 +93,9 @@ mod tests {
     #[test]
     fn test_memtable_iter() {
         let mut memtable = MemTable::new(1024);
-        memtable.insert(LogRecord::new("key1".to_string(), b"value1".to_vec()));
-        memtable.insert(LogRecord::new("key2".to_string(), b"value2".to_vec()));
-        memtable.insert(LogRecord::new("key3".to_string(), b"value3".to_vec()));
+        memtable.insert(LogRecord::new(b"key1".to_vec(), b"value1".to_vec()));
+        memtable.insert(LogRecord::new(b"key2".to_vec(), b"value2".to_vec()));
+        memtable.insert(LogRecord::new(b"key3".to_vec(), b"value3".to_vec()));
 
         let mut iter = memtable.iter();
         let mut count = 0;
@@ -111,11 +111,11 @@ mod tests {
     #[test]
     fn test_memtable_iter_from() {
         let mut memtable = MemTable::new(1024);
-        memtable.insert(LogRecord::new("key1".to_string(), b"value1".to_vec()));
-        memtable.insert(LogRecord::new("key2".to_string(), b"value2".to_vec()));
-        memtable.insert(LogRecord::new("key3".to_string(), b"value3".to_vec()));
+        memtable.insert(LogRecord::new(b"key1".to_vec(), b"value1".to_vec()));
+        memtable.insert(LogRecord::new(b"key2".to_vec(), b"value2".to_vec()));
+        memtable.insert(LogRecord::new(b"key3".to_vec(), b"value3".to_vec()));
 
-        let mut iter = memtable.iter_from("key2");
+        let mut iter = memtable.iter_from(b"key2");
         assert!(iter.is_valid());
         assert_eq!(iter.key().as_slice(), b"key2");
 

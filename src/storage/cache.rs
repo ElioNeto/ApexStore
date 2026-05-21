@@ -7,6 +7,26 @@ pub trait Cache: Clone + Send + Sync + 'static {}
 impl Cache for Arc<GlobalBlockCache> {}
 impl Cache for GlobalBlockCache {}
 
+/// A no-op cache for testing purposes
+#[derive(Clone, Debug, Default)]
+pub struct NoopCache;
+
+impl Cache for NoopCache {}
+
+impl NoopCache {
+    pub fn get(&self, _table_id: u64, _block_idx: usize) -> Option<Vec<u8>> {
+        None
+    }
+
+    pub fn put(&self, _table_id: u64, _block_idx: usize, _data: Vec<u8>) {
+        // No-op
+    }
+
+    pub fn stats(&self) -> CacheStats {
+        CacheStats { len: 0, cap: 0 }
+    }
+}
+
 type BlockId = (u64, usize);
 
 #[derive(Clone, Debug)]
@@ -17,7 +37,8 @@ pub struct GlobalBlockCache {
 impl GlobalBlockCache {
     pub fn new(size_mb: usize, block_size: usize) -> Arc<Self> {
         let max_blocks = (size_mb * 1024 * 1024) / block_size;
-        let capacity = NonZeroUsize::new(max_blocks.max(1)).unwrap();
+        let capacity = NonZeroUsize::new(max_blocks.max(1))
+            .expect("max_blocks is at least 1, NonZeroUsize is safe");
 
         Arc::new(Self {
             cache: Arc::new(Mutex::new(LruCache::new(capacity))),
@@ -25,17 +46,17 @@ impl GlobalBlockCache {
     }
 
     pub fn get(&self, table_id: u64, block_idx: usize) -> Option<Vec<u8>> {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.get(&(table_id, block_idx)).cloned()
     }
 
     pub fn put(&self, table_id: u64, block_idx: usize, data: Vec<u8>) {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.put((table_id, block_idx), data);
     }
 
     pub fn stats(&self) -> CacheStats {
-        let cache = self.cache.lock().unwrap();
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         CacheStats {
             len: cache.len(),
             cap: cache.cap().get(),

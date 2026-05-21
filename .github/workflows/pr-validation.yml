@@ -1,10 +1,15 @@
-name: PR Validation
+name: CI / PR Validation
 
 on:
   pull_request:
     branches: [ main ]
   push:
     branches: [ main ]
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,6 +20,7 @@ jobs:
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
+    container: rust:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -26,6 +32,7 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    container: rust:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -48,6 +55,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    container: rust:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -58,9 +66,28 @@ jobs:
   build_and_docs:
     name: Build and Docs
     runs-on: ubuntu-latest
+    container: rust:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
       - run: cargo doc --no-deps --all-features
+
+  report-status:
+    if: always()
+    needs: [fmt, clippy, audit, test, build_and_docs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report job status
+        uses: ./.github/actions/ci-issue-manager
+        with:
+          workflow_name: "CI / PR Validation"
+          job_results: ${{ toJSON(needs) }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          server_url: ${{ github.server_url }}
+          run_id: ${{ github.run_id }}
+          ref_name: ${{ github.ref_name }}
+          sha: ${{ github.sha }}

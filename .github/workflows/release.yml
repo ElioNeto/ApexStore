@@ -80,3 +80,26 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to crates.io
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  report-status:
+    if: always()
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report job status
+        uses: ./.github/actions/ci-issue-manager
+        with:
+          workflow_name: "Release"
+          job_results: ${{ toJSON(needs) }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          server_url: ${{ github.server_url }}
+          run_id: ${{ github.run_id }}
+          ref_name: ${{ github.ref_name }}
+          sha: ${{ github.sha }}

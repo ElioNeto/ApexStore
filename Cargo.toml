@@ -68,7 +68,7 @@ rand = "0.8"
 # TUI dependencies
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 tui-input = "0.10"
 bytes = "1.11.1"  # fix RUSTSEC-2026-0007 (integer overflow in BytesMut::reserve)
 time = "0.3.47"  # fix RUSTSEC-2026-0009 (DoS via stack exhaustion)
@@ -101,6 +101,14 @@ harness = false
 
 [[bench]]
 name = "stress_bench"
+harness = false
+
+[[bench]]
+name = "write_amplification"
+harness = false
+
+[[bench]]
+name = "latency_bench"
 harness = false
 
 [profile.bench]
