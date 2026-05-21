@@ -7,9 +7,9 @@ fn configure_criterion() -> Criterion {
     let mut c = Criterion::default();
     if std::env::var("CI").is_ok() {
         c = c
-            .sample_size(10)
-            .warm_up_time(std::time::Duration::from_secs(1))
-            .measurement_time(std::time::Duration::from_secs(3));
+            .sample_size(5)
+            .warm_up_time(std::time::Duration::from_millis(500))
+            .measurement_time(std::time::Duration::from_secs(1));
     }
     c
 }
@@ -91,7 +91,7 @@ fn bench_concurrent_access(c: &mut Criterion) {
     use std::sync::{Arc, Mutex};
 
     let thread_count: Vec<usize> = if std::env::var("CI").is_ok() {
-        vec![1, 2]
+        vec![1]
     } else {
         vec![1, 2, 4]
     };
@@ -151,6 +151,11 @@ fn bench_concurrent_access(c: &mut Criterion) {
 
 /// Benchmark with memory pressure (small memtable)
 fn bench_memory_pressure(c: &mut Criterion) {
+    let num_keys = if std::env::var("CI").is_ok() {
+        10_000usize
+    } else {
+        100_000usize
+    };
     let mut group = c.benchmark_group("memory_pressure");
 
     group.bench_with_input(
@@ -168,13 +173,14 @@ fn bench_memory_pressure(c: &mut Criterion) {
             )
             .unwrap();
 
-            for i in 0..100_000 {
+            for i in 0..num_keys {
                 let key = generate_key(i, 10);
                 let value = generate_value(i, 100);
                 engine.set(key, value).unwrap();
             }
 
-            let benchmark_keys: Vec<String> = (0..10_000).map(|i| generate_key(i, 10)).collect();
+            let read_keys_count = if std::env::var("CI").is_ok() { 1_000 } else { 10_000 };
+            let benchmark_keys: Vec<String> = (0..read_keys_count).map(|i| generate_key(i, 10)).collect();
 
             b.iter(|| {
                 for key in benchmark_keys.iter() {
@@ -193,7 +199,7 @@ fn bench_memory_pressure(c: &mut Criterion) {
 /// Benchmark with many SSTables (thousands of layers)
 fn bench_many_sstables(c: &mut Criterion) {
     let sstable_counts: Vec<usize> = if std::env::var("CI").is_ok() {
-        vec![10, 50]
+        vec![10]
     } else {
         vec![10, 50, 100]
     };
@@ -246,7 +252,7 @@ fn bench_many_sstables(c: &mut Criterion) {
 /// Benchmark cache thrashing scenario
 fn bench_cache_thrashing(c: &mut Criterion) {
     let cache_sizes: Vec<usize> = if std::env::var("CI").is_ok() {
-        vec![16, 64]
+        vec![64]
     } else {
         vec![16, 64, 128]
     };
@@ -267,7 +273,7 @@ fn bench_cache_thrashing(c: &mut Criterion) {
             )
             .unwrap();
 
-            let total_keys = 100_000;
+            let total_keys = if std::env::var("CI").is_ok() { 10_000 } else { 100_000 };
             for i in 0..total_keys {
                 let key = generate_key(i, 10);
                 let value = generate_value(i, 100);

@@ -8,9 +8,9 @@ fn configure_criterion() -> Criterion {
     let mut c = Criterion::default();
     if std::env::var("CI").is_ok() {
         c = c
-            .sample_size(10)
-            .warm_up_time(std::time::Duration::from_secs(1))
-            .measurement_time(std::time::Duration::from_secs(3));
+            .sample_size(5)
+            .warm_up_time(std::time::Duration::from_millis(500))
+            .measurement_time(std::time::Duration::from_secs(1));
     }
     c
 }
@@ -214,7 +214,7 @@ fn bench_read_sstable_warm(c: &mut Criterion) {
 /// Benchmark Bloom filter effectiveness
 fn bench_bloom_filter(c: &mut Criterion) {
     let num_keys_arr: Vec<usize> = if std::env::var("CI").is_ok() {
-        vec![10_000, 100_000]
+        vec![10_000]
     } else {
         vec![10_000, 100_000, 1_000_000]
     };

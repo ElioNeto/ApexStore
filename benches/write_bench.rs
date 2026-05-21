@@ -7,9 +7,9 @@ fn configure_criterion() -> Criterion {
     let mut c = Criterion::default();
     if std::env::var("CI").is_ok() {
         c = c
-            .sample_size(10)
-            .warm_up_time(std::time::Duration::from_secs(1))
-            .measurement_time(std::time::Duration::from_secs(3));
+            .sample_size(5)
+            .warm_up_time(std::time::Duration::from_millis(500))
+            .measurement_time(std::time::Duration::from_secs(1));
     }
     c
 }
@@ -48,7 +48,12 @@ fn generate_value(index: usize, value_size: usize) -> Vec<u8> {
 fn bench_single_write(c: &mut Criterion) {
     let mut group = c.benchmark_group("write_single");
 
-    for value_size in [10, 100, 1024, 10240] {
+    let value_sizes: &[usize] = if std::env::var("CI").is_ok() {
+        &[10, 1024]
+    } else {
+        &[10, 100, 1024, 10240]
+    };
+    for &value_size in value_sizes {
         group.throughput(Throughput::Bytes(value_size as u64));
 
         group.bench_with_input(BenchmarkId::from_parameter(value_size), &(), |b, &_| {
@@ -80,7 +85,12 @@ fn bench_single_write(c: &mut Criterion) {
 
 /// Benchmark batch write operations
 fn bench_batch_write(c: &mut Criterion) {
-    for batch_size in [1_000usize, 10_000, 100_000] {
+    let batch_sizes: &[usize] = if std::env::var("CI").is_ok() {
+        &[1_000, 10_000]
+    } else {
+        &[1_000, 10_000, 100_000]
+    };
+    for &batch_size in batch_sizes {
         let mut group = c.benchmark_group(format!("write_batch_{}", batch_size));
         let total_bytes = batch_size * 110;
         group.throughput(Throughput::Bytes(total_bytes as u64));
@@ -171,13 +181,19 @@ fn bench_memtable_flush(c: &mut Criterion) {
 
 /// Benchmark SSTable write performance during flush
 fn bench_sstable_flush(c: &mut Criterion) {
+    let records = if std::env::var("CI").is_ok() {
+        10_000usize
+    } else {
+        100_000usize
+    };
     let mut group = c.benchmark_group("sstable_flush");
-    group.throughput(Throughput::Bytes(10_000_000));
+    let flush_mb = (records * 110) as f64 / 1_000_000.0;
+    group.throughput(Throughput::Bytes((records * 110) as u64));
 
     group.bench_with_input(
-        BenchmarkId::from_parameter(100_000),
-        &100_000,
-        |b, &_records| {
+        BenchmarkId::from_parameter(records),
+        &records,
+        |b, &_r| {
             let (temp_dir, data_dir) = setup_temp_dir("sstable_flush");
             let mut engine = apexstore::LsmEngine::new_from_config(
                 &LsmConfig::builder()
@@ -189,7 +205,7 @@ fn bench_sstable_flush(c: &mut Criterion) {
             )
             .unwrap();
 
-            let records = 100_000usize;
+            let records = _r;
             let keys: Vec<String> = (0..records).map(|i| generate_key(i, 10)).collect();
             let values: Vec<Vec<u8>> = (0..records).map(|i| generate_value(i, 100)).collect();
 
@@ -203,8 +219,8 @@ fn bench_sstable_flush(c: &mut Criterion) {
             engine.flush_memtable().unwrap();
             let flush_duration = flush_start.elapsed().as_secs_f64();
 
-            println!("Flush time: {:.3}s for ~{}MB", flush_duration, 10);
-            println!("Throughput: {:.2} MB/s", 10.0 / flush_duration);
+            println!("Flush time: {:.3}s for ~{:.1}MB", flush_duration, flush_mb);
+            println!("Throughput: {:.2} MB/s", flush_mb / flush_duration);
 
             drop(engine);
             drop(temp_dir);
@@ -216,13 +232,11 @@ fn bench_sstable_flush(c: &mut Criterion) {
 
 /// Benchmark write operations across different data sizes
 fn bench_write_by_size(c: &mut Criterion) {
-    let configs = [
-        (10usize, 10),
-        (10, 100),
-        (100, 100),
-        (100, 1000),
-        (100, 10000),
-    ];
+    let configs: &[(usize, usize)] = if std::env::var("CI").is_ok() {
+        &[(10, 100), (100, 10000)]
+    } else {
+        &[(10usize, 10), (10, 100), (100, 100), (100, 1000), (100, 10000)]
+    };
 
     for (key_size, value_size) in configs {
         let mut group = c.benchmark_group(format!("write_size_{}_{}", key_size, value_size));
@@ -243,8 +257,8 @@ fn bench_write_by_size(c: &mut Criterion) {
                 )
                 .unwrap();
 
-                let key = generate_key(0, key_size);
-                let value = generate_value(0, value_size);
+                let key = generate_key(0, *key_size);
+                let value = generate_value(0, *value_size);
 
                 b.iter(|| {
                     engine.set(key.clone(), value.clone()).unwrap();

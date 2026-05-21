@@ -7,9 +7,9 @@ fn configure_criterion() -> Criterion {
     let mut c = Criterion::default();
     if std::env::var("CI").is_ok() {
         c = c
-            .sample_size(10)
-            .warm_up_time(std::time::Duration::from_secs(1))
-            .measurement_time(std::time::Duration::from_secs(3));
+            .sample_size(5)
+            .warm_up_time(std::time::Duration::from_millis(500))
+            .measurement_time(std::time::Duration::from_secs(1));
     }
     c
 }
@@ -89,9 +89,9 @@ fn bench_full_scan(c: &mut Criterion) {
 
 fn bench_range_scan(c: &mut Criterion) {
     let is_ci = std::env::var("CI").is_ok();
-    let total_keys = if is_ci { 100_000usize } else { 1_000_000usize };
+    let total_keys = if is_ci { 10_000usize } else { 1_000_000usize };
     let scan_sizes: Vec<usize> = if is_ci {
-        vec![100, 1_000]
+        vec![100]
     } else {
         vec![100, 1_000, 10_000, 100_000]
     };
@@ -250,9 +250,9 @@ fn bench_iteration_sorted(c: &mut Criterion) {
 
 fn bench_scan_with_limit(c: &mut Criterion) {
     let is_ci = std::env::var("CI").is_ok();
-    let total_keys = if is_ci { 100_000usize } else { 1_000_000usize };
+    let total_keys = if is_ci { 10_000usize } else { 1_000_000usize };
     let limits: Vec<usize> = if is_ci {
-        vec![10, 100, 1_000]
+        vec![10, 100]
     } else {
         vec![10, 100, 1_000, 10_000]
     };
@@ -360,7 +360,7 @@ fn bench_scan_pagination(c: &mut Criterion) {
 
 fn bench_sstable_layer_scan(c: &mut Criterion) {
     let layer_counts: Vec<usize> = if std::env::var("CI").is_ok() {
-        vec![1, 3, 10]
+        vec![1]
     } else {
         vec![1, 3, 10, 30]
     };

@@ -129,12 +129,20 @@ fn bench_write_amplification_size_tiered(c: &mut Criterion) {
     group.finish();
 }
 
+fn configure_criterion() -> Criterion {
+    let mut c = Criterion::default();
+    if std::env::var("CI").is_ok() {
+        c = c
+            .sample_size(5)
+            .warm_up_time(std::time::Duration::from_millis(500))
+            .measurement_time(std::time::Duration::from_secs(1));
+    }
+    c
+}
+
 criterion_group!(
     name = write_amplification;
-    config = Criterion::default()
-        .sample_size(10)
-        .warm_up_time(std::time::Duration::from_secs(1))
-        .measurement_time(std::time::Duration::from_secs(3));
+    config = configure_criterion();
     targets = bench_write_amplification_leveled, bench_write_amplification_size_tiered
 );
 
