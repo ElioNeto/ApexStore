@@ -10,6 +10,7 @@ permissions:
   contents: read
   issues: write
   actions: read
+  checks: write
 
 env:
   CARGO_TERM_COLOR: always
