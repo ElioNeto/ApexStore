@@ -270,7 +270,14 @@ jobs:
           fi
 
           git commit -m "docs: update benchmark results [skip ci]"
-          git pull --rebase origin main
+
+          # Integrate remote changes, auto-resolve conflicts in our favor
+          if ! git pull --rebase -X ours origin main 2>/dev/null; then
+            echo "Rebase failed — skipping this update."
+            git rebase --abort 2>/dev/null || true
+            exit 0
+          fi
+
           git push origin main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
