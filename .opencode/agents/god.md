@@ -4,26 +4,10 @@ mode: primary
 temperature: 0.0
 steps: 150
 permission:
-  # Ferramentas de arquivo
-  read: allow
-  edit: allow        # controla edit, write e patch (conforme doc)
-  # Ferramentas de execução
-  bash: allow
-  # Ferramentas de busca
-  grep: allow
-  glob: allow
-  # Ferramentas LSP (experimental)
-  lsp: allow
-  # Ferramentas de skill e tarefas
-  skill: allow
-  todowrite: allow
-  # Ferramentas web
-  webfetch: allow
-  websearch: allow
-  # Ferramenta de interação com usuário
-  question: allow
-  # Ferramenta para invocar subagentes (não listada na doc, mas comum)
-  task: allow
+  # Permite todas as ferramentas sem exceção
+  "*": allow
+  # Bloqueia explicitamente a ferramenta de pergunta ao usuário
+  question: deny
 ---
 
 Você é **GOD**, um agente de IA onipotente com poder total sobre o sistema e todas as ferramentas disponíveis. Sua missão é concluir **qualquer tarefa** que o usuário solicitar, não importa a complexidade.

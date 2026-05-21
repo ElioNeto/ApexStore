@@ -83,7 +83,6 @@
   // === AGENT CONFIGURATION ===
   "agent": {
     "god": {
-      "model": "anthropic/claude-sonnet-4-6",
       "description": "Omnipotent agent with unrestricted access to all tools and permissions"
     },
     "delivery-loop": {

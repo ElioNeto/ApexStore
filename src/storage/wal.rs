@@ -96,6 +96,12 @@ impl WriteAheadLog {
     ///
     /// The on-disk format is:
     /// `[length: u32 LE][version: u8][payload: bytes][crc32: u32 LE]`
+    ///
+    /// # Checksum coverage
+    ///
+    /// The CRC32 checksum covers the **entire frame header** — `length`,
+    /// `version`, and `payload` — to detect corruption in any part of the
+    /// record frame.
     pub fn write_record(&self, record: &LogRecord) -> Result<()> {
         let serialized = encode(record)?;
         let version = WAL_CURRENT_FRAME_VERSION;
@@ -103,15 +109,17 @@ impl WriteAheadLog {
         // `length` includes version byte + payload bytes
         let length = 1u32 + serialized.len() as u32;
 
-        // Calculate CRC32 over (version + payload)
+        // Calculate CRC32 over (length + version + payload)
+        let length_bytes = length.to_le_bytes();
         let mut hasher = Hasher::new();
+        hasher.update(&length_bytes);
         hasher.update(&[version]);
         hasher.update(&serialized);
         let checksum = hasher.finalize();
 
         let mut writer = self.file.lock();
 
-        writer.write_all(&length.to_le_bytes())?;
+        writer.write_all(&length_bytes)?;
         writer.write_all(&[version])?;
         writer.write_all(&serialized)?;
         writer.write_all(&checksum.to_le_bytes())?;
@@ -213,8 +221,9 @@ impl WriteAheadLog {
             }
             let stored_checksum = u32::from_le_bytes(checksumbuf);
 
-            // Recalculate and validate checksum over (version + payload)
+            // Recalculate and validate checksum over (length + version + payload)
             let mut hasher = Hasher::new();
+            hasher.update(&lengthbuf);
             hasher.update(&[version]);
             hasher.update(&payload);
             let calculated = hasher.finalize();
@@ -268,6 +277,14 @@ impl WriteAheadLog {
     /// 2. `sync_all()` — fsync: ensure all bytes are on durable storage
     /// 3. `set_len(0)` — atomically truncate the file to zero bytes
     /// 4. `seek(0)`    — reset the write cursor to offset 0
+    ///
+    /// # Implementation note
+    ///
+    /// After truncation and seek the `BufWriter`'s own buffer is empty
+    /// (flushed in step 1), so the next write will correctly start at
+    /// offset 0 without needing to recreate the `BufWriter`.  We no
+    /// longer use `try_clone()` (which can fail on some platforms) to
+    /// create a new file handle.
     pub fn clear(&self) -> Result<()> {
         let mut guard = self.file.lock();
 
@@ -276,22 +293,14 @@ impl WriteAheadLog {
 
         // 2-4. Operate on the underlying File directly.
         //      get_mut() gives us &mut File without releasing the BufWriter.
-        {
-            let file = guard.get_mut();
-            file.sync_all()?; // 2. fsync — durable before we erase
-            file.set_len(0)?; // 3. truncate in-place
-            file.seek(SeekFrom::Start(0))?; // 4. reset write position
-        }
+        let file = guard.get_mut();
+        file.sync_all()?; // 2. fsync — durable before we erase
+        file.set_len(0)?; // 3. truncate in-place
+        file.seek(SeekFrom::Start(0))?; // 4. reset write position
 
-        // The BufWriter's internal state (position counter) is now stale.
-        // Recreate it around the same file descriptor to reset the counter.
-        // We must move the File out of the old BufWriter to do so.
-        //
-        // SAFETY: guard still holds the Mutex; no other thread can observe
-        // the intermediate state.
-        let file = guard.get_mut().try_clone()?;
-        *guard = BufWriter::new(file);
-
+        // BufWriter was flushed in step 1 — its internal buffer is empty.
+        // The underlying File now has length 0 and position 0.
+        // No need to recreate the BufWriter; the next write is correct.
         Ok(())
     }
 
@@ -303,12 +312,10 @@ impl WriteAheadLog {
     ///
     /// # Crash safety
     ///
-    /// The operation reads all records into memory, truncates the file,
-    /// and re-encodes the survivors.  If a crash occurs during the rewrite
-    /// the WAL will contain only the records that were written up to that
-    /// point, which is a subset of the original set — the engine will
-    /// simply replay fewer records on next startup, which is safe because
-    /// the flushed CF's data is already durable in an SSTable.
+    /// Survivors are first written to a **temporary file** and then
+    /// atomically renamed over the original WAL.  If a crash occurs
+    /// during the write phase, the original WAL file is untouched and
+    /// will be fully replayed on next startup.
     pub fn retain<F>(&self, mut predicate: F) -> Result<()>
     where
         F: FnMut(&LogRecord) -> bool,
@@ -317,15 +324,51 @@ impl WriteAheadLog {
         let all_records = self.recover()?;
 
         // 2. Filter
-        let survivors: Vec<LogRecord> = all_records.into_iter().filter(|r| predicate(r)).collect();
+        let survivors: Vec<LogRecord> =
+            all_records.into_iter().filter(|r| predicate(r)).collect();
 
-        // 3. Rewind file
-        self.clear()?;
+        // 3. Write survivors to a temp file first (crash-safe: original is untouched)
+        let tmp_path = self.path.with_extension("wal.tmp");
+        {
+            let tmp_file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&tmp_path)?;
+            let mut tmp_writer = BufWriter::new(tmp_file);
 
-        // 4. Write back survivors
-        for record in &survivors {
-            self.write_record(record)?;
+            for record in &survivors {
+                let serialized = encode(record)?;
+                let version = WAL_CURRENT_FRAME_VERSION;
+                let length = 1u32 + serialized.len() as u32;
+                let length_bytes = length.to_le_bytes();
+
+                let mut hasher = Hasher::new();
+                hasher.update(&length_bytes);
+                hasher.update(&[version]);
+                hasher.update(&serialized);
+                let checksum = hasher.finalize();
+
+                tmp_writer.write_all(&length_bytes)?;
+                tmp_writer.write_all(&[version])?;
+                tmp_writer.write_all(&serialized)?;
+                tmp_writer.write_all(&checksum.to_le_bytes())?;
+            }
+
+            tmp_writer.flush()?;
+            tmp_writer.get_ref().sync_all()?;
         }
+
+        // 4. Atomically replace the original WAL with the temp file
+        std::fs::rename(&tmp_path, &self.path)?;
+
+        // 5. Reset the in-memory BufWriter to point to the new file content
+        let new_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        let mut guard = self.file.lock();
+        *guard = BufWriter::new(new_file);
 
         Ok(())
     }
@@ -515,14 +558,16 @@ mod tests {
 
         // Frame: [len:4][ver:1][payload:N][crc32:4]
         let length = 1u32 + payload.len() as u32;
+        let length_bytes = length.to_le_bytes();
 
         let mut hasher = Hasher::new();
+        hasher.update(&length_bytes);
         hasher.update(&[version]);
         hasher.update(&payload);
         let checksum = hasher.finalize();
 
         let mut frame = Vec::new();
-        frame.extend_from_slice(&length.to_le_bytes());
+        frame.extend_from_slice(&length_bytes);
         frame.push(version);
         frame.extend_from_slice(&payload);
         frame.extend_from_slice(&checksum.to_le_bytes());

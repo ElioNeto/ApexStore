@@ -1,5 +1,5 @@
 /// <reference path="../env.d.ts" />
-import { tool } from "@opencode-ai/plugin"
+import { tool } from "@teamcode-ai/plugin"
 
 const TEAM = {
   core: ["ElioNeto"],

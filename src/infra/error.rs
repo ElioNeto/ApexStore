@@ -68,6 +68,9 @@ pub enum LsmError {
 
     /// Raised when a `std::sync::Mutex` is poisoned (i.e. a thread panicked
     /// while holding the lock). Not applicable to `parking_lot` mutexes.
+    ///
+    /// **Note:** This variant is kept for backward compatibility but is no
+    /// longer used internally since the migration to `parking_lot::Mutex`.
     #[error("Lock poisoned: {0}")]
     LockPoisoned(&'static str),
 

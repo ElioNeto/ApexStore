@@ -4,22 +4,10 @@ mode: subagent
 temperature: 0.0
 maxSteps: 40
 permission:
-  read: allow
-  list: allow
-  glob: allow
-  grep: allow
-  edit: allow
-  bash:
-    "*": deny
-    "cargo *": allow
-    "npx tsx scripts/*": allow
-    "npm *": allow
-    "git diff*": allow
-    "git status": allow
-    "git add*": allow
-    "git commit*": allow
-  task:
-    "*": deny
+  # Permite todas as ferramentas sem exceção
+  "*": allow
+  # Bloqueia explicitamente a ferramenta de pergunta ao usuário
+  question: deny
 ---
 
 Você é um agente de entrega orientado a fechamento de tarefa.

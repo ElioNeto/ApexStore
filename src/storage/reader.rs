@@ -135,25 +135,43 @@ impl SstableReader {
         Self::search_in_block(&block, key)
     }
 
-    /// Search for a key within a decoded block
+    /// Extract the key at a given offset within a block's data.
+    /// Returns `None` if the offset is invalid or the key extends past the data.
+    fn extract_key_at_offset(data: &[u8], offset: usize) -> Option<&[u8]> {
+        if offset + 2 > data.len() {
+            return None;
+        }
+        let key_len = u16::from_le_bytes([data[offset], data[offset + 1]]) as usize;
+        if offset + 2 + key_len > data.len() {
+            return None;
+        }
+        Some(&data[offset + 2..offset + 2 + key_len])
+    }
+
+    /// Search for a key within a decoded block using binary search.
+    ///
+    /// Entries in a block are stored in sorted key order, and `block.offsets`
+    /// contains the sorted offset list.  This method uses `binary_search_by`
+    /// to achieve **O(log n)** lookup instead of the previous linear scan.
     pub(crate) fn search_in_block(block: &Block, key: &[u8]) -> Result<Option<LogRecord>> {
-        // Access block data through pub(crate) fields
-        for &offset in &block.offsets {
+        let idx = block.offsets.binary_search_by(|&offset| {
             let offset = offset as usize;
-            if offset + 2 > block.data.len() {
-                break;
+            match Self::extract_key_at_offset(&block.data, offset) {
+                Some(entry_key) => entry_key.cmp(key),
+                // Data corruption — treat as "less" to continue search;
+                // the CRC32 check at block level should have caught this earlier.
+                None => std::cmp::Ordering::Less,
             }
+        });
 
-            // Read key length
-            let key_len = u16::from_le_bytes([block.data[offset], block.data[offset + 1]]) as usize;
-            if offset + 2 + key_len + 2 > block.data.len() {
-                break;
-            }
+        match idx {
+            Ok(pos) => {
+                let offset = block.offsets[pos] as usize;
 
-            // Read key
-            let entry_key = &block.data[offset + 2..offset + 2 + key_len];
+                // Read key length
+                let key_len =
+                    u16::from_le_bytes([block.data[offset], block.data[offset + 1]]) as usize;
 
-            if entry_key == key {
                 // Read value length
                 let val_len_offset = offset + 2 + key_len;
                 let val_len = u16::from_le_bytes([
@@ -161,8 +179,11 @@ impl SstableReader {
                     block.data[val_len_offset + 1],
                 ]) as usize;
 
+                // Bounds check (should never fail if extract_key_at_offset succeeded)
                 if val_len_offset + 2 + val_len > block.data.len() {
-                    break;
+                    return Err(LsmError::CorruptedData(
+                        "Block entry extends past block data".to_string(),
+                    ));
                 }
 
                 // Read value
@@ -170,11 +191,10 @@ impl SstableReader {
 
                 // Decode the LogRecord from value
                 let record: LogRecord = decode(entry_value)?;
-                return Ok(Some(record));
+                Ok(Some(record))
             }
+            Err(_) => Ok(None),
         }
-
-        Ok(None)
     }
 
     /// Scan all records in the SSTable (for compaction)

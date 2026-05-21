@@ -9,8 +9,9 @@ use crate::storage::cache::Cache;
 use crate::storage::wal::WriteAheadLog;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use self::compaction::{Compaction, CompactionMetrics, CompactionOptions, CompactionStrategyType};
@@ -108,11 +109,44 @@ impl EngineOptions {
 
 /// All mutable state of the engine, protected behind a Mutex.
 pub(crate) struct EngineCore<C: Cache> {
-    pub(crate) memtables: HashMap<String, Vec<MemTable>>,
-    pub(crate) memtable_bytes: HashMap<String, usize>,
-    pub(crate) version_set: VersionSet<C>,
-    pub(crate) compaction: Compaction,
-    pub(crate) wal: WriteAheadLog,
+    memtables: HashMap<String, Vec<MemTable>>,
+    memtable_bytes: HashMap<String, usize>,
+    version_set: VersionSet<C>,
+    compaction: Compaction,
+    wal: WriteAheadLog,
+}
+
+impl<C: Cache> EngineCore<C> {
+    pub(crate) fn memtables(&self) -> &HashMap<String, Vec<MemTable>> {
+        &self.memtables
+    }
+    pub(crate) fn memtables_mut(&mut self) -> &mut HashMap<String, Vec<MemTable>> {
+        &mut self.memtables
+    }
+    pub(crate) fn memtable_bytes(&self) -> &HashMap<String, usize> {
+        &self.memtable_bytes
+    }
+    pub(crate) fn memtable_bytes_mut(&mut self) -> &mut HashMap<String, usize> {
+        &mut self.memtable_bytes
+    }
+    pub(crate) fn version_set(&self) -> &VersionSet<C> {
+        &self.version_set
+    }
+    pub(crate) fn version_set_mut(&mut self) -> &mut VersionSet<C> {
+        &mut self.version_set
+    }
+    pub(crate) fn compaction(&self) -> &Compaction {
+        &self.compaction
+    }
+    pub(crate) fn compaction_mut(&mut self) -> &mut Compaction {
+        &mut self.compaction
+    }
+    pub(crate) fn wal(&self) -> &WriteAheadLog {
+        &self.wal
+    }
+    pub(crate) fn wal_mut(&mut self) -> &mut WriteAheadLog {
+        &mut self.wal
+    }
 }
 
 /// The core engine that manages LSM-tree structure and compaction.
@@ -253,10 +287,8 @@ impl<C: Cache> Engine<C> {
     }
 
     /// Lock the core and return the guard.
-    pub(crate) fn lock_core(&self) -> Result<std::sync::MutexGuard<'_, EngineCore<C>>> {
-        self.core
-            .lock()
-            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in lock_core"))
+    pub(crate) fn lock_core(&self) -> parking_lot::MutexGuard<'_, EngineCore<C>> {
+        self.core.lock()
     }
 }
 
@@ -273,20 +305,20 @@ fn compact_cf_core<C: Cache>(
     options: &EngineOptions,
     cf: &str,
 ) -> Result<Option<CompactionMetrics>> {
-    let tables = core.version_set.get_tables(cf);
-    if tables.len() < core.compaction.options().compaction_threshold {
+    let tables = core.version_set().get_tables(cf);
+    if tables.len() < core.compaction().options().compaction_threshold {
         return Ok(None);
     }
 
-    let groups = core.compaction.pick_compaction(&tables, options);
+    let groups = core.compaction().pick_compaction(&tables, options);
     if groups.is_empty() {
         return Ok(None);
     }
 
     let mut all_metrics = CompactionMetrics::default();
     for group_indices in groups {
-        let (new_tables, metrics) = core.compaction.compact(&group_indices, &tables, options)?;
-        core.version_set
+        let (new_tables, metrics) = core.compaction_mut().compact(&group_indices, &tables, options)?;
+        core.version_set_mut()
             .atomic_replace(cf, &group_indices, new_tables);
         all_metrics.bytes_read += metrics.bytes_read;
         all_metrics.bytes_written += metrics.bytes_written;
@@ -377,22 +409,22 @@ impl<C: Cache> Engine<C> {
         for record in records {
             if record.is_deleted {
                 let cf = record.column_family.as_deref().unwrap_or("default");
-                let mem = core.memtables.entry(cf.to_string()).or_default();
+                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
                 if mem.is_empty() {
                     mem.push(MemTable::new());
                 }
                 let last = mem.len() - 1;
                 mem[last].delete(record.key.clone());
-                *core.memtable_bytes.entry(cf.to_string()).or_default() += record.key.len();
+                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() += record.key.len();
             } else {
                 let cf = record.column_family.as_deref().unwrap_or("default");
-                let mem = core.memtables.entry(cf.to_string()).or_default();
+                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
                 if mem.is_empty() {
                     mem.push(MemTable::new());
                 }
                 let last = mem.len() - 1;
                 mem[last].put(record.key.clone(), record.value.clone());
-                *core.memtable_bytes.entry(cf.to_string()).or_default() +=
+                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
                     record.key.len() + record.value.len();
             }
         }
@@ -406,25 +438,23 @@ impl<C: Cache> Engine<C> {
         let value_size = value.len();
         let needs_compact;
         {
-            let mut core = self.core.lock().map_err(|_| {
-                crate::infra::error::LsmError::LockPoisoned("engine core in put_cf")
-            })?;
+            let mut core = self.core.lock();
             // Write to WAL first (before modifying memtable) for crash safety
             let mut record = LogRecord::new(key.clone(), value.clone());
             record.column_family = Some(cf.to_string());
-            core.wal.write_record(&record)?;
+            core.wal_mut().write_record(&record)?;
 
-            let mem = core.memtables.entry(cf.to_string()).or_default();
+            let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
                 mem.push(MemTable::new());
             }
             let last = mem.len() - 1;
             mem[last].put(key.clone(), value.clone());
-            *core.memtable_bytes.entry(cf.to_string()).or_default() += key.len() + value.len();
+            *core.memtable_bytes_mut().entry(cf.to_string()).or_default() += key.len() + value.len();
             let write_buffer_limit =
                 self.options.write_buffer_size * self.options.max_write_buffer_number;
             needs_compact =
-                if core.memtable_bytes.get(cf).copied().unwrap_or(0) >= write_buffer_limit {
+                if core.memtable_bytes().get(cf).copied().unwrap_or(0) >= write_buffer_limit {
                     self.flush_memtable_impl(cf, &mut core)?
                 } else {
                     false
@@ -478,26 +508,24 @@ impl<C: Cache> Engine<C> {
         let key_str = String::from_utf8_lossy(&key).into_owned();
         let needs_compact;
         {
-            let mut core = self.core.lock().map_err(|_| {
-                crate::infra::error::LsmError::LockPoisoned("engine core in delete_cf")
-            })?;
+            let mut core = self.core.lock();
 
             // Write tombstone to WAL first (before modifying memtable) for crash safety
             let mut record = LogRecord::tombstone(key.clone());
             record.column_family = Some(cf.to_string());
-            core.wal.write_record(&record)?;
+            core.wal_mut().write_record(&record)?;
 
-            let mem = core.memtables.entry(cf.to_string()).or_default();
+            let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
                 mem.push(MemTable::new());
             }
             let last = mem.len() - 1;
             mem[last].delete(key.clone());
-            *core.memtable_bytes.entry(cf.to_string()).or_default() += key.len();
+            *core.memtable_bytes_mut().entry(cf.to_string()).or_default() += key.len();
             let write_buffer_limit =
                 self.options.write_buffer_size * self.options.max_write_buffer_number;
             needs_compact =
-                if core.memtable_bytes.get(cf).copied().unwrap_or(0) >= write_buffer_limit {
+                if core.memtable_bytes().get(cf).copied().unwrap_or(0) >= write_buffer_limit {
                     self.flush_memtable_impl(cf, &mut core)?
                 } else {
                     false
@@ -539,11 +567,8 @@ impl<C: Cache> Engine<C> {
         let key = key.as_ref();
         let start = std::time::Instant::now();
         let key_str = String::from_utf8_lossy(key).into_owned();
-        let core = self
-            .core
-            .lock()
-            .map_err(|_e| crate::infra::error::LsmError::LockPoisoned("engine core in get_cf"))?;
-        if let Some(memtables) = core.memtables.get(cf) {
+        let core = self.core.lock();
+        if let Some(memtables) = core.memtables().get(cf) {
             for mem in memtables.iter().rev() {
                 if let Some(v) = mem.data.get(key) {
                     let elapsed = start.elapsed();
@@ -561,7 +586,7 @@ impl<C: Cache> Engine<C> {
                 }
             }
         }
-        let result = core.version_set.get(cf, key);
+        let result = core.version_set().get(cf, key);
         let elapsed = start.elapsed();
         match &result {
             Some(v) => {
@@ -616,21 +641,18 @@ impl<C: Cache> Engine<C> {
         limit: Option<usize>,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let start = std::time::Instant::now();
-        let core = self
-            .core
-            .lock()
-            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in scan_cf"))?;
+        let core = self.core.lock();
         let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
 
         // 1. Memtables (newer first)
-        if let Some(memtables) = core.memtables.get(cf) {
+        if let Some(memtables) = core.memtables().get(cf) {
             for mem in memtables.iter().rev() {
                 iters.push(Box::new(InternalMemTableIterator::new(&mem.data)));
             }
         }
 
         // 2. SSTables (from VersionSet) — skip non-intersecting ranges
-        for sst_iter in core.version_set.table_iters_in_range(cf, lower, upper) {
+        for sst_iter in core.version_set().table_iters_in_range(cf, lower, upper) {
             iters.push(Box::new(sst_iter));
         }
 
@@ -743,19 +765,16 @@ impl<C: Cache> Engine<C> {
 
     pub fn keys(&self) -> Result<Vec<Vec<u8>>> {
         let start = std::time::Instant::now();
-        let core = self
-            .core
-            .lock()
-            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in keys"))?;
+        let core = self.core.lock();
         let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
 
-        if let Some(memtables) = core.memtables.get("default") {
+        if let Some(memtables) = core.memtables().get("default") {
             for mem in memtables.iter().rev() {
                 iters.push(Box::new(InternalMemTableIterator::new(&mem.data)));
             }
         }
 
-        for sst_iter in core.version_set.table_iters("default") {
+        for sst_iter in core.version_set().table_iters("default") {
             iters.push(Box::new(sst_iter));
         }
 
@@ -780,20 +799,17 @@ impl<C: Cache> Engine<C> {
 
     pub fn count(&self) -> Result<usize> {
         let start = std::time::Instant::now();
-        let core = self
-            .core
-            .lock()
-            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in count"))?;
+        let core = self.core.lock();
         let mut count = 0;
         let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
 
-        if let Some(memtables) = core.memtables.get("default") {
+        if let Some(memtables) = core.memtables().get("default") {
             for mem in memtables.iter().rev() {
                 count += mem.data.len();
             }
         }
 
-        for sst_iter in core.version_set.table_iters("default") {
+        for sst_iter in core.version_set().table_iters("default") {
             iters.push(Box::new(sst_iter));
         }
 
@@ -820,9 +836,7 @@ impl<C: Cache> Engine<C> {
     /// Public wrapper used by benchmarks and tests.
     pub fn flush_memtable(&self) -> Result<()> {
         let start = std::time::Instant::now();
-        let mut core = self.core.lock().map_err(|_| {
-            crate::infra::error::LsmError::LockPoisoned("engine core in flush_memtable")
-        })?;
+        let mut core = self.core.lock();
         self.flush_memtable_impl("default", &mut core)?;
         let elapsed = start.elapsed();
         tracing::info!(
@@ -835,12 +849,12 @@ impl<C: Cache> Engine<C> {
     }
 
     fn flush_memtable_impl(&self, cf: &str, core: &mut EngineCore<C>) -> Result<bool> {
-        if let Some(memtables) = core.memtables.get_mut(cf) {
+        if let Some(memtables) = core.memtables_mut().get_mut(cf) {
             if let Some(mem) = memtables.pop() {
                 let records = mem.data.len();
                 let table = Table::build(mem.data.into_iter().collect(), &self.options);
-                core.version_set.add_table(cf, table);
-                let bytes = core.memtable_bytes.get_mut(cf).ok_or_else(|| {
+                core.version_set_mut().add_table(cf, table);
+                let bytes = core.memtable_bytes_mut().get_mut(cf).ok_or_else(|| {
                     crate::LsmError::InvalidArgument(format!(
                         "Column family {} not found in memtable_bytes",
                         cf
@@ -851,7 +865,7 @@ impl<C: Cache> Engine<C> {
                 // ✅ FIX issue #107: Clear WAL while we hold the core lock
                 // ✅ FIX issue #122: Only remove records for the flushed CF,
                 // not the entire WAL (other CFs' data must survive).
-                core.wal
+                core.wal_mut()
                     .retain(|r| r.column_family.as_deref() != Some(cf))?;
 
                 tracing::info!(
@@ -864,7 +878,7 @@ impl<C: Cache> Engine<C> {
 
                 // Check if compaction might be needed after this flush
                 let threshold = self.options.compaction_options.compaction_threshold;
-                return Ok(core.version_set.table_count(cf) > threshold);
+                return Ok(core.version_set().table_count(cf) > threshold);
             }
         }
         Ok(false)
@@ -872,9 +886,7 @@ impl<C: Cache> Engine<C> {
 
     pub fn compact_cf(&self, cf: &str) -> Result<Option<CompactionMetrics>> {
         let start = std::time::Instant::now();
-        let mut core = self.core.lock().map_err(|_| {
-            crate::infra::error::LsmError::LockPoisoned("engine core in compact_cf")
-        })?;
+        let mut core = self.core.lock();
         let result = compact_cf_core(&mut core, &self.options, cf);
         let elapsed = start.elapsed();
         match &result {
@@ -914,11 +926,8 @@ impl<C: Cache> Engine<C> {
     pub fn compact(&self) -> Result<Vec<(String, CompactionMetrics)>> {
         let start = std::time::Instant::now();
         let mut results = Vec::new();
-        let core = self
-            .core
-            .lock()
-            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in compact"))?;
-        let column_families = core.version_set.column_families();
+        let core = self.core.lock();
+        let column_families = core.version_set().column_families();
         drop(core); // Release lock before calling compact_cf which will re-acquire
                     // Actually, we need the lock for compact_cf, so just call it per CF
         for cf in column_families {
@@ -949,10 +958,7 @@ impl<C: Cache> Engine<C> {
         // This prevents a TOCTOU race with close(): when close() holds
         // this lock, no new thread can be spawned and join-handle-stored
         // after close() has already taken the handle.
-        let mut thread_guard = match self.compaction_thread.lock() {
-            Ok(guard) => guard,
-            Err(_) => return,
-        };
+        let mut thread_guard = self.compaction_thread.lock();
 
         // Now we hold the lock. Check running flag again — close() may
         // have acquired this lock ahead of us and set running = false.
@@ -985,20 +991,17 @@ impl<C: Cache> Engine<C> {
                 }
 
                 let plans: Vec<CompactionPlan> = {
-                    let core = match core.lock() {
-                        Ok(guard) => guard,
-                        Err(_) => return,
-                    };
+                    let core = core.lock();
 
-                    core.version_set
+                    core.version_set()
                         .column_families()
                         .iter()
                         .filter_map(|cf| {
-                            let tables = core.version_set.get_tables(cf);
-                            if tables.len() < core.compaction.options().compaction_threshold {
+                            let tables = core.version_set().get_tables(cf);
+                            if tables.len() < core.compaction().options().compaction_threshold {
                                 return None;
                             }
-                            let groups = core.compaction.pick_compaction(&tables, &options);
+                            let groups = core.compaction().pick_compaction(&tables, &options);
                             if groups.is_empty() {
                                 return None;
                             }
@@ -1006,7 +1009,7 @@ impl<C: Cache> Engine<C> {
                                 cf: cf.clone(),
                                 tables,
                                 groups,
-                                compaction: core.compaction.clone(),
+                                compaction: core.compaction().clone(),
                                 options: options.clone(),
                             })
                         })
@@ -1037,11 +1040,10 @@ impl<C: Cache> Engine<C> {
                 }
 
                 // ── Phase 3: Re-acquire lock and apply results ──
-                if let Ok(mut core) = core.lock() {
-                    for (cf, group_indices, new_tables) in results {
-                        core.version_set
-                            .atomic_replace(&cf, &group_indices, new_tables);
-                    }
+                let mut core = core.lock();
+                for (cf, group_indices, new_tables) in results {
+                    core.version_set_mut()
+                        .atomic_replace(&cf, &group_indices, new_tables);
                 }
             }));
 
@@ -1072,28 +1074,24 @@ impl<C: Cache> Engine<C> {
         //   a) blocks until we release the lock, at which point running=false
         //      prevents it from spawning; or
         //   b) has already stored its handle under the lock, so we'll find it here.
-        if let Ok(mut handle_opt) = self.compaction_thread.lock() {
-            self.compaction_running.store(false, Ordering::Release);
-            if let Some(handle) = handle_opt.take() {
-                match handle.join() {
-                    Ok(()) => {}
-                    Err(e) => {
-                        tracing::error!("Compaction thread panicked on shutdown: {:?}", e);
-                    }
+        let mut handle_opt = self.compaction_thread.lock();
+        self.compaction_running.store(false, Ordering::Release);
+        if let Some(handle) = handle_opt.take() {
+            match handle.join() {
+                Ok(()) => {}
+                Err(e) => {
+                    tracing::error!("Compaction thread panicked on shutdown: {:?}", e);
                 }
             }
         }
     }
 
     pub fn stats(&self, cf: &str) -> Result<LsmStats> {
-        let core = self
-            .core
-            .lock()
-            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in stats"))?;
+        let core = self.core.lock();
         let mut stats = LsmStats::default();
 
         // Get stats from version set
-        let vs_stats = core.version_set.stats(cf);
+        let vs_stats = core.version_set().stats(cf);
         stats.num_tables = vs_stats.num_tables;
         stats.total_size = vs_stats.total_size;
         stats.total_records = vs_stats.total_records;
@@ -1104,27 +1102,24 @@ impl<C: Cache> Engine<C> {
         stats.num_tables_at_max = vs_stats.num_tables_at_max;
 
         // Memtable stats
-        if let Some(memtables) = core.memtables.get(cf) {
+        if let Some(memtables) = core.memtables().get(cf) {
             stats.mem_records = memtables.iter().map(|m| m.data.len()).sum();
-            stats.mem_kb = core.memtable_bytes.get(cf).copied().unwrap_or(0) / 1024;
+            stats.mem_kb = core.memtable_bytes().get(cf).copied().unwrap_or(0) / 1024;
         }
 
         // WAL stats
-        stats.wal_kb = core.wal.size()? as usize / 1024;
+        stats.wal_kb = core.wal().size()? as usize / 1024;
 
         Ok(stats)
     }
 
     pub fn stats_all(&self) -> Result<LsmStats> {
-        let core = self
-            .core
-            .lock()
-            .map_err(|_| crate::infra::error::LsmError::LockPoisoned("engine core in stats_all"))?;
+        let core = self.core.lock();
         let mut combined = LsmStats::default();
-        let column_families = core.version_set.column_families();
+        let column_families = core.version_set().column_families();
 
         for cf in column_families {
-            let vs_stats = core.version_set.stats(&cf);
+            let vs_stats = core.version_set().stats(&cf);
             combined.num_tables += vs_stats.num_tables;
             combined.total_size += vs_stats.total_size;
             combined.total_records += vs_stats.total_records;
@@ -1133,13 +1128,13 @@ impl<C: Cache> Engine<C> {
             combined.sst_records += vs_stats.sst_records;
 
             // Memtable stats per CF
-            if let Some(memtables) = core.memtables.get(&cf) {
+            if let Some(memtables) = core.memtables().get(&cf) {
                 combined.mem_records += memtables.iter().map(|m| m.data.len()).sum::<usize>();
-                combined.mem_kb += core.memtable_bytes.get(&cf).copied().unwrap_or(0) / 1024;
+                combined.mem_kb += core.memtable_bytes().get(&cf).copied().unwrap_or(0) / 1024;
             }
         }
 
-        combined.wal_kb = core.wal.size()? as usize / 1024;
+        combined.wal_kb = core.wal().size()? as usize / 1024;
 
         Ok(combined)
     }
@@ -1166,6 +1161,129 @@ impl<C: Cache> Engine<C> {
         // All bytes were 0xFF, so we need to extend
         result.push(0);
         Some(result)
+    }
+
+    /// Atomically insert a batch of key-value pairs into the default column family.
+    ///
+    /// All items are written to WAL and memtable under a single core lock
+    /// acquisition, then compaction is triggered outside the lock if needed.
+    pub fn set_batch<K, V>(&self, items: &[(K, V)]) -> Result<()>
+    where
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>,
+    {
+        self.set_batch_cf("default", items)
+    }
+
+    /// Atomically insert a batch of key-value pairs into the specified column family.
+    ///
+    /// All items are written to WAL and memtable under a single core lock
+    /// acquisition, then compaction is triggered outside the lock if needed.
+    pub fn set_batch_cf<K, V>(&self, cf: &str, items: &[(K, V)]) -> Result<()>
+    where
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>,
+    {
+        let start = std::time::Instant::now();
+        let needs_compact;
+        {
+            let mut core = self.core.lock();
+            for (key, value) in items {
+                let mut record = LogRecord::new(key.as_ref().to_vec(), value.as_ref().to_vec());
+                record.column_family = Some(cf.to_string());
+                core.wal_mut().write_record(&record)?;
+
+                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
+                if mem.is_empty() {
+                    mem.push(MemTable::new());
+                }
+                let last = mem.len() - 1;
+                mem[last].put(key.as_ref().to_vec(), value.as_ref().to_vec());
+                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
+                    key.as_ref().len() + value.as_ref().len();
+            }
+            let write_buffer_limit =
+                self.options.write_buffer_size * self.options.max_write_buffer_number;
+            needs_compact =
+                if core.memtable_bytes().get(cf).copied().unwrap_or(0) >= write_buffer_limit {
+                    self.flush_memtable_impl(cf, &mut core)?
+                } else {
+                    false
+                };
+        }
+        let elapsed = start.elapsed();
+        tracing::debug!(
+            target: "apexstore::engine",
+            operation = "set_batch_cf",
+            cf = cf,
+            count = items.len(),
+            duration_us = elapsed.as_micros() as u64,
+            needs_compact = needs_compact,
+        );
+        if needs_compact {
+            self.maybe_compact();
+        }
+        Ok(())
+    }
+
+    /// Atomically delete a batch of keys from the default column family.
+    ///
+    /// Tombstones are written to WAL and memtable under a single core lock
+    /// acquisition, then compaction is triggered outside the lock if needed.
+    pub fn delete_batch<K>(&self, keys: &[K]) -> Result<()>
+    where
+        K: AsRef<[u8]>,
+    {
+        self.delete_batch_cf("default", keys)
+    }
+
+    /// Atomically delete a batch of keys from the specified column family.
+    ///
+    /// Tombstones are written to WAL and memtable under a single core lock
+    /// acquisition, then compaction is triggered outside the lock if needed.
+    pub fn delete_batch_cf<K>(&self, cf: &str, keys: &[K]) -> Result<()>
+    where
+        K: AsRef<[u8]>,
+    {
+        let start = std::time::Instant::now();
+        let needs_compact;
+        {
+            let mut core = self.core.lock();
+            for key in keys {
+                let mut record = LogRecord::tombstone(key.as_ref().to_vec());
+                record.column_family = Some(cf.to_string());
+                core.wal_mut().write_record(&record)?;
+
+                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
+                if mem.is_empty() {
+                    mem.push(MemTable::new());
+                }
+                let last = mem.len() - 1;
+                mem[last].delete(key.as_ref().to_vec());
+                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() += key.as_ref().len();
+            }
+            let write_buffer_limit =
+                self.options.write_buffer_size * self.options.max_write_buffer_number;
+            needs_compact =
+                if core.memtable_bytes().get(cf).copied().unwrap_or(0) >= write_buffer_limit {
+                    self.flush_memtable_impl(cf, &mut core)?
+                } else {
+                    false
+                };
+        }
+        let elapsed = start.elapsed();
+        tracing::debug!(
+            target: "apexstore::engine",
+            operation = "delete_batch_cf",
+            cf = cf,
+            count = keys.len(),
+            duration_us = elapsed.as_micros() as u64,
+            needs_compact = needs_compact,
+        );
+        if needs_compact {
+            self.maybe_compact();
+        }
+        Ok(())
     }
 }
 
@@ -1906,7 +2024,7 @@ mod tests {
         // Insert some keys via the SSTable path (bypassing memtable)
         // We create a VersionSet with a table that has a bloom filter and
         // verify that reading an absent key doesn't iterate table data.
-        let mut core = engine.lock_core().unwrap();
+        let mut core = engine.lock_core();
         let mut data = BTreeMap::new();
         data.insert(b"present_key".to_vec(), b"present_value".to_vec());
         let mut table = Table::build(data, &engine.options);
@@ -1916,17 +2034,17 @@ mod tests {
         table.bloom_filter = Some(bf);
         table.min_key = b"present_key".to_vec();
         table.max_key = b"present_key".to_vec();
-        core.version_set.add_table("default", table);
+        core.version_set_mut().add_table("default", table);
 
         // Reading an absent key should return None (bloom filter says no)
-        let result = core.version_set.get("default", b"absent_key");
+        let result = core.version_set().get("default", b"absent_key");
         assert!(
             result.is_none(),
             "Absent key should return None via Bloom filter"
         );
 
         // Reading a present key should succeed
-        let result = core.version_set.get("default", b"present_key");
+        let result = core.version_set().get("default", b"present_key");
         assert_eq!(result, Some(b"present_value".to_vec()));
     }
 
@@ -1940,23 +2058,23 @@ mod tests {
         let engine = Engine::<NoopCache>::new_from_config(&config, NoopCache).unwrap();
 
         // Insert a key into the version set directly
-        let mut core = engine.lock_core().unwrap();
+        let mut core = engine.lock_core();
         let mut data = BTreeMap::new();
         data.insert(b"cached_key".to_vec(), b"cached_value".to_vec());
         let table = Table::build(data, &engine.options);
-        core.version_set.add_table("default", table);
+        core.version_set_mut().add_table("default", table);
 
         // First read populates the KV cache
-        let r1 = core.version_set.get("default", b"cached_key");
+        let r1 = core.version_set().get("default", b"cached_key");
         assert_eq!(r1, Some(b"cached_value".to_vec()));
 
         // Second read should hit the KV cache (cache populated by first read)
-        let r2 = core.version_set.get("default", b"cached_key");
+        let r2 = core.version_set().get("default", b"cached_key");
         assert_eq!(r2, Some(b"cached_value".to_vec()));
 
         // Verify cache stats by checking that clearing the cache still works
-        core.version_set.clear_cache();
-        let r3 = core.version_set.get("default", b"cached_key");
+        core.version_set().clear_cache();
+        let r3 = core.version_set().get("default", b"cached_key");
         assert_eq!(
             r3,
             Some(b"cached_value".to_vec()),
@@ -1972,7 +2090,7 @@ mod tests {
         config.core.dir_path = dir.path().to_path_buf();
         let engine = Engine::<NoopCache>::new_from_config(&config, NoopCache).unwrap();
 
-        let mut core = engine.lock_core().unwrap();
+        let mut core = engine.lock_core();
 
         // Table 1: keys "a" to "c"
         let mut data1 = BTreeMap::new();
@@ -1982,7 +2100,7 @@ mod tests {
         let mut t1 = Table::build(data1, &engine.options);
         t1.min_key = b"a".to_vec();
         t1.max_key = b"c".to_vec();
-        core.version_set.add_table("default", t1);
+        core.version_set_mut().add_table("default", t1);
 
         // Table 2: keys "x" to "z"
         let mut data2 = BTreeMap::new();
@@ -1992,7 +2110,7 @@ mod tests {
         let mut t2 = Table::build(data2, &engine.options);
         t2.min_key = b"x".to_vec();
         t2.max_key = b"z".to_vec();
-        core.version_set.add_table("default", t2);
+        core.version_set_mut().add_table("default", t2);
 
         // Table 3: keys "m" to "p"
         let mut data3 = BTreeMap::new();
@@ -2002,7 +2120,7 @@ mod tests {
         let mut t3 = Table::build(data3, &engine.options);
         t3.min_key = b"m".to_vec();
         t3.max_key = b"o".to_vec();
-        core.version_set.add_table("default", t3);
+        core.version_set_mut().add_table("default", t3);
 
         // Drop the core lock so scan_cf can acquire it
         drop(core);
@@ -2174,5 +2292,171 @@ mod tests {
             "Bloom filter negative read avg {:?} exceeds 10µs",
             elapsed
         );
+    }
+
+    // ── Issue #152: Batch atomicity tests ──
+
+    #[test]
+    fn test_set_batch_atomicity() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Insert a batch of items
+        let items: Vec<(&str, &str)> = vec![
+            ("k1", "v1"),
+            ("k2", "v2"),
+            ("k3", "v3"),
+        ];
+        engine.set_batch(&items).unwrap();
+
+        // Verify all items were written
+        assert_eq!(engine.get("k1").unwrap(), Some(b"v1".to_vec()));
+        assert_eq!(engine.get("k2").unwrap(), Some(b"v2".to_vec()));
+        assert_eq!(engine.get("k3").unwrap(), Some(b"v3".to_vec()));
+    }
+
+    #[test]
+    fn test_delete_batch_atomicity() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let mut engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Insert individual items
+        engine.set("k1", "v1").unwrap();
+        engine.set("k2", "v2").unwrap();
+        engine.set("k3", "v3").unwrap();
+        engine.set("k4", "v4").unwrap();
+
+        // Delete a batch of keys
+        let keys_to_delete = vec!["k2", "k4"];
+        engine.delete_batch(&keys_to_delete).unwrap();
+
+        // Verify deleted keys are gone
+        assert_eq!(engine.get("k1").unwrap(), Some(b"v1".to_vec()));
+        assert_eq!(engine.get("k2").unwrap(), None);
+        assert_eq!(engine.get("k3").unwrap(), Some(b"v3".to_vec()));
+        assert_eq!(engine.get("k4").unwrap(), None);
+    }
+
+    #[test]
+    fn test_set_batch_cf_atomicity() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Insert batch into a non-default column family
+        let items: Vec<(&str, &str)> = vec![
+            ("cf1:k1", "v1"),
+            ("cf1:k2", "v2"),
+        ];
+        engine.set_batch_cf("custom_cf", &items).unwrap();
+
+        // Verify items are in the custom CF
+        assert_eq!(
+            engine.get_cf("custom_cf", b"cf1:k1").unwrap(),
+            Some(b"v1".to_vec())
+        );
+        assert_eq!(
+            engine.get_cf("custom_cf", b"cf1:k2").unwrap(),
+            Some(b"v2".to_vec())
+        );
+
+        // Verify items are NOT in the default CF
+        assert_eq!(engine.get_cf("default", b"cf1:k1").unwrap(), None);
+    }
+
+    #[test]
+    fn test_delete_batch_cf_atomicity() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let mut engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Insert items into custom CF
+        engine.put_cf("cf_del", b"dk1".to_vec(), b"dv1".to_vec()).unwrap();
+        engine.put_cf("cf_del", b"dk2".to_vec(), b"dv2".to_vec()).unwrap();
+        engine.put_cf("cf_del", b"dk3".to_vec(), b"dv3".to_vec()).unwrap();
+
+        // Delete batch from custom CF
+        let keys_to_delete: Vec<&[u8]> = vec![b"dk1", b"dk3"];
+        engine.delete_batch_cf("cf_del", &keys_to_delete).unwrap();
+
+        // Verify atomic deletion
+        assert_eq!(engine.get_cf("cf_del", b"dk1").unwrap(), None);
+        assert_eq!(engine.get_cf("cf_del", b"dk2").unwrap(), Some(b"dv2".to_vec()));
+        assert_eq!(engine.get_cf("cf_del", b"dk3").unwrap(), None);
+    }
+
+    #[test]
+    fn test_set_batch_empty() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Empty batch should succeed without error
+        let items: Vec<(&str, &str)> = vec![];
+        engine.set_batch(&items).unwrap();
+        assert_eq!(engine.scan().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_delete_batch_empty() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let mut engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        engine.set("k1", "v1").unwrap();
+        // Empty delete batch should succeed without removing anything
+        let keys: Vec<&str> = vec![];
+        engine.delete_batch(&keys).unwrap();
+        assert_eq!(engine.get("k1").unwrap(), Some(b"v1".to_vec()));
     }
 }

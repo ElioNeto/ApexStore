@@ -1,7 +1,8 @@
 use crate::storage::cache::Cache;
 use lru::LruCache;
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 /// Statistics returned by `VersionSet::stats()`.
 pub struct VersionStats {
@@ -38,22 +39,20 @@ impl<C: Cache> VersionSet<C> {
 
     /// Check if a key is cached.
     pub fn get_cached(&self, key: &[u8]) -> Option<Vec<u8>> {
-        let mut cache = self.kv_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = self.kv_cache.lock();
         cache.get(key).cloned()
     }
 
     /// Store a key-value pair in the cache.
     pub fn put_cached(&self, key: Vec<u8>, value: Vec<u8>) {
-        let mut cache = self.kv_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = self.kv_cache.lock();
         cache.put(key, value);
     }
 
     /// Clear the entire KV cache. Should be called after compaction or flush
     /// to prevent stale results.
     pub fn clear_cache(&self) {
-        if let Ok(mut cache) = self.kv_cache.lock() {
-            cache.clear();
-        }
+        self.kv_cache.lock().clear();
     }
 
     pub fn get(&self, cf: &str, key: &[u8]) -> Option<Vec<u8>> {
