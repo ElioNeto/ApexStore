@@ -56,7 +56,7 @@ jobs:
       - name: Run benchmark (CI mode)
         run: |
           cargo bench --bench ${{ matrix.bench }} -- --noplot 2>&1 | tee bench_output.txt
-          exit ${PIPESTATUS[0]}
+          exit "${PIPESTATUS[0]}"
         continue-on-error: true
         env:
           CI: true
@@ -140,9 +140,11 @@ jobs:
             bench_output_stress_bench.txt; do
             if [ -f "$f" ]; then
               SECTION="=== $(echo "$f" | sed 's/bench_output_//; s/.txt//') ==="
-              echo "$SECTION" >> bench_combined.txt
-              cat "$f" >> bench_combined.txt
-              echo "" >> bench_combined.txt
+              {
+                  echo "$SECTION"
+                  cat "$f"
+                  echo ""
+              } >> bench_combined.txt
             fi
           done
           cp bench_combined.txt bench_output.txt
