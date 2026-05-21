@@ -324,8 +324,7 @@ impl WriteAheadLog {
         let all_records = self.recover()?;
 
         // 2. Filter
-        let survivors: Vec<LogRecord> =
-            all_records.into_iter().filter(|r| predicate(r)).collect();
+        let survivors: Vec<LogRecord> = all_records.into_iter().filter(|r| predicate(r)).collect();
 
         // 3. Write survivors to a temp file first (crash-safe: original is untouched)
         let tmp_path = self.path.with_extension("wal.tmp");

@@ -8,7 +8,7 @@
 //!   SEARCH <q> [--prefix] | SCAN <prefix> | ALL | KEYS | COUNT
 //!   STATS [ALL] | BATCH <n> | BATCH SET <file> | DEMO | CLEAR | HELP
 
-use apexstore::{LsmConfig, LsmEngine, LsmError, LsmStats, LogLevel, UsageLog};
+use apexstore::{LogLevel, LsmConfig, LsmEngine, LsmError, LsmStats, UsageLog};
 use chrono::Local;
 use crossterm::{
     event::{
@@ -25,12 +25,12 @@ use ratatui::{
     widgets::{BarChart, Block, Borders, Clear, Gauge, List, ListItem, Padding, Paragraph, Wrap},
     Frame, Terminal,
 };
+use std::collections::VecDeque;
 use std::{
     io, panic,
     path::PathBuf,
     time::{Duration, Instant},
 };
-use std::collections::VecDeque;
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
@@ -81,9 +81,18 @@ struct App {
 impl App {
     fn new(engine: LsmEngine) -> Self {
         let mut user_log = UsageLog::with_capacity(300);
-        user_log.push(apexstore::UsageEntry::new(LogLevel::Info, "ApexStore TUI Dashboard — engine ready.").with_duration(0.0));
-        user_log.push(apexstore::UsageEntry::new(LogLevel::Info, "Type HELP for available commands."));
-        user_log.push(apexstore::UsageEntry::new(LogLevel::Debug, "\u{2500}".repeat(54)));
+        user_log.push(
+            apexstore::UsageEntry::new(LogLevel::Info, "ApexStore TUI Dashboard — engine ready.")
+                .with_duration(0.0),
+        );
+        user_log.push(apexstore::UsageEntry::new(
+            LogLevel::Info,
+            "Type HELP for available commands.",
+        ));
+        user_log.push(apexstore::UsageEntry::new(
+            LogLevel::Debug,
+            "\u{2500}".repeat(54),
+        ));
         let mut ops_history = VecDeque::with_capacity(24);
         for _ in 0..24 {
             ops_history.push_back(0u64);
@@ -188,9 +197,10 @@ impl App {
                         );
                         self.incr_ops();
                     }
-                    Ok(None) => {
-                        self.log_push(format!("\u{26a0}  Key '{}' not found", parts[1]), LogLevel::Warn)
-                    }
+                    Ok(None) => self.log_push(
+                        format!("\u{26a0}  Key '{}' not found", parts[1]),
+                        LogLevel::Warn,
+                    ),
                     Err(e) => self.log_push(format!("\u{274c} {}", e), LogLevel::Error),
                 }
             }
@@ -204,7 +214,10 @@ impl App {
                 let key = parts[1].to_string();
                 match self.engine.delete(key.clone()) {
                     Ok(_) => {
-                        self.log_push(format!("\u{2713} DEL '{}' (tombstone written)", key), LogLevel::Success);
+                        self.log_push(
+                            format!("\u{2713} DEL '{}' (tombstone written)", key),
+                            LogLevel::Success,
+                        );
                         self.incr_ops();
                     }
                     Err(e) => self.log_push(format!("\u{274c} {}", e), LogLevel::Error),
@@ -233,7 +246,10 @@ impl App {
                 if rows.is_empty() {
                     self.log_push("\u{26a0}  No records found", LogLevel::Warn);
                 } else {
-                    self.log_push(format!("\u{2713} {} record(s) found:", rows.len()), LogLevel::Success);
+                    self.log_push(
+                        format!("\u{2713} {} record(s) found:", rows.len()),
+                        LogLevel::Success,
+                    );
                     for (k, v) in rows.iter().take(20) {
                         self.log_push(
                             format!(
@@ -245,7 +261,10 @@ impl App {
                         );
                     }
                     if rows.len() > 20 {
-                        self.log_push(format!("  ... and {} more", rows.len() - 20), LogLevel::Debug);
+                        self.log_push(
+                            format!("  ... and {} more", rows.len() - 20),
+                            LogLevel::Debug,
+                        );
                     }
                     self.incr_ops();
                 }
@@ -283,7 +302,10 @@ impl App {
                         );
                     }
                     if rows.len() > 20 {
-                        self.log_push(format!("  ... and {} more", rows.len() - 20), LogLevel::Debug);
+                        self.log_push(
+                            format!("  ... and {} more", rows.len() - 20),
+                            LogLevel::Debug,
+                        );
                     }
                     self.incr_ops();
                 }
@@ -297,7 +319,10 @@ impl App {
                         self.log_push("\u{26a0}  Database is empty", LogLevel::Warn)
                     }
                     Ok(rows) => {
-                        self.log_push(format!("\u{2713} {} record(s):", rows.len()), LogLevel::Success);
+                        self.log_push(
+                            format!("\u{2713} {} record(s):", rows.len()),
+                            LogLevel::Success,
+                        );
                         for (k, v) in rows.iter().take(30) {
                             self.log_push(
                                 format!(
@@ -309,7 +334,10 @@ impl App {
                             );
                         }
                         if rows.len() > 30 {
-                            self.log_push(format!("  ... and {} more", rows.len() - 30), LogLevel::Debug);
+                            self.log_push(
+                                format!("  ... and {} more", rows.len() - 30),
+                                LogLevel::Debug,
+                            );
                         }
                         self.incr_ops();
                     }
@@ -321,9 +349,14 @@ impl App {
             "KEYS" => {
                 let res: Result<Vec<Vec<u8>>, LsmError> = self.engine.keys();
                 match res {
-                    Ok(keys) if keys.is_empty() => self.log_push("\u{26a0}  No keys found", LogLevel::Warn),
+                    Ok(keys) if keys.is_empty() => {
+                        self.log_push("\u{26a0}  No keys found", LogLevel::Warn)
+                    }
                     Ok(keys) => {
-                        self.log_push(format!("\u{2713} {} key(s):", keys.len()), LogLevel::Success);
+                        self.log_push(
+                            format!("\u{2713} {} key(s):", keys.len()),
+                            LogLevel::Success,
+                        );
                         for (i, k) in keys.iter().enumerate().take(30) {
                             self.log_push(
                                 format!("  {}. {}", i + 1, String::from_utf8_lossy(k)),
@@ -331,7 +364,10 @@ impl App {
                             );
                         }
                         if keys.len() > 30 {
-                            self.log_push(format!("  ... and {} more", keys.len() - 30), LogLevel::Debug);
+                            self.log_push(
+                                format!("  ... and {} more", keys.len() - 30),
+                                LogLevel::Debug,
+                            );
                         }
                         self.incr_ops();
                     }
@@ -342,7 +378,10 @@ impl App {
             // COUNT ────────────────────────────────────────────────────────────
             "COUNT" => match self.engine.count() {
                 Ok(n) => {
-                    self.log_push(format!("\u{2713} Total active records: {}", n), LogLevel::Success);
+                    self.log_push(
+                        format!("\u{2713} Total active records: {}", n),
+                        LogLevel::Success,
+                    );
                     self.incr_ops();
                 }
                 Err(e) => self.log_push(format!("\u{274c} {}", e), LogLevel::Error),
@@ -370,13 +409,22 @@ impl App {
                                 ),
                                 LogLevel::Info,
                             );
-                            self.log_push(format!("  SSTable files    : {}", s.sst_files), LogLevel::Info);
+                            self.log_push(
+                                format!("  SSTable files    : {}", s.sst_files),
+                                LogLevel::Info,
+                            );
                             self.log_push(
                                 format!("  SSTable records  : {}", s.sst_records),
                                 LogLevel::Info,
                             );
-                            self.log_push(format!("  SSTable size     : {} KB", s.sst_kb), LogLevel::Info);
-                            self.log_push(format!("  WAL size         : {} KB", s.wal_kb), LogLevel::Info);
+                            self.log_push(
+                                format!("  SSTable size     : {} KB", s.sst_kb),
+                                LogLevel::Info,
+                            );
+                            self.log_push(
+                                format!("  WAL size         : {} KB", s.wal_kb),
+                                LogLevel::Info,
+                            );
                             self.log_push(
                                 format!("  Total records    : {}", s.total_records),
                                 LogLevel::Info,
@@ -387,9 +435,18 @@ impl App {
                 } else {
                     match self.engine.stats("default") {
                         Ok(s) => {
-                            self.log_push(format!("  Total records: {}", s.total_records), LogLevel::Info);
-                            self.log_push(format!("  Num tables:    {}", s.num_tables), LogLevel::Info);
-                            self.log_push(format!("  Total size:    {}", s.total_size), LogLevel::Info);
+                            self.log_push(
+                                format!("  Total records: {}", s.total_records),
+                                LogLevel::Info,
+                            );
+                            self.log_push(
+                                format!("  Num tables:    {}", s.num_tables),
+                                LogLevel::Info,
+                            );
+                            self.log_push(
+                                format!("  Total size:    {}", s.total_size),
+                                LogLevel::Info,
+                            );
                         }
                         Err(e) => self.log_push(format!("\u{274c} {}", e), LogLevel::Error),
                     }
@@ -481,10 +538,14 @@ impl App {
                                 LogLevel::Success,
                             );
                         }
-                        Err(_) => self.log_push("\u{274c} BATCH: invalid count".to_string(), LogLevel::Error),
+                        Err(_) => self
+                            .log_push("\u{274c} BATCH: invalid count".to_string(), LogLevel::Error),
                     }
                 } else {
-                    self.log_push("\u{274c} Usage: BATCH <n>  |  BATCH SET <file>", LogLevel::Error);
+                    self.log_push(
+                        "\u{274c} Usage: BATCH <n>  |  BATCH SET <file>",
+                        LogLevel::Error,
+                    );
                 }
             }
 
@@ -532,7 +593,10 @@ impl App {
 
             // HELP ─────────────────────────────────────────────────────────────
             "HELP" | "?" => {
-                self.log_push("\u{2500} Available Commands \u{2500}".to_string(), LogLevel::Info);
+                self.log_push(
+                    "\u{2500} Available Commands \u{2500}".to_string(),
+                    LogLevel::Info,
+                );
                 for line in [
                     "  SET <key> <value>         insert/update",
                     "  GET <key>                 retrieve value",
@@ -1018,7 +1082,10 @@ fn render_log(f: &mut Frame, area: Rect, app: &App) {
                 format!("{} [{}]{}{} {}", ts, level_label, key_info, duration, msg)
             };
 
-            ListItem::new(Line::from(Span::styled(display, Style::default().fg(level_color))))
+            ListItem::new(Line::from(Span::styled(
+                display,
+                Style::default().fg(level_color),
+            )))
         })
         .collect();
 

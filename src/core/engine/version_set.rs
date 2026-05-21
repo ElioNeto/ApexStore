@@ -1,7 +1,7 @@
 use crate::storage::cache::Cache;
 use lru::LruCache;
-use std::num::NonZeroUsize;
 use parking_lot::Mutex;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 /// Statistics returned by `VersionSet::stats()`.

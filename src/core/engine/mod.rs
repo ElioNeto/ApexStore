@@ -7,9 +7,9 @@ use crate::core::table::Table;
 use crate::infra::error::Result;
 use crate::storage::cache::Cache;
 use crate::storage::wal::WriteAheadLog;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -317,7 +317,9 @@ fn compact_cf_core<C: Cache>(
 
     let mut all_metrics = CompactionMetrics::default();
     for group_indices in groups {
-        let (new_tables, metrics) = core.compaction_mut().compact(&group_indices, &tables, options)?;
+        let (new_tables, metrics) =
+            core.compaction_mut()
+                .compact(&group_indices, &tables, options)?;
         core.version_set_mut()
             .atomic_replace(cf, &group_indices, new_tables);
         all_metrics.bytes_read += metrics.bytes_read;
@@ -450,7 +452,8 @@ impl<C: Cache> Engine<C> {
             }
             let last = mem.len() - 1;
             mem[last].put(key.clone(), value.clone());
-            *core.memtable_bytes_mut().entry(cf.to_string()).or_default() += key.len() + value.len();
+            *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
+                key.len() + value.len();
             let write_buffer_limit =
                 self.options.write_buffer_size * self.options.max_write_buffer_number;
             needs_compact =
@@ -2311,11 +2314,7 @@ mod tests {
         .unwrap();
 
         // Insert a batch of items
-        let items: Vec<(&str, &str)> = vec![
-            ("k1", "v1"),
-            ("k2", "v2"),
-            ("k3", "v3"),
-        ];
+        let items: Vec<(&str, &str)> = vec![("k1", "v1"), ("k2", "v2"), ("k3", "v3")];
         engine.set_batch(&items).unwrap();
 
         // Verify all items were written
@@ -2370,10 +2369,7 @@ mod tests {
         .unwrap();
 
         // Insert batch into a non-default column family
-        let items: Vec<(&str, &str)> = vec![
-            ("cf1:k1", "v1"),
-            ("cf1:k2", "v2"),
-        ];
+        let items: Vec<(&str, &str)> = vec![("cf1:k1", "v1"), ("cf1:k2", "v2")];
         engine.set_batch_cf("custom_cf", &items).unwrap();
 
         // Verify items are in the custom CF
@@ -2405,9 +2401,15 @@ mod tests {
         .unwrap();
 
         // Insert items into custom CF
-        engine.put_cf("cf_del", b"dk1".to_vec(), b"dv1".to_vec()).unwrap();
-        engine.put_cf("cf_del", b"dk2".to_vec(), b"dv2".to_vec()).unwrap();
-        engine.put_cf("cf_del", b"dk3".to_vec(), b"dv3".to_vec()).unwrap();
+        engine
+            .put_cf("cf_del", b"dk1".to_vec(), b"dv1".to_vec())
+            .unwrap();
+        engine
+            .put_cf("cf_del", b"dk2".to_vec(), b"dv2".to_vec())
+            .unwrap();
+        engine
+            .put_cf("cf_del", b"dk3".to_vec(), b"dv3".to_vec())
+            .unwrap();
 
         // Delete batch from custom CF
         let keys_to_delete: Vec<&[u8]> = vec![b"dk1", b"dk3"];
@@ -2415,7 +2417,10 @@ mod tests {
 
         // Verify atomic deletion
         assert_eq!(engine.get_cf("cf_del", b"dk1").unwrap(), None);
-        assert_eq!(engine.get_cf("cf_del", b"dk2").unwrap(), Some(b"dv2".to_vec()));
+        assert_eq!(
+            engine.get_cf("cf_del", b"dk2").unwrap(),
+            Some(b"dv2".to_vec())
+        );
         assert_eq!(engine.get_cf("cf_del", b"dk3").unwrap(), None);
     }
 

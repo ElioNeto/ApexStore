@@ -243,24 +243,33 @@ impl UsageLog {
         self.ops_count += 1;
         self.ops_scan += 1;
         self.push(
-            UsageEntry::new(LogLevel::Success, format!(" SCAN prefix='{}' ({} rows)", prefix, count))
-                .with_duration(duration_ms),
+            UsageEntry::new(
+                LogLevel::Success,
+                format!(" SCAN prefix='{}' ({} rows)", prefix, count),
+            )
+            .with_duration(duration_ms),
         );
     }
 
     /// Log a COMPACTION event.
     pub fn log_compaction(&mut self, cf: &str, files_merged: usize, duration_ms: f64) {
         self.push(
-            UsageEntry::new(LogLevel::Info, format!(" Compaction (CF={}, files={})", cf, files_merged))
-                .with_duration(duration_ms),
+            UsageEntry::new(
+                LogLevel::Info,
+                format!(" Compaction (CF={}, files={})", cf, files_merged),
+            )
+            .with_duration(duration_ms),
         );
     }
 
     /// Log a FLUSH event.
     pub fn log_flush(&mut self, cf: &str, records: usize, duration_ms: f64) {
         self.push(
-            UsageEntry::new(LogLevel::Info, format!(" Flush (CF={}, {} records)", cf, records))
-                .with_duration(duration_ms),
+            UsageEntry::new(
+                LogLevel::Info,
+                format!(" Flush (CF={}, {} records)", cf, records),
+            )
+            .with_duration(duration_ms),
         );
     }
 
