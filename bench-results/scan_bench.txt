@@ -1,0 +1,36 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on artifact directory
+    Finished `bench` profile [optimized] target(s) in 2.36s
+     Running benches/scan_bench.rs (target/release/deps/scan_bench-34b6504d0d81a8ea)
+Gnuplot not found, using plotters backend
+Benchmarking full_scan/1000
+Benchmarking full_scan/1000: Warming up for 1.0000 s
+Benchmarking full_scan/1000: Collecting 10 samples in estimated 3.0119 s (11k iterations)
+Benchmarking full_scan/1000: Analyzing
+full_scan/1000          time:   [214.45 µs 222.03 µs 232.38 µs]
+                        thrpt:  [4.3033 Melem/s 4.5039 Melem/s 4.6632 Melem/s]
+                 change:
+                        time:   [+27.928% +43.663% +58.272%] (p = 0.00 < 0.05)
+                        thrpt:  [-36.818% -30.393% -21.831%]
+                        Performance has regressed.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking full_scan/10000
+Benchmarking full_scan/10000: Warming up for 1.0000 s
+Benchmarking full_scan/10000: Collecting 10 samples in estimated 3.0789 s (990 iterations)
+Benchmarking full_scan/10000: Analyzing
+full_scan/10000         time:   [2.8019 ms 2.8985 ms 3.1096 ms]
+                        thrpt:  [3.2158 Melem/s 3.4500 Melem/s 3.5690 Melem/s]
+                 change:
+                        time:   [+9.3221% +16.467% +23.894%] (p = 0.00 < 0.05)
+                        thrpt:  [-19.286% -14.139% -8.5272%]
+                        Performance has regressed.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking range_scan_100/100
+Benchmarking range_scan_100/100: Warming up for 1.0000 s
+Benchmarking range_scan_100/100: Collecting 10 samples in estimated 3.1610 s (385 iterations)
