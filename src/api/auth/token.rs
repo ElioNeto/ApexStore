@@ -1,5 +1,6 @@
 //! Token structures and utilities
 
+use super::AuthError;
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -36,40 +37,46 @@ pub enum Permission {
 }
 
 impl ApiToken {
-    /// Create new token with given parameters
+    /// Create new token with given parameters.
+    ///
+    /// Returns an `AuthError::Internal` if the system clock is not
+    /// functioning correctly (e.g. container without a clock, kernel bug).
     pub fn new(
         name: String,
         raw_token: &str,
         expires_at: Option<u128>,
         permissions: Vec<Permission>,
-    ) -> Self {
+    ) -> Result<Self, AuthError> {
         let id = uuid::Uuid::new_v4().to_string();
         let token_hash = hash_token(raw_token);
-        let created_at = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(d) => d.as_nanos(),
-            Err(e) => panic!("SystemTime error: {}", e),
-        };
+        let created_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| AuthError::Internal(format!("SystemTime error: {}", e)))?
+            .as_nanos();
 
-        Self {
+        Ok(Self {
             id,
             name,
             token_hash,
             created_at,
             expires_at,
             permissions,
-        }
+        })
     }
 
-    /// Check if token has expired
-    pub fn is_expired(&self) -> bool {
+    /// Check if token has expired.
+    ///
+    /// Returns an `AuthError::Internal` if the system clock is not
+    /// functioning correctly.
+    pub fn is_expired(&self) -> Result<bool, AuthError> {
         if let Some(expires_at) = self.expires_at {
-            let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                Ok(d) => d.as_nanos(),
-                Err(e) => panic!("SystemTime error: {}", e),
-            };
-            now > expires_at
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| AuthError::Internal(format!("SystemTime error: {}", e)))?
+                .as_nanos();
+            Ok(now > expires_at)
         } else {
-            false
+            Ok(false)
         }
     }
 
@@ -138,7 +145,8 @@ mod tests {
     #[test]
     fn test_token_validation() {
         let raw_token = generate_token();
-        let api_token = ApiToken::new("test".to_string(), &raw_token, None, vec![Permission::Read]);
+        let api_token = ApiToken::new("test".to_string(), &raw_token, None, vec![Permission::Read])
+            .unwrap();
         assert!(api_token.validate_token(&raw_token));
         assert!(!api_token.validate_token("wrong_token"));
     }
@@ -154,16 +162,18 @@ mod tests {
             "token",
             Some(now - 1000),
             vec![Permission::Read],
-        );
-        assert!(expired.is_expired());
+        )
+        .unwrap();
+        assert!(expired.is_expired().unwrap());
 
         let valid = ApiToken::new(
             "test".to_string(),
             "token",
             Some(now + 1_000_000_000),
             vec![Permission::Read],
-        );
-        assert!(!valid.is_expired());
+        )
+        .unwrap();
+        assert!(!valid.is_expired().unwrap());
     }
 
     #[test]
@@ -173,12 +183,14 @@ mod tests {
             "token",
             None,
             vec![Permission::Read, Permission::Write],
-        );
+        )
+        .unwrap();
         assert!(token.has_permission(Permission::Read));
         assert!(token.has_permission(Permission::Write));
         assert!(!token.has_permission(Permission::Delete));
 
-        let admin = ApiToken::new("admin".to_string(), "token", None, vec![Permission::Admin]);
+        let admin =
+            ApiToken::new("admin".to_string(), "token", None, vec![Permission::Admin]).unwrap();
         assert!(admin.has_permission(Permission::Read));
         assert!(admin.has_permission(Permission::Write));
         assert!(admin.has_permission(Permission::Delete));

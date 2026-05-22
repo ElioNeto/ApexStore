@@ -27,7 +27,7 @@ impl TokenManager {
         permissions: Vec<Permission>,
     ) -> Result<(String, ApiToken), AuthError> {
         let raw_token = generate_token();
-        let token = ApiToken::new(name, &raw_token, expires_at, permissions);
+        let token = ApiToken::new(name, &raw_token, expires_at, permissions)?;
 
         let mut tokens = self
             .tokens
@@ -48,7 +48,7 @@ impl TokenManager {
 
         for token in tokens.values() {
             if token.validate_token(raw_token) {
-                if token.is_expired() {
+                if token.is_expired()? {
                     return Err(AuthError::TokenExpired);
                 }
                 return Ok(token.clone());
