@@ -9,6 +9,7 @@ use crate::storage::encryption::{EncryptionConfig, Encryptor};
 use bloomfilter::Bloom;
 use crc32fast::Hasher as Crc32Hasher;
 use lz4_flex::decompress_size_prepended;
+use memmap2::Mmap;
 use parking_lot::Mutex;
 use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
@@ -49,6 +50,11 @@ pub struct SstableReader {
     #[allow(dead_code)]
     config: StorageConfig,
     encryptor: Encryptor,
+    /// Memory-mapped view of the file for zero-copy reads.
+    /// When available, block reads use the mmap slice directly,
+    /// avoiding `pread` syscall overhead.  Falls back to `File`
+    /// when mmap is unavailable (e.g., certain filesystems).
+    mmap: Option<Mmap>,
 }
 
 impl SstableReader {
@@ -120,6 +126,21 @@ impl SstableReader {
         path.hash(&mut hasher);
         let table_id = hasher.finish();
 
+        // Memory-map the file for zero-copy block reads.
+        // This is best-effort — if mmap fails (e.g. on certain filesystems),
+        // we fall back to pread via the File handle.
+        let mmap = match unsafe { Mmap::map(&file) } {
+            Ok(m) => Some(m),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to memory-map SSTable {:?}: {:?}. Falling back to pread.",
+                    path,
+                    e
+                );
+                None
+            }
+        };
+
         Ok(Self {
             metadata,
             bloom_filter,
@@ -129,6 +150,7 @@ impl SstableReader {
             table_id,
             config,
             encryptor,
+            mmap,
         })
     }
 
@@ -434,19 +456,49 @@ impl SstableReader {
     }
 
     fn read_and_decompress_block(&self, block_meta: &BlockMeta) -> Result<Vec<u8>> {
-        // Read (possibly encrypted) compressed block + CRC32 (lock held only during I/O)
-        let (on_disk_data, stored_crc32) = {
+        // Read (possibly encrypted) compressed block + CRC32.
+        //
+        // When an mmap is available we read directly from the memory-mapped
+        // slice — zero-copy, no syscall overhead, no lock contention on
+        // `self.file`.  Fall back to `pread` via the File handle when mmap
+        // is not available (e.g. certain filesystems).
+        let offset = block_meta.offset as usize;
+        let on_disk_size = block_meta.size as usize - 4; // exclude CRC32 bytes
+        let (on_disk_data, stored_crc32) = if let Some(ref mmap) = self.mmap {
+            // Bounds check — mmap length must cover the block + CRC32 trailer
+            if offset + block_meta.size as usize <= mmap.len() {
+                let block_end = offset + on_disk_size;
+                let data = mmap[offset..block_end].to_vec();
+                let crc32_bytes: [u8; 4] = mmap[block_end..block_end + 4]
+                    .try_into()
+                    .map_err(|_| {
+                        LsmError::CorruptedData(format!(
+                            "Block CRC32 at offset {} extends past file",
+                            block_meta.offset
+                        ))
+                    })?;
+                let stored_crc32 = u32::from_le_bytes(crc32_bytes);
+                (data, stored_crc32)
+            } else {
+                // mmap is too short — fall back to file I/O
+                let mut file = self.file.lock();
+                file.seek(SeekFrom::Start(block_meta.offset))?;
+                let mut on_disk_data = vec![0u8; on_disk_size];
+                file.read_exact(&mut on_disk_data)?;
+                let mut crc32_bytes = [0u8; 4];
+                file.read_exact(&mut crc32_bytes)?;
+                let stored_crc32 = u32::from_le_bytes(crc32_bytes);
+                (on_disk_data, stored_crc32)
+            }
+        } else {
+            // No mmap — use pread via the File handle (lock held only during I/O)
             let mut file = self.file.lock();
             file.seek(SeekFrom::Start(block_meta.offset))?;
-            let on_disk_size = block_meta.size as usize - 4; // exclude CRC32 bytes
             let mut on_disk_data = vec![0u8; on_disk_size];
             file.read_exact(&mut on_disk_data)?;
-
-            // Read CRC32 (4 bytes)
             let mut crc32_bytes = [0u8; 4];
             file.read_exact(&mut crc32_bytes)?;
             let stored_crc32 = u32::from_le_bytes(crc32_bytes);
-
             (on_disk_data, stored_crc32)
         };
 

@@ -1,13 +1,18 @@
+pub mod admin;
 pub mod auth;
 pub mod config;
+pub mod graphql;
 pub mod rate_limiter;
 
 pub use self::auth::TokenManager;
 pub use self::config::ServerConfig;
+pub use self::graphql::AppSchema;
 use self::rate_limiter::{RateLimiter, RateLimiterState};
 use crate::LsmEngine;
 use actix_web::{delete, get, post, put, web, App, HttpResponse, HttpServer, Responder};
 use actix_web_httpauth::middleware::HttpAuthentication;
+use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
+use async_graphql_actix_web::{GraphQLRequest, GraphQLResponse};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -215,6 +220,28 @@ async fn admin_compact(engine: web::Data<LsmEngine>) -> impl Responder {
     }
 }
 
+// ── GraphQL handlers ────────────────────────────────────────────────────────
+
+/// GraphQL endpoint — handles all queries and mutations.
+async fn graphql_handler(
+    schema: web::Data<AppSchema>,
+    req: GraphQLRequest,
+) -> GraphQLResponse {
+    let res = schema.execute(req.into_inner()).await;
+    GraphQLResponse::from(res)
+}
+
+/// GraphQL playground (interactive IDE).
+async fn graphql_playground() -> HttpResponse {
+    let html = playground_source(
+        GraphQLPlaygroundConfig::new("/graphql")
+            .title("ApexStore GraphQL Playground"),
+    );
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html)
+}
+
 // ── Route configuration ───────────────────────────────────────────────────
 
 /// Register API routes.
@@ -226,7 +253,15 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .service(get_metrics)
         .service(get_stats)
         .service(admin_flush)
-        .service(admin_compact);
+        .service(admin_compact)
+        .service(
+            web::scope("/admin")
+                .configure(admin::configure),
+        )
+        // GraphQL endpoints
+        .route("/graphql", web::post().to(graphql_handler))
+        .route("/graphql", web::get().to(graphql_handler))
+        .route("/graphql/playground", web::get().to(graphql_playground));
 }
 
 /// Start the REST API server.
@@ -241,11 +276,19 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     tracing::info!(target: "apexstore::api", "Starting server at {}:{}", host, port);
     println!("Starting server at http://{}:{}", host, port);
 
+    // Configure CDC if an endpoint was provided
+    if let Some(ref endpoint) = config.cdc_endpoint {
+        let cdc_config = crate::infra::cdc::CdcConfig::with_endpoint(endpoint.clone());
+        engine.set_cdc(cdc_config);
+        tracing::info!(target: "apexstore::api", "CDC enabled, endpoint: {}", endpoint);
+    }
+
     let engine_data = web::Data::from(engine.clone());
     let rate_limiter_state =
         web::Data::new(RateLimiterState::new(config.rate_limit_requests_per_minute));
     let token_manager = web::Data::new(TokenManager::new());
     let auth_enabled = web::Data::new(config.auth.enabled);
+    let graphql_schema = web::Data::new(graphql::build_schema(engine.clone()));
 
     let mut server_builder = HttpServer::new(move || {
         App::new()
@@ -256,6 +299,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
             .app_data(rate_limiter_state.clone())
             .app_data(token_manager.clone())
             .app_data(auth_enabled.clone())
+            .app_data(graphql_schema.clone())
             .configure(configure)
     })
     .max_connections(config.max_connections)

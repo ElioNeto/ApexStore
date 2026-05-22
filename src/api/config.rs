@@ -20,6 +20,10 @@ pub struct ServerConfig {
     pub rate_limit_enabled: bool,
     /// Max requests per minute per IP (default: 100)
     pub rate_limit_requests_per_minute: usize,
+
+    /// CDC endpoint URL for streaming data changes.
+    /// When set, CDC is enabled and data mutations are posted as JSON to this endpoint.
+    pub cdc_endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +48,7 @@ impl Default for ServerConfig {
             workers: None,
             rate_limit_enabled: true,
             rate_limit_requests_per_minute: 100,
+            cdc_endpoint: None,
         }
     }
 }
@@ -114,6 +119,8 @@ impl ServerConfig {
             .parse::<usize>()
             .unwrap_or(100);
 
+        let cdc_endpoint = env::var("CDC_ENDPOINT").ok();
+
         Self {
             host,
             port,
@@ -129,6 +136,7 @@ impl ServerConfig {
             workers,
             rate_limit_enabled,
             rate_limit_requests_per_minute,
+            cdc_endpoint,
         }
     }
 
@@ -173,6 +181,13 @@ impl ServerConfig {
                 )
             } else {
                 "Disabled".to_string()
+            }
+        );
+        println!(
+            "   CDC: {}",
+            match &self.cdc_endpoint {
+                Some(url) => format!("Enabled ({})", url),
+                None => "Disabled".to_string(),
             }
         );
         println!();

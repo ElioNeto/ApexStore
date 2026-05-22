@@ -1,5 +1,10 @@
+pub mod cdc;
+pub mod bulk_io;
 pub mod codec;
 pub mod config;
 pub mod error;
 pub mod log;
 pub mod metrics;
+pub mod sql;
+pub mod replication;
+pub mod telemetry;

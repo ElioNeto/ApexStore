@@ -14,7 +14,9 @@
 use crate::api::auth::token::{ApiToken, Permission};
 use crate::api::auth::TokenManager;
 use crate::core::engine::{Engine, MAX_SCAN_LIMIT};
+use crate::infra::cdc::CdcConfig;
 use crate::infra::config::LsmConfig;
+use crate::infra::sql::{format_sql_result, SqlEngine};
 use crate::storage::cache::GlobalBlockCache;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
@@ -33,6 +35,11 @@ struct Cli {
     /// When provided, enables transparent encryption at rest for SSTables and WAL.
     #[arg(long = "encrypt-key-file")]
     encrypt_key_file: Option<std::path::PathBuf>,
+
+    /// CDC endpoint URL for streaming data changes (e.g. http://localhost:9000/webhook).
+    /// When set, CDC is enabled and data mutations are posted as JSON to this endpoint.
+    #[arg(long = "cdc-endpoint")]
+    cdc_endpoint: Option<String>,
 
     #[command(subcommand)]
     command: Command,
@@ -107,6 +114,31 @@ enum Command {
     Flush,
     /// Trigger compaction
     Compact,
+    /// Execute SQL query against the engine
+    Sql {
+        /// SQL query to execute (e.g. "SELECT * FROM default", "INSERT INTO default (key, value) VALUES ('k', 'v')")
+        query: String,
+    },
+    /// Import key-value pairs from a file
+    Import {
+        /// File format: "json" or "csv"
+        format: String,
+        /// Path to the input file (use "-" for stdin)
+        file: String,
+        /// Column family (default: "default")
+        #[arg(short, long, default_value = "default")]
+        cf: String,
+    },
+    /// Export key-value pairs to a file
+    Export {
+        /// File format: "json" or "csv"
+        format: String,
+        /// Path to the output file (use "-" for stdout)
+        file: String,
+        /// Column family (default: "default")
+        #[arg(short, long, default_value = "default")]
+        cf: String,
+    },
     /// Manage API tokens
     #[command(subcommand)]
     Token(TokenCommand),
@@ -149,6 +181,13 @@ pub fn main() -> crate::infra::error::Result<()> {
     let cache = GlobalBlockCache::new(100, 4096);
     let engine = Engine::new_from_config(&config, cache)?;
 
+    // Configure CDC if an endpoint was provided
+    if let Some(endpoint) = &cli.cdc_endpoint {
+        let cdc_config = CdcConfig::with_endpoint(endpoint.clone());
+        engine.set_cdc(cdc_config);
+        tracing::info!(target: "apexstore::cli", "CDC enabled, endpoint: {}", endpoint);
+    }
+
     match cli.command {
         Command::Get { key, cf } => cmd_get(&engine, &cf, &key),
         Command::Set { key, value, cf } => cmd_set(&engine, &cf, &key, &value),
@@ -164,6 +203,9 @@ pub fn main() -> crate::infra::error::Result<()> {
         Command::Stats => cmd_stats(&engine),
         Command::Flush => cmd_flush(&engine),
         Command::Compact => cmd_compact(&engine),
+        Command::Sql { query } => cmd_sql(&engine, &query),
+        Command::Import { format, file, cf } => cmd_import(&engine, &format, &file, &cf),
+        Command::Export { format, file, cf } => cmd_export(&engine, &format, &file, &cf),
         Command::Token(sub) => cmd_token(&engine, sub),
     }
 }
@@ -304,6 +346,127 @@ fn cmd_compact(engine: &CliEngine) -> crate::infra::error::Result<()> {
     if results.is_empty() {
         println!("(nothing to compact)");
     }
+    Ok(())
+}
+
+fn cmd_sql(engine: &CliEngine, query: &str) -> crate::infra::error::Result<()> {
+    let sql_engine = SqlEngine::new(engine);
+    let result = sql_engine.execute(query)?;
+    let output = format_sql_result(&result);
+    print!("{}", output);
+    Ok(())
+}
+
+// ── Import / Export command implementations ──────────────────────────────────
+
+/// Handle `import` subcommand.
+fn cmd_import(
+    engine: &CliEngine,
+    format: &str,
+    file: &str,
+    cf: &str,
+) -> crate::infra::error::Result<()> {
+    use crate::infra::bulk_io;
+
+    let start = std::time::Instant::now();
+
+    // Progress callback that prints a simple progress line
+    let progress: Option<bulk_io::ProgressFn> = Some(Box::new(|current, total| {
+        if total > 0 {
+            eprint!("\rImported: {} / {} records", current, total);
+        } else {
+            eprint!("\rImported: {} records", current);
+        }
+    }));
+
+    match format.to_lowercase().as_str() {
+        "json" => {
+            if file == "-" {
+                bulk_io::import_json(engine, std::io::stdin(), Some(cf), progress)?;
+            } else {
+                let f = std::fs::File::open(file)?;
+                let reader = std::io::BufReader::new(f);
+                bulk_io::import_json(engine, reader, Some(cf), progress)?;
+            }
+        }
+        "csv" => {
+            if file == "-" {
+                bulk_io::import_csv(engine, std::io::stdin(), Some(cf), progress)?;
+            } else {
+                let f = std::fs::File::open(file)?;
+                let reader = std::io::BufReader::new(f);
+                bulk_io::import_csv(engine, reader, Some(cf), progress)?;
+            }
+        }
+        other => {
+            return Err(crate::infra::error::LsmError::InvalidArgument(format!(
+                "Unsupported import format: '{}'. Use 'json' or 'csv'.",
+                other
+            )));
+        }
+    }
+
+    let elapsed = start.elapsed();
+    eprintln!(); // newline after progress
+    println!(
+        "Import completed in {:.2}s",
+        elapsed.as_secs_f64()
+    );
+    Ok(())
+}
+
+/// Handle `export` subcommand.
+fn cmd_export(
+    engine: &CliEngine,
+    format: &str,
+    file: &str,
+    cf: &str,
+) -> crate::infra::error::Result<()> {
+    use crate::infra::bulk_io;
+
+    let start = std::time::Instant::now();
+
+    let progress: Option<bulk_io::ProgressFn> = Some(Box::new(|current, total| {
+        if total > 0 {
+            eprint!("\rExported: {} / {} records", current, total);
+        } else {
+            eprint!("\rExported: {} records", current);
+        }
+    }));
+
+    match format.to_lowercase().as_str() {
+        "json" => {
+            if file == "-" {
+                bulk_io::export_json(engine, &mut std::io::stdout(), Some(cf), progress)?;
+            } else {
+                let f = std::fs::File::create(file)?;
+                let mut writer = std::io::BufWriter::new(f);
+                bulk_io::export_json(engine, &mut writer, Some(cf), progress)?;
+            }
+        }
+        "csv" => {
+            if file == "-" {
+                bulk_io::export_csv(engine, &mut std::io::stdout(), Some(cf), progress)?;
+            } else {
+                let f = std::fs::File::create(file)?;
+                let mut writer = std::io::BufWriter::new(f);
+                bulk_io::export_csv(engine, &mut writer, Some(cf), progress)?;
+            }
+        }
+        other => {
+            return Err(crate::infra::error::LsmError::InvalidArgument(format!(
+                "Unsupported export format: '{}'. Use 'json' or 'csv'.",
+                other
+            )));
+        }
+    }
+
+    let elapsed = start.elapsed();
+    eprintln!(); // newline after progress
+    println!(
+        "Export completed in {:.2}s",
+        elapsed.as_secs_f64()
+    );
     Ok(())
 }
 

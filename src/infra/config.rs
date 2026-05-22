@@ -1,4 +1,5 @@
 use crate::infra::error::{LsmError, Result};
+use crate::infra::replication::ReplicationConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -30,6 +31,8 @@ pub struct LsmConfig {
     pub storage: StorageConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
+    #[serde(default)]
+    pub replication: ReplicationConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -312,6 +315,9 @@ pub struct LsmConfigBuilder {
     strategy: Option<CompactionStrategy>,
     encryption_enabled: Option<bool>,
     encryption_key_path: Option<String>,
+    replication_role: Option<super::replication::ReplicationRole>,
+    replica_endpoints: Option<Vec<String>>,
+    replication_sync_interval_ms: Option<u64>,
 }
 
 impl LsmConfigBuilder {
@@ -375,6 +381,24 @@ impl LsmConfigBuilder {
         self
     }
 
+    /// Set the replication role (Primary or Replica).
+    pub fn replication_role(mut self, role: super::replication::ReplicationRole) -> Self {
+        self.replication_role = Some(role);
+        self
+    }
+
+    /// Set the list of replica endpoint URLs (used on Primary).
+    pub fn replica_endpoints(mut self, endpoints: Vec<String>) -> Self {
+        self.replica_endpoints = Some(endpoints);
+        self
+    }
+
+    /// Set the replication sync interval in milliseconds.
+    pub fn replication_sync_interval_ms(mut self, ms: u64) -> Self {
+        self.replication_sync_interval_ms = Some(ms);
+        self
+    }
+
     pub fn build(self) -> Result<LsmConfig> {
         let defaults = LsmConfig::default();
 
@@ -413,6 +437,17 @@ impl LsmConfigBuilder {
                     .unwrap_or(defaults.compaction.min_compaction_threshold),
                 strategy: self.strategy.unwrap_or(defaults.compaction.strategy),
             },
+            replication: ReplicationConfig {
+                role: self
+                    .replication_role
+                    .unwrap_or(defaults.replication.role),
+                replica_endpoints: self
+                    .replica_endpoints
+                    .unwrap_or(defaults.replication.replica_endpoints),
+                sync_interval_ms: self
+                    .replication_sync_interval_ms
+                    .unwrap_or(defaults.replication.sync_interval_ms),
+            },
         };
 
         // Validate before returning
@@ -424,6 +459,7 @@ impl LsmConfigBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::replication::ReplicationRole;
 
     #[test]
     fn test_default_config_is_valid() {
@@ -630,5 +666,23 @@ mod tests {
             config.compaction.strategy,
             CompactionStrategy::Leveled
         ));
+    }
+
+    #[test]
+    fn test_builder_replication_config() {
+        let config = LsmConfig::builder()
+            .replication_role(ReplicationRole::Replica)
+            .replica_endpoints(vec!["http://replica1:8080".to_string()])
+            .replication_sync_interval_ms(500)
+            .build();
+
+        assert!(config.is_ok());
+        let config = config.unwrap();
+        assert_eq!(config.replication.role, ReplicationRole::Replica);
+        assert_eq!(
+            config.replication.replica_endpoints,
+            vec!["http://replica1:8080"]
+        );
+        assert_eq!(config.replication.sync_interval_ms, 500);
     }
 }

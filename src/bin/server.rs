@@ -1,3 +1,4 @@
+use apexstore::infra::telemetry;
 use apexstore::{LsmConfig, LsmEngine};
 use std::env;
 use std::io;
@@ -12,10 +13,10 @@ async fn main() -> std::io::Result<()> {
         let _ = dotenvy::dotenv();
     }
 
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .with_level(true)
-        .init();
+    // Initialise OpenTelemetry tracing + metrics (falls back to console fmt
+    // when OTEL_EXPORTER_OTLP_ENDPOINT is not set).
+    telemetry::init_tracing();
+    telemetry::init_metrics();
 
     println!("╔═══════════════════════════════════════════════════════╗");
     println!("║         LSM-Tree REST API Server                      ║");

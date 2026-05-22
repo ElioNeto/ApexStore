@@ -4,7 +4,9 @@ pub mod version_set;
 
 use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::core::table::Table;
+use crate::infra::cdc::{CdcConfig, CdcEvent, CdcEventType, CdcPublisher};
 use crate::infra::error::Result;
+use crate::infra::replication::{ReplicationClient, ReplicationConfig, ReplicationRole};
 use crate::infra::metrics::EngineMetrics;
 use crate::storage::builder::SstableBuilder;
 use crate::storage::cache::{Cache, GlobalBlockCache};
@@ -19,6 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::Semaphore;
 
 use self::compaction::{Compaction, CompactionMetrics, CompactionOptions, CompactionStrategyType};
 
@@ -98,6 +101,7 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             strategy_type: config.compaction.strategy.clone().into(),
             compaction_threshold: config.compaction.min_compaction_threshold,
             max_tables_per_compaction: config.compaction.max_sstables,
+            max_concurrent_compactions: 2,
         };
 
         // Build encryption config from the config
@@ -259,10 +263,14 @@ pub struct Engine<C: Cache> {
     options: EngineOptions,
     /// All mutable state behind a mutex for thread-safe access.
     core: Arc<Mutex<EngineCore<C>>>,
-    /// Background compaction running flag.
-    compaction_running: Arc<AtomicBool>,
-    /// Handle to the background compaction thread.
-    compaction_thread: Mutex<Option<JoinHandle<()>>>,
+    /// Semaphore that limits the number of concurrent compaction threads.
+    /// Acquire a permit before spawning a compaction thread; the permit is
+    /// released when the thread finishes.
+    compaction_semaphore: Arc<Semaphore>,
+    /// Handles to all running background compaction threads.
+    compaction_threads: Mutex<Vec<JoinHandle<()>>>,
+    /// Flag set during close() to prevent new compaction threads from spawning.
+    closing: Arc<AtomicBool>,
     /// Path to the manifest file (unused currently).
     _manifest: PathBuf,
     /// SSTable output directory (used during initialization).
@@ -272,6 +280,22 @@ pub struct Engine<C: Cache> {
     _lock_file: std::fs::File,
     /// Engine metrics (counters and latency accumulators).
     pub metrics: Arc<EngineMetrics>,
+
+    /// Optional replication client for shipping WAL records to replicas.
+    /// Only active when the replication role is Primary.
+    pub(crate) replication_client: Option<Arc<ReplicationClient>>,
+
+    /// Handle to the background replication shipping task (Primary only).
+    pub(crate) _replication_handle: Option<tokio::task::JoinHandle<()>>,
+
+    /// CDC state (config + publisher).
+    cdc: Mutex<CdcState>,
+}
+
+/// Holds the CDC state behind a single mutex for atomic access.
+struct CdcState {
+    config: CdcConfig,
+    publisher: Option<Box<dyn CdcPublisher>>,
 }
 
 pub type LsmEngineGeneric<C> = Engine<C>;
@@ -306,6 +330,59 @@ impl<C: Cache> Engine<C> {
     /// Returns a reference to the engine metrics.
     pub fn metrics(&self) -> Arc<EngineMetrics> {
         self.metrics.clone()
+    }
+
+    /// Returns `true` if compaction is currently running (at least one permit
+    /// of the compaction semaphore is acquired).
+    pub fn is_compaction_running(&self) -> bool {
+        let max = self.options.compaction_options.max_concurrent_compactions;
+        self.compaction_semaphore.available_permits() < max
+    }
+
+    /// Configure CDC on this engine.
+    ///
+    /// If `config.enabled` is `true`, a collector or webhook publisher is created
+    /// according to `config.endpoint`.
+    pub fn set_cdc(&self, config: CdcConfig) {
+        let publisher = crate::infra::cdc::create_publisher(&config);
+        let mut cdc = self.cdc.lock();
+        cdc.config = config;
+        cdc.publisher = publisher;
+    }
+
+    /// Set a custom CDC publisher (e.g. for testing).
+    pub fn set_cdc_publisher(&self, publisher: Box<dyn CdcPublisher>) {
+        let mut cdc = self.cdc.lock();
+        cdc.config = CdcConfig {
+            enabled: true,
+            endpoint: None,
+        };
+        cdc.publisher = Some(publisher);
+    }
+
+    /// Publish a CDC event if a publisher is configured.
+    fn publish_cdc_event(&self, cf: &str, key: &[u8], value: Option<&[u8]>) {
+        let cdc = self.cdc.lock();
+        if let Some(ref publisher) = cdc.publisher {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let event = CdcEvent {
+                event_type: if value.is_some() {
+                    CdcEventType::Put
+                } else {
+                    CdcEventType::Delete
+                },
+                cf: cf.to_string(),
+                key: key.to_vec(),
+                value: value.map(|v| v.to_vec()),
+                timestamp,
+            };
+            if let Err(e) = publisher.publish(event) {
+                tracing::warn!(target: "apexstore::engine", "CDC publish failed: {:?}", e);
+            }
+        }
     }
 }
 
@@ -416,6 +493,7 @@ impl<C: Cache> Engine<C> {
             strategy_type,
             compaction_threshold: options.compaction_options.compaction_threshold,
             max_tables_per_compaction: options.compaction_options.max_tables_per_compaction,
+            max_concurrent_compactions: options.compaction_options.max_concurrent_compactions,
         };
 
         // Create shared block cache for on-disk SSTable reads
@@ -496,15 +574,76 @@ impl<C: Cache> Engine<C> {
         // Check for a disk.sst.manifest written by restore_snapshot().
         Self::discover_sstables_from_disk(&mut core, dir_path, &sst_dir)?;
 
+        // Initialize replication client if configured as Primary
+        let (replication_client, replication_handle) = {
+            // Attempt to read replication config; default is Primary with no endpoints,
+            // which means replication is effectively disabled.
+            //
+            // The new_from_config caller can set up replication endpoints.  Since this
+            // constructor is generic, we check via a config file or env-var convention.
+            // For simplicity, if REPLICATION_ROLE env var is set to "primary" and
+            // REPLICA_ENDPOINTS is non-empty, we start the client.
+            let role = std::env::var("REPLICATION_ROLE")
+                .ok()
+                .and_then(|s| match s.to_lowercase().as_str() {
+                    "primary" => Some(ReplicationRole::Primary),
+                    "replica" => Some(ReplicationRole::Replica),
+                    _ => None,
+                })
+                .unwrap_or(ReplicationRole::Primary);
+
+            let replica_endpoints = std::env::var("REPLICA_ENDPOINTS")
+                .ok()
+                .map(|s| {
+                    s.split(',')
+                        .map(|ep| ep.trim().to_string())
+                        .filter(|ep| !ep.is_empty())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            let sync_interval_ms = std::env::var("REPLICATION_SYNC_INTERVAL_MS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(100);
+
+            if role == ReplicationRole::Primary && !replica_endpoints.is_empty() {
+                let repl_config = ReplicationConfig {
+                    role,
+                    replica_endpoints,
+                    sync_interval_ms,
+                };
+                tracing::info!(
+                    target: "apexstore::engine",
+                    "Starting replication client (Primary) with {} endpoints, interval={}ms",
+                    repl_config.replica_endpoints.len(),
+                    repl_config.sync_interval_ms,
+                );
+                let (client, handle) = ReplicationClient::start(repl_config);
+                (Some(Arc::new(client)), Some(handle))
+            } else {
+                (None, None)
+            }
+        };
+
         let engine = Self {
             options: options.clone(),
             core: Arc::new(Mutex::new(core)),
-            compaction_running: Arc::new(AtomicBool::new(false)),
-            compaction_thread: Mutex::new(None),
+            compaction_semaphore: Arc::new(Semaphore::new(
+                options.compaction_options.max_concurrent_compactions,
+            )),
+            compaction_threads: Mutex::new(Vec::new()),
+            closing: Arc::new(AtomicBool::new(false)),
             _manifest: PathBuf::new(),
             _sst_dir: sst_dir,
             _lock_file: lock_file,
             metrics: Arc::new(EngineMetrics::new()),
+            replication_client,
+            _replication_handle: replication_handle,
+            cdc: Mutex::new(CdcState {
+                config: CdcConfig::disabled(),
+                publisher: None,
+            }),
         };
 
         Ok(engine)
@@ -514,7 +653,30 @@ impl<C: Cache> Engine<C> {
     pub fn new_from_config(config: &crate::infra::config::LsmConfig, cache: C) -> Result<Self> {
         let options: EngineOptions = config.into();
         let dir_path = std::path::PathBuf::from(&config.core.dir_path);
-        Self::new_generic(options, cache, &dir_path)
+        let mut engine = Self::new_generic(options, cache, &dir_path)?;
+
+        // If LsmConfig has explicit replication settings, prefer them over env vars
+        // by re-initializing the replication client if needed.
+        if !config.replication.replica_endpoints.is_empty()
+            && config.replication.role == ReplicationRole::Primary
+            && engine.replication_client.is_none()
+        {
+            let repl_config = ReplicationConfig {
+                role: config.replication.role.clone(),
+                replica_endpoints: config.replication.replica_endpoints.clone(),
+                sync_interval_ms: config.replication.sync_interval_ms,
+            };
+            tracing::info!(
+                target: "apexstore::engine",
+                "Starting replication client from config (Primary) with {} endpoints",
+                repl_config.replica_endpoints.len(),
+            );
+            let (client, handle) = ReplicationClient::start(repl_config);
+            engine.replication_client = Some(Arc::new(client));
+            engine._replication_handle = Some(handle);
+        }
+
+        Ok(engine)
     }
 
     /// Replay WAL records to reconstruct memtable state (operates on EngineCore directly).
@@ -583,6 +745,7 @@ impl<C: Cache> Engine<C> {
         let key_str = String::from_utf8_lossy(&key).into_owned();
         let value_size = value.len();
         let needs_compact;
+        let replication_record: Option<LogRecord>;
         {
             let mut core = self.core.lock();
             // Write to WAL first (before modifying memtable) for crash safety
@@ -607,6 +770,9 @@ impl<C: Cache> Engine<C> {
             }
             core.wal_mut(cf)?.write_record(&record)?;
 
+            // Save a clone for replication before moving record into memtable
+            replication_record = Some(record.clone());
+
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
                 mem.push(MemTable::new_unlimited());
@@ -624,6 +790,17 @@ impl<C: Cache> Engine<C> {
                     false
                 };
         } // core lock is dropped here
+
+        // Ship the record to replicas (Primary only)
+        if let Some(client) = &self.replication_client {
+            if let Some(record) = replication_record {
+                client.ship_records(vec![record]);
+            }
+        }
+
+        // Publish CDC event (fire-and-forget, runs outside core lock)
+        self.publish_cdc_event(cf, &key, Some(&value));
+
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_set(elapsed_us);
         tracing::debug!(
@@ -724,6 +901,7 @@ impl<C: Cache> Engine<C> {
         let start = std::time::Instant::now();
         let key_str = String::from_utf8_lossy(&key).into_owned();
         let needs_compact;
+        let replication_record: Option<LogRecord>;
         {
             let mut core = self.core.lock();
 
@@ -731,6 +909,9 @@ impl<C: Cache> Engine<C> {
             let mut record = LogRecord::tombstone(key.clone());
             record.column_family = Some(cf.to_string());
             core.wal_mut(cf)?.write_record(&record)?;
+
+            // Save clone for replication before consuming record
+            replication_record = Some(record.clone());
 
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
@@ -748,6 +929,17 @@ impl<C: Cache> Engine<C> {
                     false
                 };
         }
+
+        // Ship tombstone to replicas (Primary only)
+        if let Some(client) = &self.replication_client {
+            if let Some(record) = replication_record {
+                client.ship_records(vec![record]);
+            }
+        }
+
+        // Publish CDC event (fire-and-forget, runs outside core lock)
+        self.publish_cdc_event(cf, &key, None);
+
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_delete(elapsed_us);
         tracing::info!(
@@ -1278,92 +1470,107 @@ impl<C: Cache> Engine<C> {
         Ok(results)
     }
 
-    /// Check if compaction should be triggered and run it in background
+    /// Check if compaction should be triggered and run one or more CF
+    /// compactions in the background — each CF gets its own thread, up to
+    /// `max_concurrent_compactions` at once (controlled by a semaphore).
     pub fn maybe_compact(&self) {
-        // Quick check to avoid unnecessary lock contention
-        if self.compaction_running.load(Ordering::SeqCst) {
+        // Fast-path: skip if the engine is closing
+        if self.closing.load(Ordering::SeqCst) {
             return;
         }
 
-        // Acquire the compaction_thread lock FIRST before spawning.
-        // This prevents a TOCTOU race with close(): when close() holds
-        // this lock, no new thread can be spawned and join-handle-stored
-        // after close() has already taken the handle.
-        let mut thread_guard = self.compaction_thread.lock();
+        // ── Phase 1: Build compaction plans while holding the core lock ──
+        // Snapshot which CFs need compaction and what tables/groups to compact.
+        // Then drop the lock so writes can proceed during I/O.
 
-        // Now we hold the lock. Check running flag again — close() may
-        // have acquired this lock ahead of us and set running = false.
-        if self.compaction_running.load(Ordering::SeqCst) {
+        #[derive(Clone)]
+        struct CompactionPlan {
+            cf: String,
+            tables: Vec<Table>,
+            groups: Vec<Vec<usize>>,
+            compaction: Compaction,
+            options: EngineOptions,
+            range_tombstones: Vec<RangeTombstone>,
+        }
+
+        let plans: Vec<CompactionPlan> = {
+            let core = self.core.lock();
+            let master_options = self.options.clone();
+
+            core.version_set()
+                .column_families()
+                .iter()
+                .filter_map(|cf| {
+                    let tables = core.version_set().get_tables(cf);
+                    if tables.len() < core.compaction().options().compaction_threshold {
+                        return None;
+                    }
+                    let groups = core.compaction().pick_compaction(&tables, &master_options);
+                    if groups.is_empty() {
+                        return None;
+                    }
+                    Some(CompactionPlan {
+                        cf: cf.clone(),
+                        tables,
+                        groups,
+                        compaction: core.compaction().clone(),
+                        options: master_options.clone(),
+                        range_tombstones: core
+                            .range_tombstones()
+                            .get(cf)
+                            .cloned()
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect()
+        }; // MutexGuard dropped here → core lock is released
+
+        if plans.is_empty() {
             return;
         }
 
-        // Claim the compaction slot inside the lock, so close() is
-        // guaranteed to see this flag change before we store the handle.
-        self.compaction_running.store(true, Ordering::Release);
+        let max_concurrent = self.options.compaction_options.max_concurrent_compactions;
 
-        // Clone what the thread needs before spawning
-        let core = self.core.clone();
-        let running = self.compaction_running.clone();
-        let options = self.options.clone();
+        // Spawn at most `max_concurrent` threads, one per CF.  Each thread
+        // acquires a semaphore permit; when the limit is reached ({c} threads
+        // already running) the loop stops and the remaining CFs will be picked
+        // up on the next call to maybe_compact().
+        for plan in plans.iter().take(max_concurrent) {
+            // If the engine is closing, stop spawning new threads
+            if self.closing.load(Ordering::SeqCst) {
+                break;
+            }
 
-        let handle = std::thread::spawn(move || {
-            // Wrap compaction logic in catch_unwind to prevent panics from propagating
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                // ── Phase 1: Build compaction plans while holding the lock ──
-                // Snapshot which CFs need compaction and what tables/groups to compact.
-                // Then drop the lock so writes can proceed during I/O.
-                #[derive(Clone)]
-                struct CompactionPlan {
-                    cf: String,
-                    tables: Vec<Table>,
-                    groups: Vec<Vec<usize>>,
-                    compaction: Compaction,
-                    options: EngineOptions,
-                    range_tombstones: Vec<RangeTombstone>,
-                }
+            // Non-blocking acquire — if at capacity, leave remaining CFs
+            // for a future maybe_compact() call.
+            let permit = match self.compaction_semaphore.clone().try_acquire_owned() {
+                Ok(p) => p,
+                Err(_) => break,
+            };
 
-                let plans: Vec<CompactionPlan> = {
-                    let core = core.lock();
+            let core = self.core.clone();
+            let plan = plan.clone();
 
-                    core.version_set()
-                        .column_families()
-                        .iter()
-                        .filter_map(|cf| {
-                            let tables = core.version_set().get_tables(cf);
-                            if tables.len() < core.compaction().options().compaction_threshold {
-                                return None;
-                            }
-                            let groups = core.compaction().pick_compaction(&tables, &options);
-                            if groups.is_empty() {
-                                return None;
-                            }
-                            Some(CompactionPlan {
-                                cf: cf.clone(),
-                                tables,
-                                groups,
-                                compaction: core.compaction().clone(),
-                                options: options.clone(),
-                                range_tombstones: core
-                                    .range_tombstones()
-                                    .get(cf)
-                                    .cloned()
-                                    .unwrap_or_default(),
-                            })
-                        })
-                        .collect()
-                }; // MutexGuard dropped here → core lock is released
+            let handle = std::thread::spawn(move || {
+                // The permit is held for the entire thread lifetime and
+                // released automatically when the thread exits.
+                let _permit = permit;
 
-                // ── Phase 2: Execute compaction I/O without holding the lock ──
-                // This is the slow part: read SSTables, merge, write new SSTable.
-                let mut results: Vec<(String, Vec<usize>, Vec<Table>)> = Vec::new();
-                for plan in &plans {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // ── Phase 2: Execute compaction I/O without holding the lock ──
+                    let mut results: Vec<(String, Vec<usize>, Vec<Table>)> = Vec::new();
                     for group_indices in &plan.groups {
                         match plan
                             .compaction
-                            .compact(group_indices, &plan.tables, &plan.options, &plan.range_tombstones)
-                        {
+                            .compact(
+                                group_indices,
+                                &plan.tables,
+                                &plan.options,
+                                &plan.range_tombstones,
+                            ) {
                             Ok((new_tables, _metrics)) => {
-                                results.push((plan.cf.clone(), group_indices.clone(), new_tables));
+                                results
+                                    .push((plan.cf.clone(), group_indices.clone(), new_tables));
                             }
                             Err(e) => {
                                 tracing::error!(
@@ -1374,41 +1581,48 @@ impl<C: Cache> Engine<C> {
                             }
                         }
                     }
-                }
 
-                // ── Phase 3: Re-acquire lock and apply results ──
-                let mut core = core.lock();
-                for (cf, group_indices, new_tables) in results {
-                    let removed_paths = core.version_set_mut()
-                        .atomic_replace(&cf, &group_indices, new_tables);
-                    // Delete orphaned SSTable files from disk
-                    for path in &removed_paths {
-                        if path.exists() {
-                            if let Err(e) = std::fs::remove_file(path) {
-                                tracing::warn!(
-                                    "background compaction: failed to remove orphaned SSTable {:?}: {:?}",
-                                    path, e
-                                );
+                    // ── Phase 3: Re-acquire lock and apply results ──
+                    let mut core = core.lock();
+                    for (cf, group_indices, new_tables) in results {
+                        let removed_paths = core
+                            .version_set_mut()
+                            .atomic_replace(&cf, &group_indices, new_tables);
+                        // Delete orphaned SSTable files from disk
+                        for path in &removed_paths {
+                            if path.exists() {
+                                if let Err(e) = std::fs::remove_file(path) {
+                                    tracing::warn!(
+                                        "background compaction: failed to remove orphaned SSTable \
+                                         {:?}: {:?}",
+                                        path,
+                                        e
+                                    );
+                                }
                             }
                         }
                     }
+                }));
+
+                if let Err(panic_info) = result {
+                    tracing::error!("Compaction thread panicked: {:?}", panic_info);
                 }
-            }));
+            });
 
-            if let Err(panic_info) = result {
-                tracing::error!("Compaction thread panicked: {:?}", panic_info);
+            // Store the handle while holding the threads lock.
+            // This guarantees that any concurrent close() either:
+            //   a) blocks on the lock and finds this handle after we release it, or
+            //   b) has already taken all handles; but then close() cannot have
+            //      spawned new threads because it can't acquire this lock while we hold it.
+            let mut threads_guard = self.compaction_threads.lock();
+            if self.closing.load(Ordering::SeqCst) {
+                // close() may have set the flag while we were spawning;
+                // drop the handle and let the thread run detached.
+                break;
             }
-
-            running.store(false, Ordering::Release);
-        });
-
-        // Store the join handle while we still hold the lock.
-        // This guarantees that any concurrent close() either:
-        //   a) blocks on the lock and finds this handle after we release it, or
-        //   b) has already taken the handle (closing an earlier thread),
-        //      but then close() cannot spawn new threads because it can't
-        //      acquire this lock while we hold it.
-        *thread_guard = Some(handle);
+            threads_guard.push(handle);
+            drop(threads_guard);
+        }
     }
 
     /// Close the engine gracefully.
@@ -1424,16 +1638,21 @@ impl<C: Cache> Engine<C> {
     /// only durable record of those writes, causing data loss on restart.
     /// Instead, `close()` focuses on durability of the WAL itself.
     pub fn close(&self) {
-        // 1. Lock compaction_thread first, then signal stop.
-        //    This ordering prevents a TOCTOU race with maybe_compact():
-        //    while we hold the lock, no new compaction thread can be
-        //    spawned that would store its handle after we've taken it.
-        let mut handle_opt = self.compaction_thread.lock();
-        self.compaction_running.store(false, Ordering::Release);
+        // 1. Set the closing flag so no new compaction threads are spawned.
+        //    Lock compaction_threads first to synchronise with maybe_compact()
+        //    which also takes this lock before pushing a handle.
+        let mut threads_guard = self.compaction_threads.lock();
+        self.closing.store(true, Ordering::Release);
 
-        // 2. Wait for the compaction thread to finish (releases its core
-        //    lock, so we can safely acquire it in the sync step below).
-        if let Some(handle) = handle_opt.take() {
+        // 2. Take all handles while still holding the lock.
+        //    This guarantees that any concurrent maybe_compact() either:
+        //      a) sees closing=true and returns before spawning, or
+        //      b) has already stored its handle and we find it here.
+        let handles: Vec<JoinHandle<()>> = std::mem::take(&mut *threads_guard);
+        drop(threads_guard); // allow maybe_compact to proceed (but it sees closing=true)
+
+        // 3. Wait for all compaction threads to finish.
+        for handle in handles {
             match handle.join() {
                 Ok(()) => {}
                 Err(e) => {
@@ -1441,9 +1660,14 @@ impl<C: Cache> Engine<C> {
                 }
             }
         }
-        drop(handle_opt);
 
-        // 3. Sync all per-CF WALs so all buffered data is durably on disk.
+        // 4. Abort the replication shipping task (if running).
+        if let Some(handle) = self._replication_handle.as_ref() {
+            handle.abort();
+            tracing::info!("Replication background task aborted on shutdown");
+        }
+
+        // 5. Sync all per-CF WALs so all buffered data is durably on disk.
         //    The WALs are the sole persistence mechanism across restarts.
         {
             let core = self.core.lock();
@@ -1569,6 +1793,7 @@ impl<C: Cache> Engine<C> {
     {
         let start = std::time::Instant::now();
         let needs_compact;
+        let batch_records: Vec<LogRecord>;
         {
             let mut core = self.core.lock();
 
@@ -1581,6 +1806,7 @@ impl<C: Cache> Engine<C> {
                     record
                 })
                 .collect();
+            batch_records = records.clone();
             core.wal_mut(cf)?.write_batch(&records)?;
 
             // Apply to memtable
@@ -1603,6 +1829,19 @@ impl<C: Cache> Engine<C> {
                     false
                 };
         }
+
+        // Ship batch to replicas (Primary only)
+        if let Some(client) = &self.replication_client {
+            if !batch_records.is_empty() {
+                client.ship_records(batch_records);
+            }
+        }
+
+        // Publish CDC events for each item in the batch
+        for (key, value) in items {
+            self.publish_cdc_event(cf, key.as_ref(), Some(value.as_ref()));
+        }
+
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_batch_sets(items.len() as u64);
         self.metrics.record_set(elapsed_us);
@@ -1641,6 +1880,7 @@ impl<C: Cache> Engine<C> {
     {
         let start = std::time::Instant::now();
         let needs_compact;
+        let batch_records: Vec<LogRecord>;
         {
             let mut core = self.core.lock();
 
@@ -1653,6 +1893,7 @@ impl<C: Cache> Engine<C> {
                     record
                 })
                 .collect();
+            batch_records = records.clone();
             core.wal_mut(cf)?.write_batch(&records)?;
 
             // Apply to memtable
@@ -1674,6 +1915,19 @@ impl<C: Cache> Engine<C> {
                     false
                 };
         }
+
+        // Ship tombstones to replicas (Primary only)
+        if let Some(client) = &self.replication_client {
+            if !batch_records.is_empty() {
+                client.ship_records(batch_records);
+            }
+        }
+
+        // Publish CDC events for each deleted key
+        for key in keys {
+            self.publish_cdc_event(cf, key.as_ref(), None);
+        }
+
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_batch_deletes(keys.len() as u64);
         self.metrics.record_delete(elapsed_us);
@@ -1733,6 +1987,7 @@ impl<C: Cache> Engine<C> {
     /// that fall within the range.
     pub fn delete_range_cf(&self, cf: &str, start: &[u8], end: &[u8]) -> Result<()> {
         let start_time = std::time::Instant::now();
+        let replication_record: Option<LogRecord>;
         {
             let mut core = self.core.lock();
 
@@ -1750,6 +2005,9 @@ impl<C: Cache> Engine<C> {
             record.column_family = Some(cf.to_string());
             core.wal_mut(cf)?.write_record(&record)?;
 
+            // Save clone for replication
+            replication_record = Some(record.clone());
+
             // Add to EngineCore-level range tombstones (survives flushes)
             core.range_tombstones_mut()
                 .entry(cf.to_string())
@@ -1763,6 +2021,13 @@ impl<C: Cache> Engine<C> {
             }
             let last = mem.len() - 1;
             mem[last].add_range_tombstone(range);
+        }
+
+        // Ship range tombstone to replicas (Primary only)
+        if let Some(client) = &self.replication_client {
+            if let Some(record) = replication_record {
+                client.ship_records(vec![record]);
+            }
         }
 
         let elapsed = start_time.elapsed();

@@ -436,6 +436,9 @@ pub struct CompactionOptions {
     pub strategy_type: CompactionStrategyType,
     pub compaction_threshold: usize,
     pub max_tables_per_compaction: usize,
+    /// Maximum number of concurrent background compaction threads.
+    /// Each thread compacts a different column family.
+    pub max_concurrent_compactions: usize,
 }
 
 impl Default for CompactionOptions {
@@ -444,6 +447,7 @@ impl Default for CompactionOptions {
             strategy_type: CompactionStrategyType::SizeTiered,
             compaction_threshold: 4,
             max_tables_per_compaction: 8,
+            max_concurrent_compactions: 2,
         }
     }
 }
@@ -477,6 +481,7 @@ impl From<crate::infra::config::CompactionStrategy> for CompactionOptions {
             strategy_type,
             compaction_threshold: 4,      // default
             max_tables_per_compaction: 8, // default
+            max_concurrent_compactions: 2,
         }
     }
 }
@@ -552,6 +557,7 @@ impl Compaction {
             strategy_type,
             compaction_threshold: config.compaction.min_compaction_threshold,
             max_tables_per_compaction: config.compaction.max_sstables,
+            max_concurrent_compactions: 2,
         };
         let storage_config = StorageConfig {
             block_size: config.storage.block_size,
