@@ -51,6 +51,8 @@ impl From<LogRecordV0> for LogRecord {
         }
     }
 }
+    }
+}
 
 /// LogRecord payload format for V1 frames (without `range_start` / `range_end`).
 ///
@@ -79,6 +81,8 @@ impl From<LogRecordV1> for LogRecord {
             range_start: None,
             range_end: None,
         }
+    }
+}
     }
 }
 

@@ -71,7 +71,6 @@ pub struct EngineOptions {
     /// `set_with_ttl()` / `set_cf_with_ttl()`.
     pub default_ttl: Option<std::time::Duration>,
     /// Encryption configuration for data at rest (SSTable blocks and WAL frames).
-    #[serde(default)]
     pub encryption: EncryptionConfig,
 }
 

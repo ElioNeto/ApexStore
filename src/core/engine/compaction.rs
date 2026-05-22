@@ -3,9 +3,9 @@ use crate::core::iterators::{MergeIterator, StorageIterator};
 use crate::core::key::KeySlice;
 use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::core::table::Table;
-use crate::infra::config::StorageConfig;
 use crate::infra::error::Result;
 use crate::storage::builder::SstableBuilder;
+use crate::storage::config::StorageConfig;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -123,13 +123,18 @@ fn execute_compaction(
     let mut merge_iter = MergeIterator::new(iters);
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
 
+    // Build encryption config from storage config fields
+    let encryption_config = crate::storage::encryption::EncryptionConfig::from_key_path(
+        storage_config.encryption_key_path.as_deref(),
+    )?;
+
     // Create output SSTable — use encrypted builder if encryption is enabled
     let output_path = output_dir.join(format!("{}_{}.sst", output_prefix, timestamp));
     let mut builder = SstableBuilder::new_with_encryption(
         output_path.clone(),
         storage_config.clone(),
         timestamp,
-        &storage_config.encryption,
+        &encryption_config,
     )?;
 
     let mut record_count = 0u64;
@@ -544,13 +549,17 @@ impl Compaction {
             compaction_threshold: config.compaction.min_compaction_threshold,
             max_tables_per_compaction: config.compaction.max_sstables,
         };
-        let storage_config = crate::infra::config::StorageConfig {
+        let encryption = crate::storage::encryption::EncryptionConfig::from_key_path(
+            config.storage.encryption_key_path.as_deref(),
+        )
+        .unwrap_or_default();
+        let storage_config = StorageConfig {
             block_size: config.storage.block_size,
             block_cache_size_mb: config.storage.block_cache_size_mb,
             sparse_index_interval: config.storage.sparse_index_interval,
+            compaction_strategy: crate::storage::config::CompactionStrategy::SizeTiered,
             bloom_false_positive_rate: config.storage.bloom_false_positive_rate,
-            encryption_enabled: config.storage.encryption_enabled,
-            encryption_key_path: config.storage.encryption_key_path.clone(),
+            encryption,
         };
 
         Self::new(strategy_type, options, storage_config, output_dir)
