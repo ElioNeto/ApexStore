@@ -181,7 +181,7 @@ fn execute_compaction(
 
     // Create new Table from the SSTable
     let mut new_table =
-        Table::from_sstable_path(&result_path, Some(&storage_config.encryption))?;
+        Table::from_sstable_path(&result_path, Some(&encryption_config))?;
     if let Some(lvl) = level {
         new_table.level = lvl;
     }
