@@ -53,6 +53,11 @@ async fn main() -> std::io::Result<()> {
         .parse::<f64>()
         .unwrap_or(0.01);
 
+    let prefix_compression = env::var("PREFIX_COMPRESSION_ENABLED")
+        .unwrap_or_else(|_| "false".to_string())
+        .parse::<bool>()
+        .unwrap_or(false);
+
     let config = LsmConfig::builder()
         .dir_path(PathBuf::from(&data_dir))
         .memtable_max_size(memtable_max_size)
@@ -60,6 +65,7 @@ async fn main() -> std::io::Result<()> {
         .block_cache_size_mb(block_cache_size_mb)
         .sparse_index_interval(sparse_index_interval)
         .bloom_false_positive_rate(bloom_false_positive_rate)
+        .prefix_compression(prefix_compression)
         .build()
         .map_err(|e: apexstore::LsmError| {
             io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
@@ -79,6 +85,7 @@ async fn main() -> std::io::Result<()> {
     println!("   Block Cache: {} MB", block_cache_size_mb);
     println!("   Sparse Index Interval: {}", sparse_index_interval);
     println!("   Bloom Filter FP Rate: {}", bloom_false_positive_rate);
+    println!("   Prefix Compression: {}", prefix_compression);
     println!();
 
     let engine = match LsmEngine::new_from_config(

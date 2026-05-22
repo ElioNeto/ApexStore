@@ -480,6 +480,7 @@ impl<C: Cache> Engine<C> {
             bloom_false_positive_rate: 0.01,
             encryption_enabled,
             encryption_key_path,
+            prefix_compression_enabled: false,
         };
 
         // Create compaction with strategy from options
@@ -514,6 +515,7 @@ impl<C: Cache> Engine<C> {
             bloom_false_positive_rate: storage_config.bloom_false_positive_rate,
             encryption_enabled: storage_config.encryption_enabled,
             encryption_key_path: storage_config.encryption_key_path.clone(),
+            prefix_compression_enabled: storage_config.prefix_compression_enabled,
         };
         let compaction = Compaction::new(
             strategy_type,
@@ -2062,6 +2064,7 @@ impl<C: Cache> Engine<C> {
             bloom_false_positive_rate: 0.01,
             encryption_enabled: options.encryption.enabled,
             encryption_key_path: None,
+            prefix_compression_enabled: false,
         };
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let mut builder = SstableBuilder::new_with_encryption(

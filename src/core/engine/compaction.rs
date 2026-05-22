@@ -566,6 +566,7 @@ impl Compaction {
             bloom_false_positive_rate: config.storage.bloom_false_positive_rate,
             encryption_enabled: config.storage.encryption_enabled,
             encryption_key_path: config.storage.encryption_key_path.clone(),
+            prefix_compression_enabled: config.storage.prefix_compression_enabled,
         };
 
         Self::new(strategy_type, options, storage_config, output_dir)

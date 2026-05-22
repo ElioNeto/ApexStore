@@ -17,6 +17,11 @@ pub struct StorageConfig {
     /// Encryption configuration (disabled by default).
     #[serde(default)]
     pub encryption: EncryptionConfig,
+    /// Whether to enable block-level key prefix compression.
+    /// When enabled, consecutive keys within a block share their common prefix,
+    /// reducing storage size by ~10-30% for keys with common prefixes.
+    #[serde(default)]
+    pub prefix_compression: bool,
 }
 
 impl Default for StorageConfig {
@@ -28,6 +33,7 @@ impl Default for StorageConfig {
             compaction_strategy: CompactionStrategy::SizeTiered,
             bloom_false_positive_rate: 0.01,
             encryption: EncryptionConfig::default(),
+            prefix_compression: false,
         }
     }
 }

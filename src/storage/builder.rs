@@ -46,6 +46,7 @@ pub struct SstableBuilder {
     path: PathBuf,
     timestamp: u128,
     encryptor: Encryptor,
+    prefix_compression: bool,
 }
 
 impl SstableBuilder {
@@ -74,6 +75,8 @@ impl SstableBuilder {
 
         let current_block = Block::from_config(&config);
 
+        let prefix_compression = config.prefix_compression_enabled;
+
         Ok(Self {
             writer,
             current_block,
@@ -87,6 +90,7 @@ impl SstableBuilder {
             path,
             timestamp,
             encryptor,
+            prefix_compression,
         })
     }
 
@@ -120,6 +124,14 @@ impl SstableBuilder {
         }
 
         let first_key = self.extract_first_key_from_block()?;
+
+        // If prefix compression is enabled, compress keys within this block
+        // before encoding.  The first key is extracted first (above) because
+        // it's needed for BlockMeta and must be the full, uncompressed key.
+        if self.prefix_compression {
+            self.current_block.compress_keys();
+        }
+
         let encoded = self.current_block.encode();
         let uncompressed_size = encoded.len() as u32;
 

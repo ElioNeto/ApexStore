@@ -88,6 +88,9 @@ pub struct StorageConfig {
     /// Path to file containing the hex-encoded AES-256 key (64 hex chars).
     #[serde(default)]
     pub encryption_key_path: Option<String>,
+    /// Whether to enable block-level key prefix compression.
+    #[serde(default)]
+    pub prefix_compression_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +135,7 @@ impl Default for StorageConfig {
             bloom_false_positive_rate: 0.01,
             encryption_enabled: false,
             encryption_key_path: None,
+            prefix_compression_enabled: false,
         }
     }
 }
@@ -350,6 +354,7 @@ pub struct LsmConfigBuilder {
     strategy: Option<CompactionStrategy>,
     encryption_enabled: Option<bool>,
     encryption_key_path: Option<String>,
+    prefix_compression_enabled: Option<bool>,
     replication_role: Option<super::replication::ReplicationRole>,
     replica_endpoints: Option<Vec<String>>,
     replication_sync_interval_ms: Option<u64>,
@@ -444,6 +449,12 @@ impl LsmConfigBuilder {
         self
     }
 
+    /// Enable or disable block-level key prefix compression.
+    pub fn prefix_compression(mut self, enabled: bool) -> Self {
+        self.prefix_compression_enabled = Some(enabled);
+        self
+    }
+
     /// Enable or disable automatic WAL archiving.
     pub fn wal_archive_enabled(mut self, enabled: bool) -> Self {
         self.wal_archive_enabled = Some(enabled);
@@ -483,6 +494,9 @@ impl LsmConfigBuilder {
                 encryption_key_path: self
                     .encryption_key_path
                     .or_else(|| defaults.storage.encryption_key_path.clone()),
+                prefix_compression_enabled: self
+                    .prefix_compression_enabled
+                    .unwrap_or(defaults.storage.prefix_compression_enabled),
             },
             compaction: CompactionConfig {
                 level_size: self.level_size.unwrap_or(defaults.compaction.level_size),

@@ -1,15 +1,24 @@
 use crate::infra::{config::StorageConfig, error::LsmError};
+use crate::storage::prefix_compression::PrefixCompressor;
 use crc32fast::Hasher;
 use std::mem::size_of;
 
 pub const BLOCK_SIZE: usize = 4096;
 const U32_SIZE: usize = size_of::<u32>();
 
+/// Flags bit: when set, keys within this block use shared-prefix encoding.
+const PREFIX_COMPRESSION_FLAG: u8 = 0b0000_0001;
+
+/// Additional byte inserted between `num_elements` and CRC32 in the encoded format.
+const FLAGS_SIZE: usize = 1;
+
 #[derive(Debug, Clone)]
 pub struct Block {
     pub(crate) data: Vec<u8>,
     pub(crate) offsets: Vec<u32>,
     block_size: usize,
+    /// Bit flags stored in the encoded block format.
+    flags: u8,
 }
 
 impl Block {
@@ -22,7 +31,31 @@ impl Block {
             data: Vec::new(),
             offsets: Vec::new(),
             block_size,
+            flags: 0,
         }
+    }
+
+    /// Returns `true` if this block was decoded from prefix-compressed data.
+    pub fn is_prefix_compressed(&self) -> bool {
+        self.flags & PREFIX_COMPRESSION_FLAG != 0
+    }
+
+    /// Mark the block as prefix-compressed (called by the builder after compressing keys).
+    pub fn set_prefix_compressed(&mut self) {
+        self.flags |= PREFIX_COMPRESSION_FLAG;
+    }
+
+    /// Compress keys using prefix encoding, modifying `data` and `offsets` in place.
+    /// This should be called **before** `encode()` when building an SSTable.
+    pub fn compress_keys(&mut self) {
+        if self.offsets.is_empty() {
+            return;
+        }
+        let (new_data, new_offsets) =
+            PrefixCompressor::compress_block_data(&self.data, &self.offsets);
+        self.data = new_data;
+        self.offsets = new_offsets;
+        self.flags |= PREFIX_COMPRESSION_FLAG;
     }
 
     fn entry_size(key: &[u8], value: &[u8]) -> usize {
@@ -31,7 +64,7 @@ impl Block {
     }
 
     fn metadata_size(num_entries: usize) -> usize {
-        (num_entries * U32_SIZE) + U32_SIZE
+        (num_entries * U32_SIZE) + U32_SIZE + FLAGS_SIZE
     }
 
     fn current_size(&self) -> usize {
@@ -64,7 +97,7 @@ impl Block {
     }
 
     pub fn encode(&self) -> Vec<u8> {
-        let mut encoded = Vec::with_capacity(self.current_size());
+        let mut encoded = Vec::with_capacity(self.current_size() + FLAGS_SIZE);
         encoded.extend_from_slice(&self.data);
 
         for &offset in &self.offsets {
@@ -73,6 +106,9 @@ impl Block {
 
         let num_elements = self.offsets.len() as u32;
         encoded.extend_from_slice(&num_elements.to_le_bytes());
+
+        // Insert flags byte between num_elements and CRC32
+        encoded.push(self.flags);
 
         // Calculate and append CRC32 checksum (Little Endian)
         let mut hasher = Hasher::new();
@@ -84,7 +120,7 @@ impl Block {
     }
 
     pub fn decode(data: &[u8]) -> std::result::Result<Self, LsmError> {
-        if data.len() < 2 * U32_SIZE {
+        if data.len() < 2 * U32_SIZE + FLAGS_SIZE {
             return Err(LsmError::CorruptedData(
                 "Data too short to contain checksum".to_string(),
             ));
@@ -114,7 +150,12 @@ impl Block {
             ));
         }
 
-        let num_elements_start = data_without_checksum.len() - U32_SIZE;
+        // Read flags byte (right before CRC32, after num_elements)
+        let flags_pos = data_without_checksum.len() - FLAGS_SIZE;
+        let flags = data_without_checksum[flags_pos];
+
+        // num_elements is before the flags byte
+        let num_elements_start = flags_pos - U32_SIZE;
         let num_elements = u32::from_le_bytes([
             data_without_checksum[num_elements_start],
             data_without_checksum[num_elements_start + 1],
@@ -122,8 +163,8 @@ impl Block {
             data_without_checksum[num_elements_start + 3],
         ]) as usize;
 
-        let offsets_start = data_without_checksum.len() - U32_SIZE - (num_elements * U32_SIZE);
-        let records_data = data_without_checksum[..offsets_start].to_vec();
+        let offsets_start = num_elements_start - (num_elements * U32_SIZE);
+        let raw_data = data_without_checksum[..offsets_start].to_vec();
 
         let mut offsets = Vec::with_capacity(num_elements);
         let mut offset_pos = offsets_start;
@@ -139,11 +180,26 @@ impl Block {
             offset_pos += U32_SIZE;
         }
 
-        Ok(Self {
-            data: records_data,
-            offsets,
-            block_size: BLOCK_SIZE,
-        })
+        let is_compressed = flags & PREFIX_COMPRESSION_FLAG != 0;
+
+        if is_compressed {
+            // Decompress keys: rebuild full keys from prefix-compressed entries
+            let (decompressed_data, decompressed_offsets) =
+                PrefixCompressor::decompress_block_data(&raw_data, &offsets)?;
+            Ok(Self {
+                data: decompressed_data,
+                offsets: decompressed_offsets,
+                block_size: BLOCK_SIZE,
+                flags,
+            })
+        } else {
+            Ok(Self {
+                data: raw_data,
+                offsets,
+                block_size: BLOCK_SIZE,
+                flags,
+            })
+        }
     }
 
     pub fn len(&self) -> usize {
