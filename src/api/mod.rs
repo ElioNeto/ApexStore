@@ -1,11 +1,15 @@
 pub mod auth;
 pub mod config;
+pub mod rate_limiter;
 
 pub use self::config::ServerConfig;
+use self::rate_limiter::{rate_limit_middleware, RateLimiterState};
 use crate::LsmEngine;
+use actix_web::middleware::from_fn;
 use actix_web::{delete, get, post, put, web, App, HttpResponse, HttpServer, Responder};
 use serde::Deserialize;
 use serde_json::json;
+use std::sync::Arc;
 
 /// Query parameters for `GET /keys`
 #[derive(Deserialize)]
@@ -225,22 +229,78 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 }
 
 /// Start the REST API server.
-pub async fn start_server(engine: LsmEngine, config: ServerConfig) -> std::io::Result<()> {
+///
+/// Registers SIGINT and SIGTERM handlers so that `engine.close()` is called
+/// before the server shuts down, ensuring WALs are synced and compaction
+/// finishes cleanly.
+pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::io::Result<()> {
     let host = config.host.clone();
     let port = config.port;
 
     tracing::info!(target: "apexstore::api", "Starting server at {}:{}", host, port);
-    println!("🚀 Starting server at http://{}:{}", host, port);
+    println!("Starting server at http://{}:{}", host, port);
 
-    let engine_data = web::Data::new(engine);
+    let engine_data = web::Data::from(engine.clone());
+    let max_req_per_min = if config.rate_limit_enabled {
+        config.rate_limit_requests_per_minute
+    } else {
+        0
+    };
+    let rate_limiter_state = web::Data::new(RateLimiterState::new(max_req_per_min));
 
-    HttpServer::new(move || {
+    let mut server_builder = HttpServer::new(move || {
         App::new()
+            .wrap(from_fn(rate_limit_middleware))
             .wrap(actix_web::middleware::Logger::default())
             .app_data(engine_data.clone())
+            .app_data(rate_limiter_state.clone())
             .configure(configure)
     })
-    .bind((host, port))?
-    .run()
-    .await
+    .max_connections(config.max_connections)
+    .backlog(config.backlog)
+    .bind((host, port))?;
+
+    if let Some(workers) = config.workers {
+        server_builder = server_builder.workers(workers);
+    }
+
+    let server = server_builder.run();
+
+    let server_handle = server.handle();
+
+    // Spawn a signal handler that waits for SIGINT (Ctrl+C) or SIGTERM,
+    // calls engine.close() to sync WALs and join the compaction thread,
+    // then gracefully stops the HTTP server.
+    let signal_engine = engine.clone();
+    tokio::spawn(async move {
+        // Wait for SIGINT (cross-platform) or SIGTERM (Unix).
+        #[cfg(unix)]
+        {
+            let mut term_signal =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("Failed to register SIGTERM handler");
+
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("Received SIGINT (Ctrl+C), shutting down...");
+                }
+                _ = term_signal.recv() => {
+                    tracing::info!("Received SIGTERM, shutting down...");
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c().await.ok();
+            tracing::info!("Received shutdown signal, shutting down...");
+        }
+
+        // Sync WALs and wait for compaction to finish.
+        signal_engine.close();
+        tracing::info!("Engine closed, stopping HTTP server...");
+
+        server_handle.stop(true).await;
+    });
+
+    server.await
 }
