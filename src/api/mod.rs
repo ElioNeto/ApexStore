@@ -3,9 +3,8 @@ pub mod config;
 pub mod rate_limiter;
 
 pub use self::config::ServerConfig;
-use self::rate_limiter::{rate_limit_middleware, RateLimiterState};
+use self::rate_limiter::{RateLimiter, RateLimiterState};
 use crate::LsmEngine;
-use actix_web::middleware::from_fn;
 use actix_web::{delete, get, post, put, web, App, HttpResponse, HttpServer, Responder};
 use serde::Deserialize;
 use serde_json::json;
@@ -241,16 +240,12 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     println!("Starting server at http://{}:{}", host, port);
 
     let engine_data = web::Data::from(engine.clone());
-    let max_req_per_min = if config.rate_limit_enabled {
-        config.rate_limit_requests_per_minute
-    } else {
-        0
-    };
-    let rate_limiter_state = web::Data::new(RateLimiterState::new(max_req_per_min));
+    let rate_limiter_state =
+        web::Data::new(RateLimiterState::new(config.rate_limit_requests_per_minute));
 
     let mut server_builder = HttpServer::new(move || {
         App::new()
-            .wrap(from_fn(rate_limit_middleware))
+            .wrap(RateLimiter)
             .wrap(actix_web::middleware::Logger::default())
             .app_data(engine_data.clone())
             .app_data(rate_limiter_state.clone())

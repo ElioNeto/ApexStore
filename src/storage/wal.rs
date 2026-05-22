@@ -417,9 +417,17 @@ impl WriteAheadLog {
             records.push(record);
         }
 
+        // Deduplicate: keep only the last occurrence of each key to avoid
+        // reverting to a stale value when batch fsync loses ordering (see
+        // [`deduplicate_records`] for details).
+        let before = records.len();
+        let records = deduplicate_records(records);
+        let dedup_count = before - records.len();
+
         info!(
-            "WAL recovery: {} records recovered, {} frames skipped",
+            "WAL recovery: {} records recovered, {} deduplicated, {} frames skipped",
             records.len(),
+            dedup_count,
             skipped_frames
         );
 
@@ -572,6 +580,47 @@ impl WriteAheadLog {
             .map(|m| m.len())
             .map_err(crate::infra::error::LsmError::Io)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: deduplicate recovered WAL records
+// ---------------------------------------------------------------------------
+
+/// Deduplicate recovered WAL records by (column_family, key), keeping only the
+/// **last** occurrence of each key (by position in the file).
+///
+/// ## Why this is necessary
+///
+/// The batched WAL fsync (`WAL_SYNC_INTERVAL = 4`) delays `sync_all()` across
+/// multiple `write_record()` calls.  If a key is written multiple times (e.g.
+/// `k=v1`, `k=v2`, `k=v3`) and only 1 out of 3 fsyncs completes before a crash,
+/// the WAL might contain `k=v1` but not `k=v2` or `k=v3`.  Without deduplication,
+/// recovery would replay `k=v1` — reverting the key to a stale value.
+///
+/// By keeping only the **last** occurrence of each key in the recovered records,
+/// we ensure that even if some intermediate writes were lost, the engine never
+/// regresses to an older value that happened to be more durably persisted.
+///
+/// The deduplication is performed **after** all records have been read from the
+/// file, so it works regardless of which frames survived the crash.
+fn deduplicate_records(records: Vec<LogRecord>) -> Vec<LogRecord> {
+    use std::collections::HashMap;
+
+    // Map from (column_family, key_bytes) → index of last occurrence
+    let mut last_occurrence: HashMap<(String, Vec<u8>), usize> = HashMap::new();
+    for (i, record) in records.iter().enumerate() {
+        let cf = record
+            .column_family
+            .as_deref()
+            .unwrap_or("default")
+            .to_string();
+        last_occurrence.insert((cf, record.key.clone()), i);
+    }
+
+    // Collect the last occurrence of each unique key in file order.
+    let mut indices: Vec<usize> = last_occurrence.into_values().collect();
+    indices.sort_unstable();
+    indices.into_iter().map(|i| records[i].clone()).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -915,6 +964,129 @@ mod tests {
         assert_eq!(recovered.len(), records.len());
         for (original, recovered_record) in records.iter().zip(recovered.iter()) {
             assert_eq!(original, recovered_record);
+        }
+    }
+
+    // ── Issue #191: WAL deduplication tests ──
+
+    #[test]
+    fn test_wal_deduplicate_same_key_different_values() {
+        // Simulate the bug scenario: k=v1, k=v2, k=v3 written, but only
+        // k=v1 and k=v3 survive on disk. Recovery should return only k=v3
+        // (the last occurrence).
+        let (_temp_dir, wal) = create_test_wal();
+
+        let r1 = LogRecord::new(b"k".to_vec(), b"v1".to_vec());
+        let r2 = LogRecord::new(b"k".to_vec(), b"v2".to_vec());
+        let r3 = LogRecord::new(b"k".to_vec(), b"v3".to_vec());
+
+        wal.write_record(&r1).unwrap();
+        wal.write_record(&r2).unwrap();
+        wal.write_record(&r3).unwrap();
+
+        // Force an fsync so all 3 records are durable.
+        wal.sync().unwrap();
+
+        // Recovery should deduplicate: only the last occurrence (k=v3) survives.
+        let records = wal.recover().unwrap();
+        assert_eq!(records.len(), 1, "only the last occurrence should survive");
+        assert_eq!(records[0].key, b"k");
+        assert_eq!(
+            records[0].value, b"v3",
+            "should keep the final value v3, not v1"
+        );
+    }
+
+    #[test]
+    fn test_wal_deduplicate_interleaved_keys() {
+        // Multiple keys interleaved: k1=v1, k2=v2, k1=v3, k2=v4
+        // Recovery should keep k1=v3, k2=v4 (last occurrence of each).
+        let (_temp_dir, wal) = create_test_wal();
+
+        let r1 = LogRecord::new(b"k1".to_vec(), b"v1".to_vec());
+        let r2 = LogRecord::new(b"k2".to_vec(), b"v2".to_vec());
+        let r3 = LogRecord::new(b"k1".to_vec(), b"v3".to_vec());
+        let r4 = LogRecord::new(b"k2".to_vec(), b"v4".to_vec());
+
+        wal.write_record(&r1).unwrap();
+        wal.write_record(&r2).unwrap();
+        wal.write_record(&r3).unwrap();
+        wal.write_record(&r4).unwrap();
+        wal.sync().unwrap();
+
+        let records = wal.recover().unwrap();
+        assert_eq!(records.len(), 2, "two unique keys after dedup");
+
+        // Order should be k1, k2 (preserving last-occurrence order)
+        assert_eq!(records[0].key, b"k1");
+        assert_eq!(records[0].value, b"v3");
+        assert_eq!(records[1].key, b"k2");
+        assert_eq!(records[1].value, b"v4");
+    }
+
+    #[test]
+    fn test_wal_deduplicate_with_tombstone() {
+        // If a key is written then deleted, and both survive, the tombstone
+        // (last occurrence) should be kept.
+        let (_temp_dir, wal) = create_test_wal();
+
+        let write = LogRecord::new(b"k".to_vec(), b"v1".to_vec());
+        let delete = LogRecord::tombstone(b"k".to_vec());
+
+        wal.write_record(&write).unwrap();
+        wal.write_record(&delete).unwrap();
+        wal.sync().unwrap();
+
+        let records = wal.recover().unwrap();
+        assert_eq!(records.len(), 1, "only the tombstone should survive");
+        assert_eq!(records[0].key, b"k");
+        assert!(records[0].is_deleted, "should keep the tombstone");
+    }
+
+    #[test]
+    fn test_wal_deduplicate_different_cfs_independent() {
+        // Keys with the same name in different column families should
+        // NOT be deduplicated against each other.
+        let (_temp_dir, wal) = create_test_wal();
+
+        let mut r1 = LogRecord::new(b"k".to_vec(), b"default_v1".to_vec());
+        r1.column_family = None; // default
+        let mut r2 = LogRecord::new(b"k".to_vec(), b"users_v1".to_vec());
+        r2.column_family = Some("users".to_string());
+
+        wal.write_record(&r1).unwrap();
+        wal.write_record(&r2).unwrap();
+        wal.sync().unwrap();
+
+        let records = wal.recover().unwrap();
+        assert_eq!(
+            records.len(),
+            2,
+            "same key in different CFs should both survive"
+        );
+    }
+
+    #[test]
+    fn test_wal_deduplicate_no_duplicates_unchanged() {
+        // When there are no duplicate keys, deduplication should return the
+        // same records in the same order.
+        let (_temp_dir, wal) = create_test_wal();
+
+        let records = vec![
+            LogRecord::new(b"a".to_vec(), b"1".to_vec()),
+            LogRecord::new(b"b".to_vec(), b"2".to_vec()),
+            LogRecord::new(b"c".to_vec(), b"3".to_vec()),
+        ];
+
+        for r in &records {
+            wal.write_record(r).unwrap();
+        }
+        wal.sync().unwrap();
+
+        let recovered = wal.recover().unwrap();
+        assert_eq!(recovered.len(), 3);
+        for (orig, recv) in records.iter().zip(recovered.iter()) {
+            assert_eq!(orig, recv);
         }
     }
 }

@@ -7,7 +7,7 @@ use crate::infra::config::StorageConfig;
 use crate::infra::error::Result;
 use crate::infra::metrics::EngineMetrics;
 use crate::storage::builder::SstableBuilder;
-use crate::storage::cache::Cache;
+use crate::storage::cache::{Cache, GlobalBlockCache};
 use crate::storage::wal::WriteAheadLog;
 use fs2::FileExt;
 use parking_lot::Mutex;
@@ -277,31 +277,9 @@ fn compact_cf_core<C: Cache>(
         return Ok(None);
     }
 
-    // Phase 1: Plan — quickly pick which tables to compact (under lock).
-
-    // Clone table metadata and group indices so we can release the lock
-    // during I/O (Phase 2).  The tables vector contains only metadata
-    // (key ranges, file paths, levels); the actual I/O is done by
-    // Compaction::compact which creates new SstableBuilders.
-    let plan: Vec<(Vec<usize>, Vec<Table>)> = groups
-        .iter()
-        .map(|indices| {
-            let group_tables: Vec<Table> = indices.iter().map(|&i| tables[i].clone()).collect();
-            (indices.clone(), group_tables)
-        })
-        .collect();
-    // Drop core lock — Phase 2 (I/O) runs without it.
-    drop(tables);
-    // Note: we still hold &mut EngineCore from the caller (compact_cf),
-    // so we can't fully release the lock here. The actual release
-    // happens in compact_cf() which calls this function.
-    // This function is marked for future refactoring to three-phase.
-
     let mut all_metrics = CompactionMetrics::default();
-    for (indices, group_tables) in &plan {
-        let (new_tables, metrics) =
-            core.compaction_mut()
-                .compact(indices, group_tables, options)?;
+    for indices in &groups {
+        let (new_tables, metrics) = core.compaction_mut().compact(indices, &tables, options)?;
         core.version_set_mut()
             .atomic_replace(cf, indices, new_tables);
         all_metrics.bytes_read += metrics.bytes_read;
@@ -361,14 +339,22 @@ impl<C: Cache> Engine<C> {
             max_tables_per_compaction: options.compaction_options.max_tables_per_compaction,
         };
 
+        // Create shared block cache for on-disk SSTable reads
+        let block_cache = GlobalBlockCache::new(options.block_cache_size_mb, options.block_size);
+
+        let version_set = VersionSet::new(
+            options.clone(),
+            cache,
+            storage_config.clone(),
+            Some(block_cache),
+        );
+
         let compaction = Compaction::new(
             strategy_type,
             compaction_options,
             storage_config,
             sst_dir.clone(),
         );
-
-        let version_set = VersionSet::new(options.clone(), cache);
 
         // ── Recover all per-CF WALs ──────────────────────────────────
         // Start with the default WAL, then discover any wal-{cf}.log files.
@@ -1919,11 +1905,17 @@ mod tests {
 
     #[test]
     fn test_atomic_replace_in_version_set() {
+        use crate::infra::config::StorageConfig;
         use crate::storage::cache::NoopCache;
 
         let options = crate::core::engine::EngineOptions::default();
         let cache = NoopCache;
-        let mut vs = crate::core::engine::version_set::VersionSet::<NoopCache>::new(options, cache);
+        let mut vs = crate::core::engine::version_set::VersionSet::<NoopCache>::new(
+            options,
+            cache,
+            StorageConfig::default(),
+            None,
+        );
 
         // Add some tables
         for i in 0..5 {

@@ -2,6 +2,7 @@ use apexstore::{LsmConfig, LsmEngine};
 use std::env;
 use std::io;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -98,7 +99,7 @@ async fn main() -> std::io::Result<()> {
 
     println!("✓ Engine initialized successfully!\n");
 
-    apexstore::api::start_server(engine, server_config)
+    apexstore::api::start_server(Arc::new(engine), server_config)
         .await
         .map_err(|e: io::Error| e)
 }

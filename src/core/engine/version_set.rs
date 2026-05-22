@@ -1,4 +1,6 @@
-use crate::storage::cache::Cache;
+use crate::infra::config::StorageConfig;
+use crate::storage::cache::{Cache, GlobalBlockCache};
+use crate::storage::reader::SstableReader;
 use lru::LruCache;
 use parking_lot::Mutex;
 use std::num::NonZeroUsize;
@@ -22,10 +24,20 @@ pub struct VersionSet<C: Cache> {
     /// so repeated reads for the same key bypass table iteration.
     kv_cache: Arc<Mutex<LruCache<Vec<u8>, Vec<u8>>>>,
     tables: std::collections::HashMap<String, Vec<crate::core::table::Table>>,
+    /// Storage configuration used to open SstableReaders for on-disk tables.
+    storage_config: StorageConfig,
+    /// Shared block cache for SSTable block caching. `None` when no block cache
+    /// is available (e.g., in tests with `NoopCache`).
+    block_cache: Option<Arc<GlobalBlockCache>>,
 }
 
 impl<C: Cache> VersionSet<C> {
-    pub fn new(options: crate::core::engine::EngineOptions, _cache: C) -> Self {
+    pub fn new(
+        options: crate::core::engine::EngineOptions,
+        _cache: C,
+        storage_config: StorageConfig,
+        block_cache: Option<Arc<GlobalBlockCache>>,
+    ) -> Self {
         // Derive KV cache capacity from block cache size (rough estimate: entry ~200 bytes)
         let kv_capacity = (options.block_cache_size_mb * 1024 * 1024 / 200).max(1000);
         let kv_capacity =
@@ -34,6 +46,8 @@ impl<C: Cache> VersionSet<C> {
             _cache: std::marker::PhantomData,
             kv_cache: Arc::new(Mutex::new(LruCache::new(kv_capacity))),
             tables: std::collections::HashMap::new(),
+            storage_config,
+            block_cache,
         }
     }
 
@@ -58,6 +72,10 @@ impl<C: Cache> VersionSet<C> {
     pub fn get(&self, cf: &str, key: &[u8]) -> Option<Vec<u8>> {
         // 1. Check KV cache first — avoids table iteration entirely for hot keys
         if let Some(cached) = self.get_cached(key) {
+            if cached.is_empty() {
+                // Empty value in cache means tombstone — key was deleted
+                return None;
+            }
             return Some(cached);
         }
 
@@ -80,10 +98,46 @@ impl<C: Cache> VersionSet<C> {
                     // Bloom says key might exist, fall through to BTreeMap lookup
                 }
 
+                // Check in-memory data first
                 if let Some(val) = table.data.get(key) {
+                    // Tombstones are stored as empty values — treat as "key not found"
+                    // so deleted keys return None instead of Some(vec![]).
+                    if val.is_empty() {
+                        return None;
+                    }
                     // 2. Populate cache after successful read
                     self.put_cached(key.to_vec(), val.clone());
                     return Some(val.clone());
+                }
+
+                // 3. If not in memory but has a disk path, try reading from SSTable
+                if let Some(ref path) = table.path {
+                    if let Some(ref block_cache) = self.block_cache {
+                        match SstableReader::open(
+                            path.clone(),
+                            self.storage_config.clone(),
+                            block_cache.clone(),
+                        ) {
+                            Ok(reader) => match reader.get(key) {
+                                Ok(Some(record)) => {
+                                    // Tombstone: SSTable reader sets is_deleted flag
+                                    if !record.is_deleted {
+                                        let value = record.value;
+                                        self.put_cached(key.to_vec(), value.clone());
+                                        return Some(value);
+                                    }
+                                    // Tombstone → key is deleted, stop searching
+                                    return None;
+                                }
+                                // Not found in this SSTable — continue to next table
+                                Ok(None) => continue 'table_loop,
+                                // I/O error — skip this table and try next
+                                Err(_) => continue 'table_loop,
+                            },
+                            // Can't open reader — skip this table
+                            Err(_) => continue 'table_loop,
+                        }
+                    }
                 }
             }
         }

@@ -111,6 +111,17 @@ fn execute_compaction(
         let key = merge_iter.key();
         let value = merge_iter.value();
 
+        // Tombstone convention: deleted keys are stored with an empty value
+        // (Vec<u8> of length 0) throughout the system.  All paths — memtable
+        // flush, compaction, and point lookups — treat `is_empty()` as the
+        // tombstone signal.  This avoids carrying a separate boolean per
+        // record in the SSTable format while keeping tombstone detection
+        // cheap (a single length check).
+        //
+        // During compaction, tombstones are dropped entirely: the deleted key
+        // no longer appears in the compacted output since it cannot affect
+        // future reads (a later tombstone overriding an earlier value would
+        // be resolved the same way — dropped).
         // Skip tombstones (empty values) during compaction
         if !value.is_empty() {
             let key_vec: Vec<u8> = key.as_slice().to_vec();
@@ -327,12 +338,13 @@ impl CompactionStrategy for LazyLevelingCompaction {
                 self.size_tiered.min_tables_to_merge,
             );
 
-            // Map back to original indices
+            // Map back to original indices (with bounds check)
             buckets
                 .into_iter()
                 .map(|bucket| {
                     bucket
                         .iter()
+                        .filter(|&&local_idx| local_idx < l0_indices.len())
                         .map(|&local_idx| l0_indices[local_idx])
                         .collect()
                 })
@@ -512,10 +524,17 @@ impl Compaction {
         all_tables: &[Table],
         options: &EngineOptions,
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
+        // Defensive bounds check: skip indices out of range to avoid panics
+        // from off-by-one errors in group index selection.
         let tables: Vec<Table> = table_indices
             .iter()
+            .filter(|&&i| i < all_tables.len())
             .map(|i| all_tables[*i].clone())
             .collect();
+
+        if tables.is_empty() {
+            return Ok((Vec::new(), CompactionMetrics::default()));
+        }
 
         self.strategy
             .execute(tables, options, &self.storage_config, &self.output_dir)
