@@ -350,6 +350,7 @@ impl<C: Cache> Engine<C> {
         let lock_path = dir_path.join(".apexstore.lock");
         let lock_file = std::fs::OpenOptions::new()
             .create(true)
+            .truncate(false)
             .write(true)
             .read(true)
             .open(&lock_path)?;
@@ -1401,7 +1402,7 @@ mod tests {
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
 
-        let mut engine = Engine::new_from_config(
+        let engine = Engine::new_from_config(
             &config,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -1433,7 +1434,7 @@ mod tests {
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
 
-        let mut engine = Engine::new_from_config(
+        let engine = Engine::new_from_config(
             &config,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -1820,7 +1821,7 @@ mod tests {
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
 
-        let mut engine = Engine::new_from_config(
+        let engine = Engine::new_from_config(
             &config,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -1868,7 +1869,7 @@ mod tests {
         // Use a tiny memtable so writes trigger a flush immediately
         config.core.memtable_max_size = 512;
 
-        let mut engine = Engine::new_from_config(
+        let engine = Engine::new_from_config(
             &config,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -1937,7 +1938,7 @@ mod tests {
         let key_count = 200;
 
         {
-            let mut engine = Engine::new_from_config(
+            let engine = Engine::new_from_config(
                 &config,
                 crate::storage::cache::GlobalBlockCache::new(100, 4096),
             )
@@ -1977,7 +1978,7 @@ mod tests {
         config.compaction.max_sstables = 8;
         config.compaction.level_size = 3;
 
-        let mut engine = Engine::new_from_config(
+        let engine = Engine::new_from_config(
             &config,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -2025,7 +2026,7 @@ mod tests {
 
         // This block simulates shutdown with compaction in progress — should not panic
         {
-            let mut engine = Engine::new_from_config(
+            let engine = Engine::new_from_config(
                 &config,
                 crate::storage::cache::GlobalBlockCache::new(100, 4096),
             )
@@ -2186,7 +2187,7 @@ mod tests {
         let mut config = crate::infra::config::LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
         config.compaction.max_sstables = 4;
-        let mut engine = Engine::new_from_config(
+        let engine = Engine::new_from_config(
             &config,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -2222,7 +2223,7 @@ mod tests {
         let mut config = crate::infra::config::LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
         config.core.memtable_max_size = 4096;
-        let mut engine = Engine::new_from_config(
+        let engine = Engine::new_from_config(
             &config,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -2268,7 +2269,7 @@ mod tests {
         let mut config = crate::infra::config::LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
         config.core.memtable_max_size = 10 * 1024 * 1024; // Keep all keys in memtable
-        let mut engine = Engine::new_from_config(
+        let engine = Engine::new_from_config(
             &config,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -2308,7 +2309,7 @@ mod tests {
         config.compaction.max_sstables = 4;
         // Use small memtable to trigger flush
         config.core.memtable_max_size = 4096;
-        let mut engine = Engine::new_from_config(
+        let engine = Engine::new_from_config(
             &config,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -2371,7 +2372,7 @@ mod tests {
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
 
-        let mut engine = Engine::new_from_config(
+        let engine = Engine::new_from_config(
             &config,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -2434,7 +2435,7 @@ mod tests {
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
 
-        let mut engine = Engine::new_from_config(
+        let engine = Engine::new_from_config(
             &config,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -2492,7 +2493,7 @@ mod tests {
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
 
-        let mut engine = Engine::new_from_config(
+        let engine = Engine::new_from_config(
             &config,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),
         )

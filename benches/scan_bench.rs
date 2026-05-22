@@ -56,7 +56,7 @@ fn bench_full_scan(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("full_scan");
-                let mut engine = apexstore::LsmEngine::new_from_config(
+                let engine = apexstore::LsmEngine::new_from_config(
                     &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(nk * 220)
@@ -104,7 +104,7 @@ fn bench_range_scan(c: &mut Criterion) {
             &scan_size,
             |b, &_ss| {
                 let (temp_dir, data_dir) = setup_temp_dir("range_scan");
-                let mut engine = apexstore::LsmEngine::new_from_config(
+                let engine = apexstore::LsmEngine::new_from_config(
                     &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(total_keys * 110 / 2)
@@ -165,7 +165,7 @@ fn bench_prefix_scan(c: &mut Criterion) {
             &prefix_size,
             |b, &_ps| {
                 let (temp_dir, data_dir) = setup_temp_dir("prefix_scan");
-                let mut engine = apexstore::LsmEngine::new_from_config(
+                let engine = apexstore::LsmEngine::new_from_config(
                     &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(total_keys * 110 / 2)
@@ -214,7 +214,7 @@ fn bench_iteration_sorted(c: &mut Criterion) {
             &num_keys,
             |b, &nk| {
                 let (temp_dir, data_dir) = setup_temp_dir("iteration_sorted");
-                let mut engine = apexstore::LsmEngine::new_from_config(
+                let engine = apexstore::LsmEngine::new_from_config(
                     &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(nk * 220)
@@ -262,7 +262,7 @@ fn bench_scan_with_limit(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(limit), &limit, |b, &_l| {
             let (temp_dir, data_dir) = setup_temp_dir("scan_limit");
-            let mut engine = apexstore::LsmEngine::new_from_config(
+            let engine = apexstore::LsmEngine::new_from_config(
                 &LsmConfig::builder()
                     .dir_path(data_dir.clone())
                     .memtable_max_size(total_keys * 110 / 2)
@@ -310,7 +310,7 @@ fn bench_scan_pagination(c: &mut Criterion) {
             |b, &_np| {
                 let page_size = 100usize;
                 let (temp_dir, data_dir) = setup_temp_dir("scan_pagination");
-                let mut engine = apexstore::LsmEngine::new_from_config(
+                let engine = apexstore::LsmEngine::new_from_config(
                     &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(total_keys * 110 / 2)
@@ -373,7 +373,7 @@ fn bench_sstable_layer_scan(c: &mut Criterion) {
             |b, &_lc| {
                 let keys_per_layer = 10_000usize;
                 let (temp_dir, data_dir) = setup_temp_dir("sstable_layer");
-                let mut engine = apexstore::LsmEngine::new_from_config(
+                let engine = apexstore::LsmEngine::new_from_config(
                     &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(1024 * 1024)

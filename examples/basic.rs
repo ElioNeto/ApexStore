@@ -31,7 +31,7 @@ fn main() {
 
     // Open the engine
     let cache = GlobalBlockCache::new(100, 4096);
-    let mut engine = Engine::new_from_config(&config, cache).expect("failed to open engine");
+    let engine = Engine::new_from_config(&config, cache).expect("failed to open engine");
 
     // ── Put ──
     engine

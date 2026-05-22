@@ -50,7 +50,7 @@ fn bench_large_dataset_1m(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::from_parameter("1m_keys"), &(), |b, &_| {
         let (temp_dir, data_dir) = setup_temp_dir("large_1m");
-        let mut engine = apexstore::LsmEngine::new_from_config(
+        let engine = apexstore::LsmEngine::new_from_config(
             &LsmConfig::builder()
                 .dir_path(data_dir.clone())
                 .memtable_max_size(16 * 1024 * 1024)
@@ -100,7 +100,7 @@ fn bench_concurrent_access(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(threads), &threads, |b, _t| {
             let (temp_dir, data_dir) = setup_temp_dir("concurrent");
-            let mut engine = apexstore::LsmEngine::new_from_config(
+            let engine = apexstore::LsmEngine::new_from_config(
                 &LsmConfig::builder()
                     .dir_path(data_dir.clone())
                     .memtable_max_size(16 * 1024 * 1024)
@@ -163,7 +163,7 @@ fn bench_memory_pressure(c: &mut Criterion) {
         &(),
         |b, &_| {
             let (temp_dir, data_dir) = setup_temp_dir("memory_pressure");
-            let mut engine = apexstore::LsmEngine::new_from_config(
+            let engine = apexstore::LsmEngine::new_from_config(
                 &LsmConfig::builder()
                     .dir_path(data_dir.clone())
                     .memtable_max_size(2 * 1024 * 1024)
@@ -216,7 +216,7 @@ fn bench_many_sstables(c: &mut Criterion) {
             &(),
             |b, &_sc| {
                 let (temp_dir, data_dir) = setup_temp_dir(&format!("many_sst_{}", sstable_count));
-                let mut engine = apexstore::LsmEngine::new_from_config(
+                let engine = apexstore::LsmEngine::new_from_config(
                     &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(512 * 1024)
@@ -267,7 +267,7 @@ fn bench_cache_thrashing(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(cache_mb), &(), |b, &_cm| {
             let (temp_dir, data_dir) =
                 setup_temp_dir(format!("cache_thrash_{}", cache_mb).as_str());
-            let mut engine = apexstore::LsmEngine::new_from_config(
+            let engine = apexstore::LsmEngine::new_from_config(
                 &LsmConfig::builder()
                     .dir_path(data_dir.clone())
                     .memtable_max_size(16 * 1024 * 1024)
@@ -312,7 +312,7 @@ fn bench_key_updates(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::from_parameter("10k_keys"), &(), |b, &_| {
         let (temp_dir, data_dir) = setup_temp_dir("key_updates");
-        let mut engine = apexstore::LsmEngine::new_from_config(
+        let engine = apexstore::LsmEngine::new_from_config(
             &LsmConfig::builder()
                 .dir_path(data_dir.clone())
                 .memtable_max_size(64 * 1024 * 1024)
@@ -350,7 +350,7 @@ fn bench_delete_operations(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::from_parameter("10k_keys"), &(), |b, &_| {
         let (temp_dir, data_dir) = setup_temp_dir("delete_ops");
-        let mut engine = apexstore::LsmEngine::new_from_config(
+        let engine = apexstore::LsmEngine::new_from_config(
             &LsmConfig::builder()
                 .dir_path(data_dir.clone())
                 .memtable_max_size(64 * 1024 * 1024)

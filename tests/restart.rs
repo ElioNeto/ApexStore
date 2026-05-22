@@ -17,7 +17,7 @@ fn restart_recovers_from_wal() {
         .unwrap();
 
     {
-        let mut engine = LsmEngine::new_from_config(
+        let engine = LsmEngine::new_from_config(
             &cfg,
             apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -45,7 +45,7 @@ fn restart_after_flush_reads_sstable() {
         .unwrap();
 
     {
-        let mut engine = LsmEngine::new_from_config(
+        let engine = LsmEngine::new_from_config(
             &cfg,
             apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -78,7 +78,7 @@ fn tombstone_persists_across_restart() {
         .unwrap();
 
     {
-        let mut engine = LsmEngine::new_from_config(
+        let engine = LsmEngine::new_from_config(
             &cfg,
             apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -106,7 +106,7 @@ fn wal_truncation_recovers_partial_last_record() {
         .unwrap();
 
     {
-        let mut engine = LsmEngine::new_from_config(
+        let engine = LsmEngine::new_from_config(
             &cfg,
             apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -153,7 +153,7 @@ fn wal_truncation_mid_write_recovers_prior_records() {
     // Write N=5 records, record size after first 4
     let size_after_4: u64;
     {
-        let mut engine = LsmEngine::new_from_config(
+        let engine = LsmEngine::new_from_config(
             &cfg,
             apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -216,7 +216,7 @@ fn test_wal_partial_replay() {
     // Write N=5 records, recording WAL size after the first 4
     let size_after_4: u64;
     {
-        let mut engine = LsmEngine::new_from_config(
+        let engine = LsmEngine::new_from_config(
             &cfg,
             apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -276,7 +276,7 @@ fn compaction_crash_restart_consistency() {
 
     // Populate with enough data to trigger multiple flushes and compactions
     {
-        let mut engine = LsmEngine::new_from_config(
+        let engine = LsmEngine::new_from_config(
             &cfg,
             apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
         )
@@ -290,7 +290,7 @@ fn compaction_crash_restart_consistency() {
     } // engine dropped — simulates crash during/after compaction
 
     // Reopen — VersionSet must be consistent, engine must not panic
-    let mut engine = LsmEngine::new_from_config(
+    let engine = LsmEngine::new_from_config(
         &cfg,
         apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
     )
