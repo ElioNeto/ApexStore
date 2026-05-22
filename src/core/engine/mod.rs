@@ -1,5 +1,4 @@
 pub mod compaction;
-pub mod manifest;
 pub mod version_set;
 
 use crate::core::log_record::LogRecord;
