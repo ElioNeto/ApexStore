@@ -74,7 +74,17 @@ pub struct WriteAheadLog {
     /// Exposed read-only so callers (e.g. `LsmEngine::stats_all`) can
     /// query the file size without going through the write lock.
     pub(crate) path: PathBuf,
+    /// Number of buffered writes since the last fsync.
+    /// Used to amortise fsync cost across multiple write_record calls.
+    batch_count: Mutex<usize>,
 }
+
+/// How many `write_record` calls to accumulate before issuing an fsync.
+///
+/// A value of 1 means every write fsyncs (maximum durability).
+/// Higher values improve write throughput at the cost of a wider
+/// durability window in the event of a crash.
+const WAL_SYNC_INTERVAL: usize = 4;
 
 const MAX_WAL_RECORD_BYTES: usize = 32 * 1024 * 1024; // 32 MiB
 
@@ -89,10 +99,17 @@ impl WriteAheadLog {
         Ok(Self {
             file: Mutex::new(BufWriter::new(file)),
             path: wal_path,
+            batch_count: Mutex::new(0),
         })
     }
 
-    /// Append a single record to the WAL and fsync.
+    /// Append a single record to the WAL with batched fsync.
+    ///
+    /// Instead of fsyncing after every write (which limits throughput to
+    /// ~1 100 ops/s on typical hardware), the method accumulates
+    /// [`WAL_SYNC_INTERVAL`] records before issuing an fsync.  Callers
+    /// that need strict durability after every operation should use
+    /// [`WriteAheadLog::sync()`] explicitly.
     ///
     /// The on-disk format is:
     /// `[length: u32 LE][version: u8][payload: bytes][crc32: u32 LE]`
@@ -124,7 +141,16 @@ impl WriteAheadLog {
         writer.write_all(&serialized)?;
         writer.write_all(&checksum.to_le_bytes())?;
         writer.flush()?;
-        writer.get_ref().sync_all()?;
+
+        // Accumulate writes and fsync only every WAL_SYNC_INTERVAL calls.
+        let mut count = self.batch_count.lock();
+        *count += 1;
+        if *count >= WAL_SYNC_INTERVAL {
+            *count = 0;
+            // Drop the batch lock before fsync so we don't hold two locks.
+            drop(count);
+            writer.get_ref().sync_all()?;
+        }
 
         debug!(
             "WAL persisted: key={:?}, ts={}",
@@ -174,6 +200,11 @@ impl WriteAheadLog {
         }
         writer.flush()?;
         writer.get_ref().sync_all()?;
+
+        // Reset the single-write batch counter since we just fsynced.
+        let mut count = self.batch_count.lock();
+        *count = 0;
+        drop(count);
 
         debug!("WAL batch persisted: {} records", records.len());
         Ok(())
@@ -515,11 +546,14 @@ impl WriteAheadLog {
     /// Flush the BufWriter and fsync the underlying file.
     ///
     /// Called during graceful shutdown to ensure all buffered data is
-    /// durably on disk before the engine is dropped.
+    /// durably on disk before the engine is dropped.  Also resets the
+    /// batch counter so the next `write_record` starts a fresh batch.
     pub fn sync(&self) -> Result<()> {
         let mut guard = self.file.lock();
         guard.flush()?;
         guard.get_ref().sync_all()?;
+        let mut count = self.batch_count.lock();
+        *count = 0;
         Ok(())
     }
 
