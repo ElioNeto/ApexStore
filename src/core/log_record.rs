@@ -82,7 +82,7 @@ impl LogRecord {
 
     /// Returns `true` if this record has expired relative to the given `now` timestamp (in nanos).
     pub fn is_expired_at(&self, now: u128) -> bool {
-        self.expires_at.map_or(false, |exp| now >= exp)
+        self.expires_at.is_some_and(|exp| now >= exp)
     }
 
     /// Returns `true` if this record has expired relative to the current system time.

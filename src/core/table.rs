@@ -99,7 +99,8 @@ impl Table {
 
         // Extract metadata from the SSTable's MetaBlock
         let (min_key, max_key, bloom_filter) = if path.exists() {
-            let enc = encryption.unwrap_or(&crate::storage::encryption::EncryptionConfig::default());
+            let default_enc = crate::storage::encryption::EncryptionConfig::default();
+            let enc = encryption.unwrap_or(&default_enc);
             match Self::read_meta_block(path, enc) {
                 Ok(meta) => {
                     let bf = bloomfilter::Bloom::<[u8]>::from_bytes(meta.bloom_filter_data)

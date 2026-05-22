@@ -4,7 +4,6 @@ pub mod version_set;
 
 use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::core::table::Table;
-use crate::infra::config::StorageConfig;
 use crate::infra::error::Result;
 use crate::infra::metrics::EngineMetrics;
 use crate::storage::builder::SstableBuilder;
@@ -107,7 +106,7 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
                 .storage
                 .encryption_key_path
                 .as_deref()
-                .map(EncryptionConfig::from_key_path)
+                .map(|path| EncryptionConfig::from_key_path(Some(path)))
                 .unwrap_or_else(|| {
                     Err(crate::infra::error::LsmError::InvalidArgument(
                         "Encryption enabled but no key path provided".to_string(),
@@ -163,8 +162,9 @@ pub(crate) struct EngineCore<C: Cache> {
     /// Database directory path, used to create new per-CF WALs lazily.
     dir_path: std::path::PathBuf,
     /// Active range tombstones per column family.
-    /// These survive memtable flushes and are checked on every read/scan.
     range_tombstones: HashMap<String, Vec<crate::core::log_record::RangeTombstone>>,
+    /// Encryption config used when creating new WALs.
+    encryption: EncryptionConfig,
 }
 
 impl<C: Cache> EngineCore<C> {
@@ -196,7 +196,8 @@ impl<C: Cache> EngineCore<C> {
     /// Creates a new WAL file if one doesn't exist yet.
     pub(crate) fn wal_mut(&mut self, cf: &str) -> &mut WriteAheadLog {
         if !self.wals.contains_key(cf) {
-            let wal = WriteAheadLog::new(&self.dir_path, cf).expect("Failed to create WAL for CF");
+            let wal = WriteAheadLog::new_with_encryption(&self.dir_path, cf, &self.encryption)
+                .expect("Failed to create WAL for CF");
             self.wals.insert(cf.to_string(), wal);
         }
         self.wals.get_mut(cf).unwrap()
@@ -369,14 +370,16 @@ impl<C: Cache> Engine<C> {
             }
         })?;
 
-        // Create storage config from options
+        // Create storage config from options (with encryption derived from engine options)
+        let encryption_enabled = options.encryption.enabled;
+        let encryption_key_path = None; // Key is already loaded in options.encryption
         let storage_config = crate::infra::config::StorageConfig {
             block_size: options.block_size,
             block_cache_size_mb: options.block_cache_size_mb,
             sparse_index_interval: 16,
             bloom_false_positive_rate: 0.01,
-            encryption_enabled: false,
-            encryption_key_path: None,
+            encryption_enabled,
+            encryption_key_path,
         };
 
         // Create compaction with strategy from options
@@ -402,10 +405,19 @@ impl<C: Cache> Engine<C> {
             Some(block_cache),
         );
 
+        // Convert infra config to storage config for the compaction layer
+        let compaction_storage_config = crate::infra::config::StorageConfig {
+            block_size: storage_config.block_size,
+            block_cache_size_mb: storage_config.block_cache_size_mb,
+            sparse_index_interval: storage_config.sparse_index_interval,
+            bloom_false_positive_rate: storage_config.bloom_false_positive_rate,
+            encryption_enabled: storage_config.encryption_enabled,
+            encryption_key_path: storage_config.encryption_key_path.clone(),
+        };
         let compaction = Compaction::new(
             strategy_type,
             compaction_options,
-            storage_config,
+            compaction_storage_config,
             sst_dir.clone(),
         );
 
@@ -419,11 +431,13 @@ impl<C: Cache> Engine<C> {
             wals: HashMap::new(),
             dir_path: dir_path.to_path_buf(),
             range_tombstones: HashMap::new(),
+            encryption: options.encryption.clone(),
         };
 
         // Create and recover the "default" CF WAL
         {
-            let default_wal = WriteAheadLog::new(dir_path, "default")?;
+            let default_wal =
+                WriteAheadLog::new_with_encryption(dir_path, "default", &options.encryption)?;
             let records = default_wal.recover()?;
             core.wals.insert("default".to_string(), default_wal);
             Self::replay_wal_records_core(&mut core, records)?;
@@ -440,7 +454,7 @@ impl<C: Cache> Engine<C> {
                     .and_then(|s| s.strip_suffix(".log"))
                 {
                     if cf != "default" && !core.wals.contains_key(cf) {
-                        match WriteAheadLog::new(dir_path, cf) {
+                        match WriteAheadLog::new_with_encryption(dir_path, cf, &options.encryption) {
                             Ok(wal) => {
                                 let records = wal.recover()?;
                                 core.wals.insert(cf.to_string(), wal);
@@ -767,24 +781,8 @@ impl<C: Cache> Engine<C> {
         let key_str = String::from_utf8_lossy(key).into_owned();
         let core = self.core.lock();
 
-        // First check if the key falls within any active range tombstone.
-        // The range tombstone check must happen before the value lookup so that
-        // deleted ranges take precedence over any existing data.
-        if Self::is_in_range_tombstone(&core, cf, key) {
-            let elapsed_us = start.elapsed().as_micros() as u64;
-            self.metrics.record_get(elapsed_us);
-            tracing::debug!(
-                target: "apexstore::engine",
-                operation = "get_cf",
-                cf = cf,
-                key = %key_str,
-                found = false,
-                reason = "range_tombstone",
-                duration_us = elapsed_us,
-            );
-            return Ok(None);
-        }
-
+        // First check memtables (newest first) — point writes take precedence
+        // over range tombstones.
         if let Some(memtables) = core.memtables().get(cf) {
             for mem in memtables.iter().rev() {
                 if let Some(v) = mem.data.get(key) {
@@ -813,6 +811,24 @@ impl<C: Cache> Engine<C> {
                 }
             }
         }
+
+        // After memtable lookup, check if key falls within a range tombstone.
+        // This is done after memtable check so point writes take precedence.
+        if Self::is_in_range_tombstone(&core, cf, key) {
+            let elapsed_us = start.elapsed().as_micros() as u64;
+            self.metrics.record_get(elapsed_us);
+            tracing::debug!(
+                target: "apexstore::engine",
+                operation = "get_cf",
+                cf = cf,
+                key = %key_str,
+                found = false,
+                reason = "range_tombstone",
+                duration_us = elapsed_us,
+            );
+            return Ok(None);
+        }
+
         let result = core.version_set().get(cf, key);
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_get(elapsed_us);
@@ -1736,16 +1752,21 @@ impl<C: Cache> Engine<C> {
         path: &Path,
         options: &EngineOptions,
     ) -> Result<PathBuf> {
-        let storage_config = StorageConfig {
+        let storage_config = crate::infra::config::StorageConfig {
             block_size: options.block_size,
             block_cache_size_mb: options.block_cache_size_mb,
             sparse_index_interval: 16,
             bloom_false_positive_rate: 0.01,
-            encryption_enabled: false,
+            encryption_enabled: options.encryption.enabled,
             encryption_key_path: None,
         };
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let mut builder = SstableBuilder::new(path.to_path_buf(), storage_config, timestamp)?;
+        let mut builder = SstableBuilder::new_with_encryption(
+            path.to_path_buf(),
+            storage_config,
+            timestamp,
+            &options.encryption,
+        )?;
         for (key, value) in &table.data {
             let record = LogRecord::new(key.clone(), value.clone());
             builder.add(key, &record)?;
@@ -2088,8 +2109,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (new_tables, _metrics) = strategy
-            .execute(tables, &options, &storage_config, &output_dir)
-            .unwrap();
+.execute(tables, &options, &storage_config, &output_dir, &[])
+                                   .unwrap();
 
         assert!(
             !new_tables.is_empty(),
@@ -2129,8 +2150,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (new_tables, _) = strategy
-            .execute(tables, &options, &storage_config, &output_dir)
-            .unwrap();
+.execute(tables, &options, &storage_config, &output_dir, &[])
+                                   .unwrap();
 
         assert!(
             !new_tables.is_empty(),
@@ -2169,8 +2190,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (new_tables, _) = strategy
-            .execute(vec![table], &options, &storage_config, &output_dir)
-            .unwrap();
+.execute(vec![table], &options, &storage_config, &output_dir, &[])
+                                   .unwrap();
 
         // The new table should not contain tombstones
         if let Some(new_table) = new_tables.first() {
@@ -2209,8 +2230,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (_, metrics) = strategy
-            .execute(tables, &options, &storage_config, &output_dir)
-            .unwrap();
+.execute(tables, &options, &storage_config, &output_dir, &[])
+                                   .unwrap();
 
         assert!(metrics.bytes_read > 0, "Should track bytes read");
         assert!(metrics.files_merged > 0, "Should track files merged");
@@ -2322,8 +2343,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (_new_tables, metrics) = strategy
-            .execute(tables, &options, &storage_config, &output_dir)
-            .unwrap();
+.execute(tables, &options, &storage_config, &output_dir, &[])
+                                   .unwrap();
 
         // Write amplification = bytes_written / bytes_read
         // For SizeTiered, should be < 3x
@@ -2365,8 +2386,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (new_tables, metrics) = strategy
-            .execute(tables, &options, &storage_config, &output_dir)
-            .unwrap();
+.execute(tables, &options, &storage_config, &output_dir, &[])
+                                   .unwrap();
 
         assert!(
             !new_tables.is_empty(),
@@ -2409,8 +2430,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (_new_tables, metrics) = strategy
-            .execute(tables, &options, &storage_config, &output_dir)
-            .unwrap();
+.execute(tables, &options, &storage_config, &output_dir, &[])
+                                   .unwrap();
 
         // Write amplification = bytes_written / bytes_read
         // For SizeTiered, should be < 3x
@@ -3504,5 +3525,188 @@ mod tests {
         let no_ttl = LogRecord::new(b"k".to_vec(), b"v".to_vec());
         assert!(!no_ttl.is_expired(), "No TTL record should never expire");
         assert_eq!(no_ttl.expires_at, None);
+    }
+
+    // ── Range Delete Tests ──
+
+    #[test]
+    fn test_delete_range_removes_keys_in_range() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Write keys "a", "b", "c", "d", "e" and flush to SSTable
+        // so that range tombstones can mask them
+        engine.put_cf("default", b"a".to_vec(), b"value_a".to_vec()).unwrap();
+        engine.put_cf("default", b"b".to_vec(), b"value_b".to_vec()).unwrap();
+        engine.put_cf("default", b"c".to_vec(), b"value_c".to_vec()).unwrap();
+        engine.put_cf("default", b"d".to_vec(), b"value_d".to_vec()).unwrap();
+        engine.put_cf("default", b"e".to_vec(), b"value_e".to_vec()).unwrap();
+        engine.flush_memtable().unwrap();
+
+        // Verify all keys are present
+        assert_eq!(engine.get(b"a").unwrap(), Some(b"value_a".to_vec()));
+        assert_eq!(engine.get(b"b").unwrap(), Some(b"value_b".to_vec()));
+        assert_eq!(engine.get(b"c").unwrap(), Some(b"value_c".to_vec()));
+
+        // Delete range [b, d) — should delete "b", "c"
+        engine.delete_range(b"b", b"d").unwrap();
+
+        // Keys in range should be removed
+        assert_eq!(engine.get(b"a").unwrap(), Some(b"value_a".to_vec()));
+        assert_eq!(engine.get(b"b").unwrap(), None);
+        assert_eq!(engine.get(b"c").unwrap(), None);
+        assert_eq!(engine.get(b"d").unwrap(), Some(b"value_d".to_vec()));
+        assert_eq!(engine.get(b"e").unwrap(), Some(b"value_e".to_vec()));
+    }
+
+    #[test]
+    fn test_delete_range_preserves_keys_outside_range() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Write keys with numerical prefixes and flush to SSTable
+        for i in 0..10 {
+            let key = format!("key_{}", i).into_bytes();
+            let value = format!("value_{}", i).into_bytes();
+            engine.put_cf("default", key, value).unwrap();
+        }
+        engine.flush_memtable().unwrap();
+
+        // Delete range "key_3".."key_7"
+        engine.delete_range(b"key_3", b"key_7").unwrap();
+
+        // Keys outside range should remain
+        assert_eq!(engine.get(b"key_0").unwrap(), Some(b"value_0".to_vec()));
+        assert_eq!(engine.get(b"key_2").unwrap(), Some(b"value_2".to_vec()));
+        assert_eq!(engine.get(b"key_7").unwrap(), Some(b"value_7".to_vec()));
+        assert_eq!(engine.get(b"key_9").unwrap(), Some(b"value_9".to_vec()));
+
+        // Keys inside range should be gone
+        assert_eq!(engine.get(b"key_3").unwrap(), None);
+        assert_eq!(engine.get(b"key_4").unwrap(), None);
+        assert_eq!(engine.get(b"key_5").unwrap(), None);
+        assert_eq!(engine.get(b"key_6").unwrap(), None);
+    }
+
+    #[test]
+    fn test_range_tombstone_interaction_with_point_writes() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Write key "x" with value "original" and flush to SSTable
+        engine.put_cf("default", b"x".to_vec(), b"original".to_vec()).unwrap();
+        engine.flush_memtable().unwrap();
+        assert_eq!(engine.get(b"x").unwrap(), Some(b"original".to_vec()));
+
+        // Delete range [x, z) — should shadow "x" in SSTable
+        engine.delete_range(b"x", b"z").unwrap();
+
+        // "x" should now be deleted (range tombstone masks SSTable data)
+        assert_eq!(engine.get(b"x").unwrap(), None);
+
+        // Write "x" again with a new value — point write in memtable
+        // should take precedence over the range tombstone
+        engine.put_cf("default", b"x".to_vec(), b"new_value".to_vec()).unwrap();
+
+        // "x" should have the new value (memtable point write wins)
+        assert_eq!(engine.get(b"x").unwrap(), Some(b"new_value".to_vec()));
+
+        // "y" should still be deleted by the range tombstone
+        assert_eq!(engine.get(b"y").unwrap(), None);
+    }
+
+    #[test]
+    fn test_delete_range_scan_filters_out_tombstoned_keys() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Write keys 1-5 and flush to SSTable
+        for i in 1..=5 {
+            let key = format!("k{}", i).into_bytes();
+            let value = format!("v{}", i).into_bytes();
+            engine.put_cf("default", key, value).unwrap();
+        }
+        engine.flush_memtable().unwrap();
+
+        // Delete range "k2".."k4"
+        engine.delete_range(b"k2", b"k4").unwrap();
+
+        // Scan should only return k1, k4, k5
+        let results = engine.scan().unwrap();
+        let keys: Vec<&[u8]> = results.iter().map(|(k, _)| k.as_slice()).collect();
+        assert_eq!(keys, vec![b"k1", b"k4", b"k5"]);
+    }
+
+    #[test]
+    fn test_delete_range_cf() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Write keys in custom CF and flush to SSTable
+        engine.put_cf("cf1", b"a".to_vec(), b"1".to_vec()).unwrap();
+        engine.put_cf("cf1", b"b".to_vec(), b"2".to_vec()).unwrap();
+        engine.put_cf("cf1", b"c".to_vec(), b"3".to_vec()).unwrap();
+        engine.flush_memtable_cf("cf1").unwrap();
+
+        // Verify keys in CF
+        assert_eq!(engine.get_cf("cf1", b"a").unwrap(), Some(b"1".to_vec()));
+        assert_eq!(engine.get_cf("cf1", b"b").unwrap(), Some(b"2".to_vec()));
+
+        // Delete range [a, c) in CF
+        engine.delete_range_cf("cf1", b"a", b"c").unwrap();
+
+        // Keys in range should be deleted
+        assert_eq!(engine.get_cf("cf1", b"a").unwrap(), None);
+        assert_eq!(engine.get_cf("cf1", b"b").unwrap(), None);
+        assert_eq!(engine.get_cf("cf1", b"c").unwrap(), Some(b"3".to_vec()));
+
+        // Write a separate key to default CF to verify independence
+        engine.put_cf("default", b"default_key".to_vec(), b"val".to_vec()).unwrap();
+        assert_eq!(engine.get(b"default_key").unwrap(), Some(b"val".to_vec()));
     }
 }

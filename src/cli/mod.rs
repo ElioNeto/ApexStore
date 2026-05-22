@@ -27,6 +27,11 @@ struct Cli {
     #[arg(short = 'D', long = "db", default_value = "./apexstore_data")]
     db_path: std::path::PathBuf,
 
+    /// Path to file containing the hex-encoded AES-256 encryption key (64 hex chars).
+    /// When provided, enables transparent encryption at rest for SSTables and WAL.
+    #[arg(long = "encrypt-key-file")]
+    encrypt_key_file: Option<std::path::PathBuf>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -103,7 +108,14 @@ pub fn main() -> crate::infra::error::Result<()> {
     let cli = Cli::parse();
 
     // Build config from CLI args
-    let config = LsmConfig::builder().dir_path(cli.db_path).build()?;
+    let mut builder = LsmConfig::builder().dir_path(cli.db_path);
+    if let Some(key_path) = cli.encrypt_key_file {
+        let key_str = key_path.to_string_lossy().to_string();
+        builder = builder
+            .encryption_enabled(true)
+            .encryption_key_path(key_str);
+    }
+    let config = builder.build()?;
 
     // Open engine with a shared block cache
     let cache = GlobalBlockCache::new(100, 4096);

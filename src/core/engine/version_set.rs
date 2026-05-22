@@ -1,5 +1,6 @@
 use crate::infra::config::StorageConfig;
 use crate::storage::cache::{Cache, GlobalBlockCache};
+use crate::storage::encryption::EncryptionConfig;
 use crate::storage::reader::SstableReader;
 use lru::LruCache;
 use parking_lot::Mutex;
@@ -29,6 +30,8 @@ pub struct VersionSet<C: Cache> {
     /// Shared block cache for SSTable block caching. `None` when no block cache
     /// is available (e.g., in tests with `NoopCache`).
     block_cache: Option<Arc<GlobalBlockCache>>,
+    /// Encryption configuration for reading encrypted SSTables.
+    encryption: EncryptionConfig,
 }
 
 impl<C: Cache> VersionSet<C> {
@@ -42,12 +45,21 @@ impl<C: Cache> VersionSet<C> {
         let kv_capacity = (options.block_cache_size_mb * 1024 * 1024 / 200).max(1000);
         let kv_capacity =
             NonZeroUsize::new(kv_capacity).expect("kv_capacity >= 1000, NonZeroUsize is safe");
+        // Build EncryptionConfig from the infra config
+        let encryption = if storage_config.encryption_enabled {
+            EncryptionConfig::from_key_path(storage_config.encryption_key_path.as_deref())
+                .unwrap_or_default()
+        } else {
+            EncryptionConfig::default()
+        };
+
         Self {
             _cache: std::marker::PhantomData,
             kv_cache: Arc::new(Mutex::new(LruCache::new(kv_capacity))),
             tables: std::collections::HashMap::new(),
             storage_config,
             block_cache,
+            encryption,
         }
     }
 
@@ -113,10 +125,11 @@ impl<C: Cache> VersionSet<C> {
                 // 3. If not in memory but has a disk path, try reading from SSTable
                 if let Some(ref path) = table.path {
                     if let Some(ref block_cache) = self.block_cache {
-                        match SstableReader::open(
+                        match SstableReader::open_with_encryption(
                             path.clone(),
                             self.storage_config.clone(),
                             block_cache.clone(),
+                            &self.encryption,
                         ) {
                             Ok(reader) => match reader.get(key) {
                                 Ok(Some(record)) => {

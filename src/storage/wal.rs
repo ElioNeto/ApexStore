@@ -16,7 +16,7 @@ use tracing::{debug, info, warn};
 /// - Version 1: LogRecord serialized WITH `column_family` (but no range tombstone fields).
 /// - Version 2: LogRecord serialized WITH `column_family` AND `range_start`/`range_end`.
 /// - Version 3: Same as V2, but the payload is AES-256-GCM encrypted.
-///              Format: `[12-byte IV][encrypted V2 payload]`
+///   Format: `[12-byte IV][encrypted V2 payload]`
 pub(crate) const WAL_FRAME_VERSION_V0: u8 = 0;
 pub(crate) const WAL_FRAME_VERSION_V1: u8 = 1;
 pub(crate) const WAL_FRAME_VERSION_V2: u8 = 2;
@@ -51,8 +51,6 @@ impl From<LogRecordV0> for LogRecord {
         }
     }
 }
-    }
-}
 
 /// LogRecord payload format for V1 frames (without `range_start` / `range_end`).
 ///
@@ -81,8 +79,6 @@ impl From<LogRecordV1> for LogRecord {
             range_start: None,
             range_end: None,
         }
-    }
-}
     }
 }
 
