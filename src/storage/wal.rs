@@ -691,6 +691,48 @@ impl WriteAheadLog {
             .map(|m| m.len())
             .map_err(crate::infra::error::LsmError::Io)
     }
+
+    // ── WAL Archiving (#224) ───────────────────────────────────────────────
+
+    /// Archive the current WAL by rotating it to a timestamped backup file.
+    ///
+    /// The current WAL is flushed, fsynced, and renamed to
+    /// `wal-{cf}-{timestamp}.log.archive`. A fresh empty WAL file is created
+    /// in its place.
+    ///
+    /// Returns the path to the archived file.
+    pub fn archive(&self) -> Result<std::path::PathBuf> {
+        let archive_path = self.path.with_extension(format!(
+            "log-{}.archive",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+
+        // Flush and fsync current data.
+        let mut guard = self.file.lock();
+        guard.flush()?;
+        guard.get_ref().sync_all()?;
+
+        // Rename current file to archive path.
+        std::fs::rename(&self.path, &archive_path)?;
+
+        // Create a fresh WAL file.
+        let new_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        *guard = BufWriter::new(new_file);
+
+        Ok(archive_path)
+    }
+
+    /// Check whether the WAL file exceeds the given `max_size` and should be
+    /// archived.
+    pub fn exceeds_max_size(&self, max_size: u64) -> Result<bool> {
+        Ok(self.size()? > max_size)
+    }
 }
 
 // ---------------------------------------------------------------------------

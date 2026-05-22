@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 /// Top-level configuration for the ApexStore LSM engine.
 ///
-/// Groups configuration into three categories: [`CoreConfig`], [`StorageConfig`],
-/// and [`CompactionConfig`].
+/// Groups configuration into four categories: [`CoreConfig`], [`StorageConfig`],
+/// [`CompactionConfig`], and [`WalConfig`].
 ///
 /// # Usage example
 ///
@@ -33,6 +33,41 @@ pub struct LsmConfig {
     pub compaction: CompactionConfig,
     #[serde(default)]
     pub replication: ReplicationConfig,
+    #[serde(default)]
+    pub wal: WalConfig,
+}
+
+/// Configuration for WAL archiving and rotation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalConfig {
+    /// Maximum WAL file size in bytes before automatic archiving is triggered.
+    /// Default: 64 MiB.
+    #[serde(default = "default_wal_max_size")]
+    pub max_wal_size: u64,
+    /// Whether to enable automatic WAL archiving in the background.
+    #[serde(default)]
+    pub archive_enabled: bool,
+    /// Interval in seconds between WAL size checks (default: 60).
+    #[serde(default = "default_wal_check_interval_secs")]
+    pub check_interval_secs: u64,
+}
+
+fn default_wal_max_size() -> u64 {
+    64 * 1024 * 1024 // 64 MiB
+}
+
+fn default_wal_check_interval_secs() -> u64 {
+    60
+}
+
+impl Default for WalConfig {
+    fn default() -> Self {
+        Self {
+            max_wal_size: default_wal_max_size(),
+            archive_enabled: false,
+            check_interval_secs: default_wal_check_interval_secs(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -318,6 +353,10 @@ pub struct LsmConfigBuilder {
     replication_role: Option<super::replication::ReplicationRole>,
     replica_endpoints: Option<Vec<String>>,
     replication_sync_interval_ms: Option<u64>,
+    // WAL archiving config
+    wal_max_size: Option<u64>,
+    wal_archive_enabled: Option<bool>,
+    wal_check_interval_secs: Option<u64>,
 }
 
 impl LsmConfigBuilder {
@@ -399,6 +438,24 @@ impl LsmConfigBuilder {
         self
     }
 
+    /// Set the maximum WAL file size before archiving.
+    pub fn wal_max_size(mut self, size: u64) -> Self {
+        self.wal_max_size = Some(size);
+        self
+    }
+
+    /// Enable or disable automatic WAL archiving.
+    pub fn wal_archive_enabled(mut self, enabled: bool) -> Self {
+        self.wal_archive_enabled = Some(enabled);
+        self
+    }
+
+    /// Set the interval (in seconds) between WAL size checks.
+    pub fn wal_check_interval_secs(mut self, secs: u64) -> Self {
+        self.wal_check_interval_secs = Some(secs);
+        self
+    }
+
     pub fn build(self) -> Result<LsmConfig> {
         let defaults = LsmConfig::default();
 
@@ -447,6 +504,11 @@ impl LsmConfigBuilder {
                 sync_interval_ms: self
                     .replication_sync_interval_ms
                     .unwrap_or(defaults.replication.sync_interval_ms),
+            },
+            wal: WalConfig {
+                max_wal_size: self.wal_max_size.unwrap_or(defaults.wal.max_wal_size),
+                archive_enabled: self.wal_archive_enabled.unwrap_or(defaults.wal.archive_enabled),
+                check_interval_secs: self.wal_check_interval_secs.unwrap_or(defaults.wal.check_interval_secs),
             },
         };
 

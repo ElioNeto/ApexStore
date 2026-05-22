@@ -554,6 +554,113 @@
         "cargo check passes for all modified files"
       ],
       "fetched_body": true
+    },
+    {
+      "number": 206,
+      "priority": "medium",
+      "title": "[FEATURE] WebAssembly plugin system",
+      "status": "in_progress",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "WasmPlugin struct with load/call/unload stub methods",
+        "wasm feature gate added to Cargo.toml",
+        "Module registered in infra/mod.rs",
+        "Re-export in lib.rs",
+        "cargo check passes"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 207,
+      "priority": "medium",
+      "title": "[FEATURE] Built-in vector search / embeddings index",
+      "status": "in_progress",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "VectorIndex struct with insert/search stub methods",
+        "Module registered in infra/mod.rs",
+        "Re-export in lib.rs",
+        "cargo check passes"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 208,
+      "priority": "medium",
+      "title": "[FEATURE] Time-travel queries",
+      "status": "in_progress",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "TimeTravelEngine struct with query_as_of/query_range stub methods",
+        "Module registered in infra/mod.rs",
+        "Re-export in lib.rs",
+        "cargo check passes"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 209,
+      "priority": "medium",
+      "title": "[FEATURE] Built-in pub/sub messaging",
+      "status": "in_progress",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "PubSub struct with publish/subscribe/unsubscribe using tokio::sync::broadcast",
+        "Module registered in infra/mod.rs",
+        "Re-export in lib.rs",
+        "cargo check passes"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 210,
+      "priority": "medium",
+      "title": "[FEATURE] Automatic data tiering",
+      "status": "in_progress",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "DataTieringConfig struct with promote/demote/get_tier stub methods",
+        "Module registered in infra/mod.rs",
+        "Re-export in lib.rs",
+        "cargo check passes"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 211,
+      "priority": "medium",
+      "title": "[FEATURE] Multi-model queries",
+      "status": "in_progress",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "MultiModelEngine wrapper with query_document/query_time_series/query_graph stubs",
+        "Module registered in infra/mod.rs",
+        "Re-export in lib.rs",
+        "cargo check passes"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 212,
+      "priority": "medium",
+      "title": "[FEATURE] Webhook triggers",
+      "status": "in_progress",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "WebhookRegistry struct with register/unregister/trigger stub methods",
+        "Uses existing CDC infrastructure for firing webhooks",
+        "Module registered in infra/mod.rs",
+        "Re-export in lib.rs",
+        "cargo check passes"
+      ],
+      "fetched_body": true
     }
   ],
   "todos": [
@@ -781,6 +888,62 @@
       "files": ["src/api/mod.rs", "src/core/engine/mod.rs"],
       "depends_on": ["T201_1"],
       "notes": "Added admin module to api/mod.rs, configured admin routes under /admin scope. Added is_compaction_running() to Engine."
+    },
+    {
+      "id": "T206",
+      "description": "Issue #206: Create WasmPlugin struct with load/call/unload stub methods, add wasm feature gate",
+      "status": "done",
+      "files": ["src/infra/wasm_plugin.rs", "src/infra/mod.rs", "src/lib.rs", "Cargo.toml"],
+      "depends_on": [],
+      "notes": "Created wasm_plugin.rs with WasmPlugin struct, feature-gated methods, module registration."
+    },
+    {
+      "id": "T207",
+      "description": "Issue #207: Create VectorIndex struct with insert/search stub methods",
+      "status": "done",
+      "files": ["src/infra/vector_index.rs", "src/infra/mod.rs", "src/lib.rs"],
+      "depends_on": [],
+      "notes": "Created vector_index.rs with VectorIndex, cosine similarity search, tests."
+    },
+    {
+      "id": "T208",
+      "description": "Issue #208: Create TimeTravelEngine struct with query_as_of/query_range stub methods",
+      "status": "done",
+      "files": ["src/infra/time_travel.rs", "src/infra/mod.rs", "src/lib.rs"],
+      "depends_on": [],
+      "notes": "Created time_travel.rs with snapshot capture, time-travel queries, eviction, tests."
+    },
+    {
+      "id": "T209",
+      "description": "Issue #209: Create PubSub struct with publish/subscribe/unsubscribe using tokio::sync::broadcast",
+      "status": "done",
+      "files": ["src/infra/pubsub.rs", "src/infra/mod.rs", "src/lib.rs"],
+      "depends_on": [],
+      "notes": "Created pubsub.rs with topic-based pub/sub using broadcast channels, tests."
+    },
+    {
+      "id": "T210",
+      "description": "Issue #210: Create DataTieringConfig struct with promote/demote/get_tier stub methods",
+      "status": "done",
+      "files": ["src/infra/data_tiering.rs", "src/infra/mod.rs", "src/lib.rs"],
+      "depends_on": [],
+      "notes": "Created data_tiering.rs with hot/warm/cold tiering, auto-promotion, age-out, tests."
+    },
+    {
+      "id": "T211",
+      "description": "Issue #211: Create MultiModelEngine wrapper with query_document/query_time_series/query_graph stubs",
+      "status": "done",
+      "files": ["src/infra/multi_model.rs", "src/infra/mod.rs", "src/lib.rs"],
+      "depends_on": [],
+      "notes": "Created multi_model.rs with multi-model dispatcher, toggleable models, tests."
+    },
+    {
+      "id": "T212",
+      "description": "Issue #212: Create WebhookRegistry struct with register/unregister/trigger using CDC infrastructure",
+      "status": "done",
+      "files": ["src/infra/webhook_triggers.rs", "src/infra/mod.rs", "src/lib.rs"],
+      "depends_on": [],
+      "notes": "Created webhook_triggers.rs with prefix-based webhook registration, CDC-backed trigger, tests."
     }
   ]
 }

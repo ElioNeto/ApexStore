@@ -2,7 +2,9 @@ pub mod admin;
 pub mod auth;
 pub mod config;
 pub mod graphql;
+pub mod health;
 pub mod rate_limiter;
+pub mod timeout_middleware;
 
 pub use self::auth::TokenManager;
 pub use self::config::ServerConfig;
@@ -175,6 +177,17 @@ async fn get_stats(engine: web::Data<LsmEngine>) -> impl Responder {
     }
 }
 
+/// Handler for `GET /admin/rate_limits` — view current rate limit state.
+#[get("/admin/rate_limits")]
+async fn admin_rate_limits(
+    rate_limiter: web::Data<RateLimiterState>,
+) -> impl Responder {
+    let summary = rate_limiter.get_state();
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .json(summary)
+}
+
 /// Handler for `POST /admin/flush` — force memtable flush.
 #[post("/admin/flush")]
 async fn admin_flush(engine: web::Data<LsmEngine>) -> impl Responder {
@@ -254,10 +267,15 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .service(get_stats)
         .service(admin_flush)
         .service(admin_compact)
+        .service(admin_rate_limits)
         .service(
             web::scope("/admin")
                 .configure(admin::configure),
         )
+        // Health endpoints (no auth required)
+        .service(health::liveness)
+        .service(health::readiness)
+        .service(health::startup)
         // GraphQL endpoints
         .route("/graphql", web::post().to(graphql_handler))
         .route("/graphql", web::get().to(graphql_handler))
@@ -292,6 +310,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
 
     let mut server_builder = HttpServer::new(move || {
         App::new()
+            .wrap(self::timeout_middleware::RequestTimeout)
             .wrap(RateLimiter)
             .wrap(actix_web::middleware::Logger::default())
             .wrap(HttpAuthentication::bearer(self::auth::bearer_validator))
