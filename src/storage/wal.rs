@@ -133,6 +133,52 @@ impl WriteAheadLog {
         Ok(())
     }
 
+    /// Append multiple records to the WAL with a single fsync.
+    ///
+    /// This is more efficient than calling `write_record` N times because
+    /// the lock is acquired only once and `flush() + sync_all()` is called
+    /// only once, regardless of the batch size.
+    ///
+    /// Each record uses the same on-disk frame format as `write_record`:
+    /// `[length: u32 LE][version: u8][payload: bytes][crc32: u32 LE]`
+    pub fn write_batch(&self, records: &[LogRecord]) -> Result<()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+
+        // Pre-encode all records and build frame data
+        let mut frames: Vec<Vec<u8>> = Vec::with_capacity(records.len());
+        for record in records {
+            let serialized = encode(record)?;
+            let version = WAL_CURRENT_FRAME_VERSION;
+            let length = 1u32 + serialized.len() as u32;
+            let length_bytes = length.to_le_bytes();
+
+            let mut hasher = Hasher::new();
+            hasher.update(&length_bytes);
+            hasher.update(&[version]);
+            hasher.update(&serialized);
+            let checksum = hasher.finalize();
+
+            let mut frame = Vec::with_capacity(4 + 1 + serialized.len() + 4);
+            frame.extend_from_slice(&length_bytes);
+            frame.push(version);
+            frame.extend_from_slice(&serialized);
+            frame.extend_from_slice(&checksum.to_le_bytes());
+            frames.push(frame);
+        }
+
+        let mut writer = self.file.lock();
+        for frame in &frames {
+            writer.write_all(frame)?;
+        }
+        writer.flush()?;
+        writer.get_ref().sync_all()?;
+
+        debug!("WAL batch persisted: {} records", records.len());
+        Ok(())
+    }
+
     /// Replay all records persisted in the WAL.
     ///
     /// Called once during engine initialisation.  Returns an error if the
