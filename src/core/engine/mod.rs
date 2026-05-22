@@ -7,6 +7,7 @@ use crate::core::table::Table;
 use crate::infra::error::Result;
 use crate::storage::cache::Cache;
 use crate::storage::wal::WriteAheadLog;
+use fs2::FileExt;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -168,7 +169,7 @@ impl<C: Cache> EngineCore<C> {
 /// let mut config = LsmConfig::default();
 /// config.core.dir_path = dir.path().to_path_buf();
 ///
-/// let mut engine = Engine::new_from_config(
+/// let engine = Engine::new_from_config(
 ///     &config,
 ///     GlobalBlockCache::new(100, 4096),
 /// ).unwrap();
@@ -190,6 +191,9 @@ pub struct Engine<C: Cache> {
     _manifest: PathBuf,
     /// SSTable output directory (used during initialization).
     _sst_dir: PathBuf,
+    /// File lock handle — prevents concurrent access to the same database directory.
+    /// Held for the entire engine lifetime; lock is released on drop.
+    _lock_file: std::fs::File,
 }
 
 pub type LsmEngineGeneric<C> = Engine<C>;
@@ -342,6 +346,23 @@ impl<C: Cache> Engine<C> {
         let sst_dir = dir_path.join("sstables");
         std::fs::create_dir_all(&sst_dir)?;
 
+        // Acquire an exclusive file lock to prevent concurrent access
+        let lock_path = dir_path.join(".apexstore.lock");
+        let lock_file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .read(true)
+            .open(&lock_path)?;
+        lock_file.try_lock_exclusive().map_err(|e| {
+            if e.kind() == std::io::ErrorKind::WouldBlock {
+                crate::LsmError::InvalidArgument(
+                    "Database is locked by another process".into(),
+                )
+            } else {
+                e.into()
+            }
+        })?;
+
         // Create storage config from options
         let storage_config = crate::infra::config::StorageConfig {
             block_size: options.block_size,
@@ -394,6 +415,7 @@ impl<C: Cache> Engine<C> {
             compaction_thread: Mutex::new(None),
             _manifest: PathBuf::new(),
             _sst_dir: sst_dir,
+            _lock_file: lock_file,
         };
 
         Ok(engine)
@@ -434,7 +456,7 @@ impl<C: Cache> Engine<C> {
     }
 
     /// Put a key-value pair into the specified column family.
-    pub fn put_cf(&mut self, cf: &str, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+    pub fn put_cf(&self, cf: &str, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
         let start = std::time::Instant::now();
         let key_str = String::from_utf8_lossy(&key).into_owned();
         let value_size = value.len();
@@ -485,7 +507,7 @@ impl<C: Cache> Engine<C> {
         Ok(())
     }
 
-    pub fn set<K, V>(&mut self, key: K, value: V) -> Result<()>
+    pub fn set<K, V>(&self, key: K, value: V) -> Result<()>
     where
         K: Into<Vec<u8>>,
         V: Into<Vec<u8>>,
@@ -502,7 +524,7 @@ impl<C: Cache> Engine<C> {
         self.put_cf("default", key_vec, value_vec)
     }
 
-    pub fn delete_cf<K>(&mut self, cf: &str, key: K) -> Result<()>
+    pub fn delete_cf<K>(&self, cf: &str, key: K) -> Result<()>
     where
         K: Into<Vec<u8>>,
     {
@@ -549,7 +571,7 @@ impl<C: Cache> Engine<C> {
         Ok(())
     }
 
-    pub fn delete<K>(&mut self, key: K) -> Result<()>
+    pub fn delete<K>(&self, key: K) -> Result<()>
     where
         K: Into<Vec<u8>>,
     {
@@ -1191,11 +1213,20 @@ impl<C: Cache> Engine<C> {
         let needs_compact;
         {
             let mut core = self.core.lock();
-            for (key, value) in items {
-                let mut record = LogRecord::new(key.as_ref().to_vec(), value.as_ref().to_vec());
-                record.column_family = Some(cf.to_string());
-                core.wal_mut().write_record(&record)?;
 
+            // Collect all WAL records first, then write them with a single fsync
+            let records: Vec<LogRecord> = items
+                .iter()
+                .map(|(key, value)| {
+                    let mut record = LogRecord::new(key.as_ref().to_vec(), value.as_ref().to_vec());
+                    record.column_family = Some(cf.to_string());
+                    record
+                })
+                .collect();
+            core.wal_mut().write_batch(&records)?;
+
+            // Apply to memtable
+            for (key, value) in items {
                 let mem = core.memtables_mut().entry(cf.to_string()).or_default();
                 if mem.is_empty() {
                     mem.push(MemTable::new());
@@ -1252,11 +1283,20 @@ impl<C: Cache> Engine<C> {
         let needs_compact;
         {
             let mut core = self.core.lock();
-            for key in keys {
-                let mut record = LogRecord::tombstone(key.as_ref().to_vec());
-                record.column_family = Some(cf.to_string());
-                core.wal_mut().write_record(&record)?;
 
+            // Collect all WAL records first, then write them with a single fsync
+            let records: Vec<LogRecord> = keys
+                .iter()
+                .map(|key| {
+                    let mut record = LogRecord::tombstone(key.as_ref().to_vec());
+                    record.column_family = Some(cf.to_string());
+                    record
+                })
+                .collect();
+            core.wal_mut().write_batch(&records)?;
+
+            // Apply to memtable
+            for key in keys {
                 let mem = core.memtables_mut().entry(cf.to_string()).or_default();
                 if mem.is_empty() {
                     mem.push(MemTable::new());
