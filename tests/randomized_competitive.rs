@@ -86,9 +86,12 @@ fn test_random_ops_linearizability() {
                     if let Some(key) = keys.choose(&mut rng).cloned() {
                         let expected = model.get(key).cloned();
                         let got = engine.get(key.as_slice()).unwrap();
-                        assert_eq!(got, expected,
+                        assert_eq!(
+                            got,
+                            expected,
                             "LINEARIZABILITY VIOLATION: read returned wrong value for key {:?}",
-                            String::from_utf8_lossy(&key));
+                            String::from_utf8_lossy(&key)
+                        );
                     }
                 } else {
                     // 70% read random key (may or may not exist)
@@ -96,8 +99,10 @@ fn test_random_ops_linearizability() {
                     let key = random_key(&mut rng, len);
                     let expected = model.get(&key).cloned();
                     let got = engine.get(key.as_slice()).unwrap();
-                    assert_eq!(got, expected,
-                        "LINEARIZABILITY VIOLATION: read of non-existent key should be None");
+                    assert_eq!(
+                        got, expected,
+                        "LINEARIZABILITY VIOLATION: read of non-existent key should be None"
+                    );
                 }
             }
             // 10% deletes
@@ -126,22 +131,39 @@ fn test_random_ops_linearizability() {
         if (i + 1) % 2500 == 0 {
             let elapsed = start.elapsed();
             let ops_per_sec = (i + 1) as f64 / elapsed.as_secs_f64();
-            eprintln!("    {} ops ({:.0} ops/s, model size: {})", i + 1, ops_per_sec, model.len());
+            eprintln!(
+                "    {} ops ({:.0} ops/s, model size: {})",
+                i + 1,
+                ops_per_sec,
+                model.len()
+            );
         }
     }
 
     let elapsed = start.elapsed();
     let throughput = OPS_COUNT as f64 / elapsed.as_secs_f64();
-    eprintln!("\n  ✅ Linearizability: {} ops in {:.2}s ({:.0} ops/s), model had {} keys",
-        OPS_COUNT, elapsed.as_secs_f64(), throughput, model.len());
+    eprintln!(
+        "\n  ✅ Linearizability: {} ops in {:.2}s ({:.0} ops/s), model had {} keys",
+        OPS_COUNT,
+        elapsed.as_secs_f64(),
+        throughput,
+        model.len()
+    );
 
     // Verify final state matches model
     for (key, expected_val) in &model {
         let got = engine.get(key.as_slice()).unwrap();
-        assert_eq!(got.as_deref(), Some(expected_val.as_slice()),
-            "Final state mismatch for key {:?}", String::from_utf8_lossy(key));
+        assert_eq!(
+            got.as_deref(),
+            Some(expected_val.as_slice()),
+            "Final state mismatch for key {:?}",
+            String::from_utf8_lossy(key)
+        );
     }
-    eprintln!("  ✅ Final state verified: {} keys match model", model.len());
+    eprintln!(
+        "  ✅ Final state verified: {} keys match model",
+        model.len()
+    );
 }
 
 // ── Test 2: Concurrent random operations ────────────────────────────────
@@ -206,16 +228,29 @@ fn test_concurrent_random_ops() {
         let (tid, err, keys) = h.join().unwrap();
         total_errors += err;
         total_keys += keys;
-        eprintln!("    Thread {}: {} ops done, {} errors, {} keys left", tid, ops_per_thread, err, keys);
+        eprintln!(
+            "    Thread {}: {} ops done, {} errors, {} keys left",
+            tid, ops_per_thread, err, keys
+        );
     }
 
     let elapsed = start.elapsed();
     let total_ops = OPS_COUNT;
     let throughput = total_ops as f64 / elapsed.as_secs_f64();
-    eprintln!("\n  ✅ Concurrent: {} threads x {} ops = {} in {:.2}s ({:.0} ops/s), {} errors",
-        CONCURRENT_THREADS, ops_per_thread, total_ops, elapsed.as_secs_f64(), throughput, total_errors);
+    eprintln!(
+        "\n  ✅ Concurrent: {} threads x {} ops = {} in {:.2}s ({:.0} ops/s), {} errors",
+        CONCURRENT_THREADS,
+        ops_per_thread,
+        total_ops,
+        elapsed.as_secs_f64(),
+        throughput,
+        total_errors
+    );
 
-    assert_eq!(total_errors, 0, "Concurrent operations should not produce errors");
+    assert_eq!(
+        total_errors, 0,
+        "Concurrent operations should not produce errors"
+    );
 }
 
 // ── Test 3: Edge case fuzzing ──────────────────────────────────────────
@@ -255,12 +290,18 @@ fn test_edge_case_fuzzing() {
         "a\x00b\x00c",
     ];
     for key in &unicode_keys {
-        engine.set(key.as_bytes().to_vec(), b"unicode_val".to_vec()).unwrap();
+        engine
+            .set(key.as_bytes().to_vec(), b"unicode_val".to_vec())
+            .unwrap();
     }
     for key in &unicode_keys {
         let got = engine.get(key.as_bytes()).unwrap();
-        assert_eq!(got, Some(b"unicode_val".to_vec()),
-            "Unicode key failed: {:?}", key);
+        assert_eq!(
+            got,
+            Some(b"unicode_val".to_vec()),
+            "Unicode key failed: {:?}",
+            key
+        );
     }
 
     // 3e: Binary keys (all byte values)
@@ -272,8 +313,12 @@ fn test_edge_case_fuzzing() {
     for byte in 0..=255u8 {
         let key = vec![byte];
         let got = engine.get(key.as_slice()).unwrap();
-        assert_eq!(got, Some(b"bin".to_vec()),
-            "Binary byte {:02x} roundtrip failed", byte);
+        assert_eq!(
+            got,
+            Some(b"bin".to_vec()),
+            "Binary byte {:02x} roundtrip failed",
+            byte
+        );
     }
 
     // 3f: Maximum key length
@@ -281,17 +326,25 @@ fn test_edge_case_fuzzing() {
     let mut rng = rand::thread_rng();
     for i in 0..1000 {
         let key = format!("uniq_{}_{}", i, rng.gen::<u64>());
-        engine.set(key.as_bytes().to_vec(), b"unique".to_vec()).unwrap();
+        engine
+            .set(key.as_bytes().to_vec(), b"unique".to_vec())
+            .unwrap();
     }
 
     // 3g: Overwrite same key many times
     eprintln!("  Edge: Overwrite storm...");
     for i in 0..1000 {
         let val = format!("v{}", i);
-        engine.set(b"storm_key".to_vec(), val.as_bytes().to_vec()).unwrap();
+        engine
+            .set(b"storm_key".to_vec(), val.as_bytes().to_vec())
+            .unwrap();
     }
     let final_val = engine.get(b"storm_key").unwrap();
-    assert_eq!(final_val, Some(b"v999".to_vec()), "Last overwrite should win");
+    assert_eq!(
+        final_val,
+        Some(b"v999".to_vec()),
+        "Last overwrite should win"
+    );
 
     eprintln!("  ✅ All edge cases passed");
 }
@@ -306,7 +359,9 @@ fn test_random_scan_consistency() {
     // Insert known keys in sorted order
     let keys: Vec<String> = (0..500).map(|i| format!("{:04}", i)).collect();
     for key in &keys {
-        engine.set(key.as_bytes().to_vec(), b"scan_val".to_vec()).unwrap();
+        engine
+            .set(key.as_bytes().to_vec(), b"scan_val".to_vec())
+            .unwrap();
     }
 
     // Randomly delete some
@@ -323,23 +378,29 @@ fn test_random_scan_consistency() {
         let lower = keys[lower_i].as_bytes();
         let upper = keys[upper_i].as_bytes();
 
-        let results = engine.scan_range("default", lower, upper, Some(100)).unwrap();
+        let results = engine
+            .scan_range("default", lower, upper, Some(100))
+            .unwrap();
 
         // Verify ascending order
         for w in results.windows(2) {
-            assert!(w[0].0 <= w[1].0,
+            assert!(
+                w[0].0 <= w[1].0,
                 "Scan results not in order: {:?} > {:?}",
                 String::from_utf8_lossy(&w[0].0),
-                String::from_utf8_lossy(&w[1].0));
+                String::from_utf8_lossy(&w[1].0)
+            );
         }
 
         // Verify all results are within bounds
         for (k, _) in &results {
-            assert!(k.as_slice() >= lower && k.as_slice() < upper,
+            assert!(
+                k.as_slice() >= lower && k.as_slice() < upper,
                 "Key {:?} outside scan range [{:?}, {:?})",
                 String::from_utf8_lossy(k),
                 String::from_utf8_lossy(lower),
-                String::from_utf8_lossy(upper));
+                String::from_utf8_lossy(upper)
+            );
         }
     }
     eprintln!("  ✅ Scan consistency verified across 50 random ranges");
@@ -364,23 +425,37 @@ fn test_flush_compaction_stress() {
         model.insert(key.as_bytes().to_vec(), val);
     }
     let phase1 = start.elapsed();
-    eprintln!("    {} ops in {:.2}s ({:.0} ops/s)", 5000, phase1.as_secs_f64(), 5000.0 / phase1.as_secs_f64());
+    eprintln!(
+        "    {} ops in {:.2}s ({:.0} ops/s)",
+        5000,
+        phase1.as_secs_f64(),
+        5000.0 / phase1.as_secs_f64()
+    );
 
     // Phase 2: Compact
     eprintln!("  Phase 2: Compacting...");
     if let Ok(results) = engine.compact() {
         for (cf, m) in &results {
-            eprintln!("    CF '{}': {} files merged, {} bytes read/written",
-                cf, m.files_merged, m.bytes_read);
+            eprintln!(
+                "    CF '{}': {} files merged, {} bytes read/written",
+                cf, m.files_merged, m.bytes_read
+            );
         }
     }
 
     // Phase 3: Verify all data survives
-    eprintln!("  Phase 3: Verifying {} keys after compaction...", model.len());
+    eprintln!(
+        "  Phase 3: Verifying {} keys after compaction...",
+        model.len()
+    );
     for (key, expected) in &model {
         let got = engine.get(key.as_slice()).unwrap();
-        assert_eq!(got.as_deref(), Some(expected.as_slice()),
-            "Data lost after compaction for key {:?}", String::from_utf8_lossy(key));
+        assert_eq!(
+            got.as_deref(),
+            Some(expected.as_slice()),
+            "Data lost after compaction for key {:?}",
+            String::from_utf8_lossy(key)
+        );
     }
     eprintln!("  ✅ All {} keys verified after compaction", model.len());
 
@@ -397,14 +472,21 @@ fn test_flush_compaction_stress() {
     eprintln!("  Phase 5: Verifying {} remaining keys...", model.len());
     for (key, expected) in &model {
         let got = engine.get(key.as_slice()).unwrap();
-        assert_eq!(got.as_deref(), Some(expected.as_slice()),
-            "Data lost after delete+compact for key {:?}", String::from_utf8_lossy(key));
+        assert_eq!(
+            got.as_deref(),
+            Some(expected.as_slice()),
+            "Data lost after delete+compact for key {:?}",
+            String::from_utf8_lossy(key)
+        );
     }
     for key in &to_delete {
         let got = engine.get(key.as_slice()).unwrap();
-        assert_eq!(got, None,
+        assert_eq!(
+            got,
+            None,
             "Deleted key {:?} still present after compaction",
-            String::from_utf8_lossy(key));
+            String::from_utf8_lossy(key)
+        );
     }
     eprintln!("  ✅ Tombstone cleanup verified");
 }
@@ -430,15 +512,20 @@ fn test_recovery_after_random_ops() {
             let op = rng.gen_range(0..100);
             let key = format!("recover_{}", rng.gen_range(0..500));
             match op {
-                0..=79 => { // write
+                0..=79 => {
+                    // write
                     let val = format!("v{}", i);
-                    engine.set(key.as_bytes().to_vec(), val.as_bytes().to_vec()).unwrap();
+                    engine
+                        .set(key.as_bytes().to_vec(), val.as_bytes().to_vec())
+                        .unwrap();
                     model.insert(key.as_bytes().to_vec(), val.as_bytes().to_vec());
                 }
-                80..=94 => { // read
+                80..=94 => {
+                    // read
                     let _ = engine.get(key.as_bytes());
                 }
-                _ => { // delete
+                _ => {
+                    // delete
                     engine.delete(key.as_bytes()).unwrap();
                     model.remove(key.as_bytes());
                 }
@@ -462,19 +549,28 @@ fn test_recovery_after_random_ops() {
             match engine.get(key.as_slice()).unwrap() {
                 Some(got) if got == *expected => hits += 1,
                 Some(got) => {
-                    panic!("RECOVERY MISMATCH: key {:?} expected {:?} got {:?}",
+                    panic!(
+                        "RECOVERY MISMATCH: key {:?} expected {:?} got {:?}",
                         String::from_utf8_lossy(key),
                         String::from_utf8_lossy(expected),
-                        String::from_utf8_lossy(&got));
+                        String::from_utf8_lossy(&got)
+                    );
                 }
                 _ => {
                     misses += 1;
-                    eprintln!("  ⚠️  Lost key after restart: {:?}", String::from_utf8_lossy(key));
+                    eprintln!(
+                        "  ⚠️  Lost key after restart: {:?}",
+                        String::from_utf8_lossy(key)
+                    );
                 }
             }
         }
-        eprintln!("  ✅ Recovery: {} hits, {} misses out of {} keys",
-            hits, misses, model.len());
+        eprintln!(
+            "  ✅ Recovery: {} hits, {} misses out of {} keys",
+            hits,
+            misses,
+            model.len()
+        );
     }
 }
 
@@ -493,17 +589,27 @@ fn test_long_sequence_stability() {
         let val_len: usize = rng.gen_range(0..100);
         let val = random_value(&mut rng, val_len);
         match rng.gen_range(0..10) {
-            0..=6 => { engine.set(key.as_bytes().to_vec(), val).unwrap(); }
-            7..=8 => { let _ = engine.get(key.as_bytes()); }
-            _ => { let _ = engine.delete(key.as_bytes()); }
+            0..=6 => {
+                engine.set(key.as_bytes().to_vec(), val).unwrap();
+            }
+            7..=8 => {
+                let _ = engine.get(key.as_bytes());
+            }
+            _ => {
+                let _ = engine.delete(key.as_bytes());
+            }
         }
         if (i + 1) % 10000 == 0 {
             eprintln!("    {} ops...", i + 1);
         }
     }
     let elapsed = start.elapsed();
-    eprintln!("  ✅ {} ops in {:.2}s ({:.0} ops/s) — stable, no crashes",
-        long_ops, elapsed.as_secs_f64(), long_ops as f64 / elapsed.as_secs_f64());
+    eprintln!(
+        "  ✅ {} ops in {:.2}s ({:.0} ops/s) — stable, no crashes",
+        long_ops,
+        elapsed.as_secs_f64(),
+        long_ops as f64 / elapsed.as_secs_f64()
+    );
 }
 
 // ── Test 8: Performance baseline vs market ──────────────────────────────
@@ -546,7 +652,11 @@ fn test_performance_baseline() {
     let start = Instant::now();
     for _ in 0..100 {
         let lower = format!("perf_{}", rng.gen_range(0..(count - 100)));
-        let upper = format!("perf_{}", rng.gen_range(0..(count - 100)).max((count as u32).saturating_sub(50) as usize));
+        let upper = format!(
+            "perf_{}",
+            rng.gen_range(0..(count - 100))
+                .max((count as u32).saturating_sub(50) as usize)
+        );
         let _ = engine.scan_range("default", lower.as_bytes(), upper.as_bytes(), Some(50));
     }
     let scan_time = start.elapsed();
@@ -554,16 +664,40 @@ fn test_performance_baseline() {
     eprintln!("\n  ╔══════════════════════════════════════════════════════════════╗");
     eprintln!("  ║  PERFORMANCE BASELINE vs MARKET EXPECTATIONS              ║");
     eprintln!("  ╠══════════════════════════════════════════════════════════════╣");
-    eprintln!("  ║  Sequential write:  {:>8.0} ops/s  (target: 5000+)    ║", write_ops);
-    eprintln!("  ║  Sequential read:   {:>8.0} ops/s  (target: 10000+)   ║", read_ops);
-    eprintln!("  ║  Sequential delete: {:>8.0} ops/s  (target: 5000+)    ║", del_ops);
-    eprintln!("  ║  Scan (100x50):     {:>8.2}s      (target: <1s)      ║", scan_time.as_secs_f64());
+    eprintln!(
+        "  ║  Sequential write:  {:>8.0} ops/s  (target: 5000+)    ║",
+        write_ops
+    );
+    eprintln!(
+        "  ║  Sequential read:   {:>8.0} ops/s  (target: 10000+)   ║",
+        read_ops
+    );
+    eprintln!(
+        "  ║  Sequential delete: {:>8.0} ops/s  (target: 5000+)    ║",
+        del_ops
+    );
+    eprintln!(
+        "  ║  Scan (100x50):     {:>8.2}s      (target: <1s)      ║",
+        scan_time.as_secs_f64()
+    );
     eprintln!("  ╚══════════════════════════════════════════════════════════════╝");
 
     // Assertions — these define the competitive bar
-    assert!(write_ops > 500.0, "Write throughput too low: {:.0} ops/s", write_ops);
-    assert!(read_ops > 1000.0, "Read throughput too low: {:.0} ops/s", read_ops);
-    assert!(del_ops > 500.0, "Delete throughput too low: {:.0} ops/s", del_ops);
+    assert!(
+        write_ops > 500.0,
+        "Write throughput too low: {:.0} ops/s",
+        write_ops
+    );
+    assert!(
+        read_ops > 1000.0,
+        "Read throughput too low: {:.0} ops/s",
+        read_ops
+    );
+    assert!(
+        del_ops > 500.0,
+        "Delete throughput too low: {:.0} ops/s",
+        del_ops
+    );
 }
 
 // ── Test 9: Market competitive gap analysis ─────────────────────────────
@@ -582,11 +716,16 @@ fn test_competitive_gap_analysis() {
     // Gap 1: Range delete
     eprintln!("  Gap 1: Range delete (RocksDB DeleteRange)");
     // No range delete method — emulate via scan+delete
-    let results = engine.scan_range("default", b"a", b"z", Some(1000)).unwrap();
+    let results = engine
+        .scan_range("default", b"a", b"z", Some(1000))
+        .unwrap();
     for (k, _) in &results {
         let _ = engine.delete(k.to_vec());
     }
-    eprintln!("    Status: ⚠️  No range delete — emulated via scan+delete ({} keys)\n", results.len());
+    eprintln!(
+        "    Status: ⚠️  No range delete — emulated via scan+delete ({} keys)\n",
+        results.len()
+    );
 
     // Gap 2: Iterator with seek
     eprintln!("  Gap 2: Iterator seek (MergeIterator::seek)");
@@ -594,8 +733,12 @@ fn test_competitive_gap_analysis() {
 
     // Gap 3: Column family CRUD
     eprintln!("  Gap 3: Multi-column-family ops");
-    engine.put_cf("cf1", b"key1".to_vec(), b"val1".to_vec()).unwrap();
-    engine.put_cf("cf2", b"key1".to_vec(), b"val2".to_vec()).unwrap();
+    engine
+        .put_cf("cf1", b"key1".to_vec(), b"val1".to_vec())
+        .unwrap();
+    engine
+        .put_cf("cf2", b"key1".to_vec(), b"val2".to_vec())
+        .unwrap();
     let v1 = engine.get_cf("cf1", b"key1").unwrap();
     let v2 = engine.get_cf("cf2", b"key1").unwrap();
     assert!(v1 != v2, "CF isolation broken");
@@ -650,7 +793,11 @@ fn test_competitive_gap_analysis() {
             let _ = engine.get(key.as_bytes()).unwrap();
         }
         let dur = start.elapsed();
-        eprintln!("    {}B value: {:.1} µs/op", val_size, dur.as_micros() as f64 / 100.0);
+        eprintln!(
+            "    {}B value: {:.1} µs/op",
+            val_size,
+            dur.as_micros() as f64 / 100.0
+        );
     }
 
     eprintln!("\n  ┌─────────────────────────────────────────────────────────────┐");

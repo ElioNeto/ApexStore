@@ -10,8 +10,8 @@
 use apexstore::core::engine::Engine;
 use apexstore::infra::config::LsmConfig;
 use apexstore::storage::cache::GlobalBlockCache;
-use std::time::{Duration, Instant};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 const LOG_COUNT: usize = 50_000;
@@ -43,17 +43,25 @@ fn measure_disk_io(dir: &TempDir) -> (u64, u64, usize, usize) {
     // SSTables are stored in <dir>/sstables/
     let sst_dir = dir.path().join("sstables");
     let sst_count = if sst_dir.exists() {
-        sst_dir.read_dir()
-            .map(|e| e.filter_map(|e| e.ok()).filter(|e| {
-                e.file_name().to_string_lossy().contains(".sst")
-            }).count())
+        sst_dir
+            .read_dir()
+            .map(|e| {
+                e.filter_map(|e| e.ok())
+                    .filter(|e| e.file_name().to_string_lossy().contains(".sst"))
+                    .count()
+            })
             .unwrap_or(0)
-    } else { 0 };
-    let wal_count = dir.path()
+    } else {
+        0
+    };
+    let wal_count = dir
+        .path()
         .read_dir()
-        .map(|e| e.filter_map(|e| e.ok()).filter(|e| {
-            e.file_name().to_string_lossy().contains("wal")
-        }).count())
+        .map(|e| {
+            e.filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().contains("wal"))
+                .count()
+        })
         .unwrap_or(0);
     let total_size = dir_size(dir.path());
     (total_size, 0, wal_count, sst_count)
@@ -77,10 +85,14 @@ fn dir_size(path: &std::path::Path) -> u64 {
 #[test]
 fn test_log_simulation_stress() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n╔══════════════════════════════════════════════════════════════╗");
-    println!("║  ApexStore v{} — Log Simulation Stress Test        ║",
-        env!("CARGO_PKG_VERSION"));
-    println!("║  {}                               ║",
-        chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"));
+    println!(
+        "║  ApexStore v{} — Log Simulation Stress Test        ║",
+        env!("CARGO_PKG_VERSION")
+    );
+    println!(
+        "║  {}                               ║",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M UTC")
+    );
     println!("╚══════════════════════════════════════════════════════════════╝\n");
 
     let dir = TempDir::new()?;
@@ -88,17 +100,18 @@ fn test_log_simulation_stress() -> Result<(), Box<dyn std::error::Error>> {
     println!("─── 1. Setup ───");
     println!("  DB dir:    {:?}", db_path);
     println!("  Records:   {}", LOG_COUNT);
-    println!("  Memtable:  {} bytes (forces frequent flushes)", SMALL_MEMTABLE);
+    println!(
+        "  Memtable:  {} bytes (forces frequent flushes)",
+        SMALL_MEMTABLE
+    );
 
     // ── Build engine with small memtable ─────────────────────────
     let mut config = LsmConfig::default();
     config.core.dir_path = db_path.clone();
     config.core.memtable_max_size = SMALL_MEMTABLE;
 
-    let engine = Engine::<Arc<GlobalBlockCache>>::new_from_config(
-        &config,
-        GlobalBlockCache::new(1, 4096),
-    )?;
+    let engine =
+        Engine::<Arc<GlobalBlockCache>>::new_from_config(&config, GlobalBlockCache::new(1, 4096))?;
 
     let mut stats = Vec::new();
 
@@ -116,7 +129,12 @@ fn test_log_simulation_stress() -> Result<(), Box<dyn std::error::Error>> {
             let _ = engine.flush_memtable();
             let elapsed = write_start.elapsed();
             let rate = ((i + 1) as f64) / elapsed.as_secs_f64();
-            println!("    {} / {} entries ({:.0} ops/s)...", i + 1, LOG_COUNT, rate);
+            println!(
+                "    {} / {} entries ({:.0} ops/s)...",
+                i + 1,
+                LOG_COUNT,
+                rate
+            );
         }
     }
     // Final flush to ensure all data is in SSTables
@@ -127,8 +145,11 @@ fn test_log_simulation_stress() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Write complete:");
     println!("    Elapsed:    {:.2}s", write_dur.as_secs_f64());
     println!("    Throughput: {:.0} ops/s", write_rate);
-    println!("    DB size:    {} bytes ({:.1} MB)",
-        disk_size_after, disk_size_after as f64 / 1_048_576.0);
+    println!(
+        "    DB size:    {} bytes ({:.1} MB)",
+        disk_size_after,
+        disk_size_after as f64 / 1_048_576.0
+    );
 
     // ── Phase 2: Storage analysis ────────────────────────────────
     println!("\n─── 3. STORAGE LAYER ANALYSIS ───");
@@ -140,9 +161,11 @@ fn test_log_simulation_stress() -> Result<(), Box<dyn std::error::Error>> {
             for entry in std::fs::read_dir(&sst_dir)? {
                 let entry = entry?;
                 let meta = entry.metadata()?;
-                println!("    {:>8}  {}",
+                println!(
+                    "    {:>8}  {}",
                     humansize(meta.len()),
-                    entry.file_name().to_string_lossy());
+                    entry.file_name().to_string_lossy()
+                );
             }
         }
     }
@@ -162,9 +185,13 @@ fn test_log_simulation_stress() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let cold_dur = cold_start.elapsed();
-    println!("    Hits:  {}  Miss:  {}  Time: {:.2?} ({:.0} µs/op)",
-        cold_hits, cold_misses, cold_dur,
-        cold_dur.as_micros() as f64 / 100.0);
+    println!(
+        "    Hits:  {}  Miss:  {}  Time: {:.2?} ({:.0} µs/op)",
+        cold_hits,
+        cold_misses,
+        cold_dur,
+        cold_dur.as_micros() as f64 / 100.0
+    );
 
     stats.push(Stats {
         label: "cold_read (sstable)",
@@ -194,9 +221,13 @@ fn test_log_simulation_stress() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let hot_dur = hot_start.elapsed();
-    println!("    Hits:  {}  Miss:  {}  Time: {:.2?} ({:.0} µs/op)",
-        hot_hits, hot_misses, hot_dur,
-        hot_dur.as_micros() as f64 / 100.0);
+    println!(
+        "    Hits:  {}  Miss:  {}  Time: {:.2?} ({:.0} µs/op)",
+        hot_hits,
+        hot_misses,
+        hot_dur,
+        hot_dur.as_micros() as f64 / 100.0
+    );
 
     stats.push(Stats {
         label: "hot_read (memtable)",
@@ -212,8 +243,12 @@ fn test_log_simulation_stress() -> Result<(), Box<dyn std::error::Error>> {
         let scan_start = Instant::now();
         let (results, _) = engine.search_prefix(&format!("log/{}", level), None, 50)?;
         let scan_dur = scan_start.elapsed();
-        println!("  Prefix 'log/{}' (50): {:.2?}, {} results",
-            level, scan_dur, results.len());
+        println!(
+            "  Prefix 'log/{}' (50): {:.2?}, {} results",
+            level,
+            scan_dur,
+            results.len()
+        );
     }
 
     // ── Phase 6: Engine stats ────────────────────────────────────
@@ -230,16 +265,34 @@ fn test_log_simulation_stress() -> Result<(), Box<dyn std::error::Error>> {
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║  STRESS TEST RESULTS                                        ║");
     println!("╠══════════════════════════════════════════════════════════════╣");
-    println!("║  Write throughput:  {:>14.0} ops/s                ║", write_rate);
-    println!("║  Write time:        {:>14.2}s                    ║", write_dur.as_secs_f64());
-    println!("║  DB size:           {:>14} bytes        ║",
-        humansize(disk_size_after));
-    println!("║  SSTable files:     {:>14}                    ║", sst_count_after);
-    println!("║  WAL files:         {:>14}                    ║", wal_count_after);
-    println!("║  Hot read (mem):    {:>9.2?} ({} hits)      ║",
-        hot_dur, hot_hits);
-    println!("║  Cold read (disk):  {:>9.2?} ({} hits)     ║",
-        cold_dur, cold_hits);
+    println!(
+        "║  Write throughput:  {:>14.0} ops/s                ║",
+        write_rate
+    );
+    println!(
+        "║  Write time:        {:>14.2}s                    ║",
+        write_dur.as_secs_f64()
+    );
+    println!(
+        "║  DB size:           {:>14} bytes        ║",
+        humansize(disk_size_after)
+    );
+    println!(
+        "║  SSTable files:     {:>14}                    ║",
+        sst_count_after
+    );
+    println!(
+        "║  WAL files:         {:>14}                    ║",
+        wal_count_after
+    );
+    println!(
+        "║  Hot read (mem):    {:>9.2?} ({} hits)      ║",
+        hot_dur, hot_hits
+    );
+    println!(
+        "║  Cold read (disk):  {:>9.2?} ({} hits)     ║",
+        cold_dur, cold_hits
+    );
     println!("╚══════════════════════════════════════════════════════════════╝\n");
 
     // ── Cleanup ──────────────────────────────────────────────────

@@ -1,13 +1,15 @@
 pub mod compaction;
+pub mod transaction;
 pub mod version_set;
 
-use crate::core::log_record::LogRecord;
+use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::core::table::Table;
 use crate::infra::config::StorageConfig;
 use crate::infra::error::Result;
 use crate::infra::metrics::EngineMetrics;
 use crate::storage::builder::SstableBuilder;
 use crate::storage::cache::{Cache, GlobalBlockCache};
+use crate::storage::encryption::EncryptionConfig;
 use crate::storage::wal::WriteAheadLog;
 use fs2::FileExt;
 use parking_lot::Mutex;
@@ -64,6 +66,13 @@ pub struct EngineOptions {
     pub max_write_buffer_number: usize,
     pub block_cache_size_mb: usize,
     pub compaction_options: CompactionOptions,
+    /// Default TTL for keys.  If set, all keys written via `set()`, `put_cf()`,
+    /// etc. will automatically expire after this duration unless overridden via
+    /// `set_with_ttl()` / `set_cf_with_ttl()`.
+    pub default_ttl: Option<std::time::Duration>,
+    /// Encryption configuration for data at rest (SSTable blocks and WAL frames).
+    #[serde(default)]
+    pub encryption: EncryptionConfig,
 }
 
 impl Default for EngineOptions {
@@ -79,6 +88,8 @@ impl Default for EngineOptions {
             max_write_buffer_number: 4,
             block_cache_size_mb: 64,
             compaction_options: CompactionOptions::default(),
+            default_ttl: None,
+            encryption: EncryptionConfig::default(),
         }
     }
 }
@@ -89,6 +100,23 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             strategy_type: config.compaction.strategy.clone().into(),
             compaction_threshold: config.compaction.min_compaction_threshold,
             max_tables_per_compaction: config.compaction.max_sstables,
+        };
+
+        // Build encryption config from the config
+        let encryption = if config.storage.encryption_enabled {
+            config
+                .storage
+                .encryption_key_path
+                .as_deref()
+                .map(EncryptionConfig::from_key_path)
+                .unwrap_or_else(|| {
+                    Err(crate::infra::error::LsmError::InvalidArgument(
+                        "Encryption enabled but no key path provided".to_string(),
+                    ))
+                })
+                .unwrap_or_default()
+        } else {
+            EncryptionConfig::default()
         };
 
         Self {
@@ -102,6 +130,8 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             max_write_buffer_number: 4,
             block_cache_size_mb: config.storage.block_cache_size_mb,
             compaction_options,
+            default_ttl: None,
+            encryption,
         }
     }
 }
@@ -133,6 +163,9 @@ pub(crate) struct EngineCore<C: Cache> {
     wals: HashMap<String, WriteAheadLog>,
     /// Database directory path, used to create new per-CF WALs lazily.
     dir_path: std::path::PathBuf,
+    /// Active range tombstones per column family.
+    /// These survive memtable flushes and are checked on every read/scan.
+    range_tombstones: HashMap<String, Vec<crate::core::log_record::RangeTombstone>>,
 }
 
 impl<C: Cache> EngineCore<C> {
@@ -168,6 +201,16 @@ impl<C: Cache> EngineCore<C> {
             self.wals.insert(cf.to_string(), wal);
         }
         self.wals.get_mut(cf).unwrap()
+    }
+
+    pub(crate) fn range_tombstones(&self) -> &HashMap<String, Vec<crate::core::log_record::RangeTombstone>> {
+        &self.range_tombstones
+    }
+
+    pub(crate) fn range_tombstones_mut(
+        &mut self,
+    ) -> &mut HashMap<String, Vec<crate::core::log_record::RangeTombstone>> {
+        &mut self.range_tombstones
     }
 }
 
@@ -277,9 +320,18 @@ fn compact_cf_core<C: Cache>(
         return Ok(None);
     }
 
+    // Collect active range tombstones for this CF to pass to compaction
+    let rt = core
+        .range_tombstones()
+        .get(cf)
+        .cloned()
+        .unwrap_or_default();
+
     let mut all_metrics = CompactionMetrics::default();
     for indices in &groups {
-        let (new_tables, metrics) = core.compaction_mut().compact(indices, &tables, options)?;
+        let (new_tables, metrics) =
+            core.compaction_mut()
+                .compact(indices, &tables, options, &rt)?;
         core.version_set_mut()
             .atomic_replace(cf, indices, new_tables);
         all_metrics.bytes_read += metrics.bytes_read;
@@ -324,6 +376,8 @@ impl<C: Cache> Engine<C> {
             block_cache_size_mb: options.block_cache_size_mb,
             sparse_index_interval: 16,
             bloom_false_positive_rate: 0.01,
+            encryption_enabled: false,
+            encryption_key_path: None,
         };
 
         // Create compaction with strategy from options
@@ -365,6 +419,7 @@ impl<C: Cache> Engine<C> {
             compaction,
             wals: HashMap::new(),
             dir_path: dir_path.to_path_buf(),
+            range_tombstones: HashMap::new(),
         };
 
         // Create and recover the "default" CF WAL
@@ -426,18 +481,42 @@ impl<C: Cache> Engine<C> {
     fn replay_wal_records_core(core: &mut EngineCore<C>, records: Vec<LogRecord>) -> Result<()> {
         for record in records {
             let cf = record.column_family.as_deref().unwrap_or("default");
-            let mem = core.memtables_mut().entry(cf.to_string()).or_default();
-            if mem.is_empty() {
-                mem.push(MemTable::new_unlimited());
-            }
-            let last = mem.len() - 1;
-            if record.is_deleted {
+            if record.is_range_tombstone() {
+                // Range tombstone records are stored at the EngineCore level
+                // and also added to the current memtable's range tombstone list.
+                let range = crate::core::log_record::RangeTombstone {
+                    start_key: record.range_start.clone().unwrap_or_default(),
+                    end_key: record.range_end.clone().unwrap_or_default(),
+                    timestamp: record.timestamp,
+                };
+                core.range_tombstones_mut()
+                    .entry(cf.to_string())
+                    .or_default()
+                    .push(range.clone());
+                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
+                if mem.is_empty() {
+                    mem.push(MemTable::new_unlimited());
+                }
+                let last = mem.len() - 1;
+                mem[last].add_range_tombstone(range);
+            } else if record.is_deleted {
+                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
+                if mem.is_empty() {
+                    mem.push(MemTable::new_unlimited());
+                }
+                let last = mem.len() - 1;
                 mem[last].delete(record.key.clone());
+                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() += record.key.len();
             } else {
+                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
+                if mem.is_empty() {
+                    mem.push(MemTable::new_unlimited());
+                }
+                let last = mem.len() - 1;
                 mem[last].put(record.key.clone(), record.value.clone());
+                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
+                    record.key.len() + record.value.len();
             }
-            *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
-                record.key.len() + record.value.len();
         }
         Ok(())
     }
@@ -449,8 +528,17 @@ impl<C: Cache> Engine<C> {
 // maybe_compact() which may spawn a background compaction thread.
 
 impl<C: Cache> Engine<C> {
-    /// Put a key-value pair into the specified column family.
-    pub fn put_cf(&self, cf: &str, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+    /// Put a key-value pair into the specified column family with an optional TTL.
+    ///
+    /// If `ttl` is `Some(duration)`, the key will expire after that duration.
+    /// If `ttl` is `None`, no expiry is set (unless `default_ttl` is configured).
+    fn put_cf_with_ttl_inner(
+        &self,
+        cf: &str,
+        key: Vec<u8>,
+        value: Vec<u8>,
+        ttl: Option<std::time::Duration>,
+    ) -> Result<()> {
         let start = std::time::Instant::now();
         let key_str = String::from_utf8_lossy(&key).into_owned();
         let value_size = value.len();
@@ -458,8 +546,25 @@ impl<C: Cache> Engine<C> {
         {
             let mut core = self.core.lock();
             // Write to WAL first (before modifying memtable) for crash safety
-            let mut record = LogRecord::new(key.clone(), value.clone());
-            record.column_family = Some(cf.to_string());
+            let mut record = if let Some(ttl) = ttl {
+                let mut r = LogRecord::new_with_ttl(key.clone(), value.clone(), ttl);
+                r.column_family = Some(cf.to_string());
+                r
+            } else {
+                let mut r = LogRecord::new(key.clone(), value.clone());
+                r.column_family = Some(cf.to_string());
+                r
+            };
+            // Apply default_ttl if no explicit TTL was given
+            if record.expires_at.is_none() {
+                if let Some(default_ttl) = self.options.default_ttl {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    record.expires_at = Some(now.saturating_add(default_ttl.as_nanos()));
+                }
+            }
             core.wal_mut(cf).write_record(&record)?;
 
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
@@ -467,7 +572,7 @@ impl<C: Cache> Engine<C> {
                 mem.push(MemTable::new_unlimited());
             }
             let last = mem.len() - 1;
-            mem[last].put(key.clone(), value.clone());
+            mem[last].insert(record);
             *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
                 key.len() + value.len();
             let write_buffer_limit =
@@ -502,6 +607,11 @@ impl<C: Cache> Engine<C> {
         Ok(())
     }
 
+    /// Put a key-value pair into the specified column family.
+    pub fn put_cf(&self, cf: &str, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+        self.put_cf_with_ttl_inner(cf, key, value, None)
+    }
+
     pub fn set<K, V>(&self, key: K, value: V) -> Result<()>
     where
         K: Into<Vec<u8>>,
@@ -517,6 +627,53 @@ impl<C: Cache> Engine<C> {
             value_size = value_vec.len(),
         );
         self.put_cf("default", key_vec, value_vec)
+    }
+
+    /// Store a key-value pair with a Time-To-Live (TTL).
+    ///
+    /// After `ttl` elapses, the key will be treated as non-existent
+    /// by `get()` and `scan()`.
+    pub fn set_with_ttl<K, V>(&self, key: K, value: V, ttl: std::time::Duration) -> Result<()>
+    where
+        K: Into<Vec<u8>>,
+        V: Into<Vec<u8>>,
+    {
+        let key_vec = key.into();
+        let value_vec = value.into();
+        tracing::info!(
+            target: "apexstore::engine",
+            operation = "set_with_ttl",
+            cf = "default",
+            key = %String::from_utf8_lossy(&key_vec),
+            value_size = value_vec.len(),
+            ttl_ms = ttl.as_millis(),
+        );
+        self.put_cf_with_ttl_inner("default", key_vec, value_vec, Some(ttl))
+    }
+
+    /// Store a key-value pair with a Time-To-Live (TTL) in the given column family.
+    pub fn set_cf_with_ttl<K, V>(
+        &self,
+        cf: &str,
+        key: K,
+        value: V,
+        ttl: std::time::Duration,
+    ) -> Result<()>
+    where
+        K: Into<Vec<u8>>,
+        V: Into<Vec<u8>>,
+    {
+        let key_vec = key.into();
+        let value_vec = value.into();
+        tracing::info!(
+            target: "apexstore::engine",
+            operation = "set_cf_with_ttl",
+            cf = cf,
+            key = %String::from_utf8_lossy(&key_vec),
+            value_size = value_vec.len(),
+            ttl_ms = ttl.as_millis(),
+        );
+        self.put_cf_with_ttl_inner(cf, key_vec, value_vec, Some(ttl))
     }
 
     pub fn delete_cf<K>(&self, cf: &str, key: K) -> Result<()>
@@ -581,6 +738,27 @@ impl<C: Cache> Engine<C> {
         self.delete_cf("default", key_vec)
     }
 
+    /// Check if a key falls within any active range tombstone for the given column family.
+    fn is_in_range_tombstone(core: &EngineCore<C>, cf: &str, key: &[u8]) -> bool {
+        if let Some(tombstones) = core.range_tombstones().get(cf) {
+            if tombstones
+                .iter()
+                .any(|rt| rt.start_key.as_slice() <= key && key < rt.end_key.as_slice())
+            {
+                return true;
+            }
+        }
+        // Also check memtable-level range tombstones
+        if let Some(memtables) = core.memtables().get(cf) {
+            for mem in memtables.iter() {
+                if mem.contains_range_tombstone(key) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub fn get_cf<K>(&self, cf: &str, key: K) -> Result<Option<Vec<u8>>>
     where
         K: AsRef<[u8]>,
@@ -589,11 +767,34 @@ impl<C: Cache> Engine<C> {
         let start = std::time::Instant::now();
         let key_str = String::from_utf8_lossy(key).into_owned();
         let core = self.core.lock();
+
+        // First check if the key falls within any active range tombstone.
+        // The range tombstone check must happen before the value lookup so that
+        // deleted ranges take precedence over any existing data.
+        if Self::is_in_range_tombstone(&core, cf, key) {
+            let elapsed_us = start.elapsed().as_micros() as u64;
+            self.metrics.record_get(elapsed_us);
+            tracing::debug!(
+                target: "apexstore::engine",
+                operation = "get_cf",
+                cf = cf,
+                key = %key_str,
+                found = false,
+                reason = "range_tombstone",
+                duration_us = elapsed_us,
+            );
+            return Ok(None);
+        }
+
         if let Some(memtables) = core.memtables().get(cf) {
             for mem in memtables.iter().rev() {
                 if let Some(v) = mem.data.get(key) {
                     // Skip tombstones (deleted records)
                     if v.is_deleted {
+                        return Ok(None);
+                    }
+                    // Skip expired keys (TTL-based auto-expiry)
+                    if v.is_expired() {
                         return Ok(None);
                     }
                     let elapsed_us = start.elapsed().as_micros() as u64;
@@ -704,8 +905,41 @@ impl<C: Cache> Engine<C> {
                     break;
                 }
             }
+            // Skip keys that fall within active range tombstones
+            let key = merge_iter.key();
+            if Self::is_in_range_tombstone(&core, cf, key.as_slice()) {
+                merge_iter.next();
+                continue;
+            }
             results.push((merge_iter.key(), merge_iter.value().to_vec()));
             merge_iter.next();
+        }
+
+        // Filter out expired entries that are still in a memtable.
+        // Keys from SSTables cannot be checked for TTL because the
+        // LogRecord metadata (including expires_at) is lost during
+        // flush (see flush_memtable_impl / Table::build).
+        //
+        // NOTE: flush_memtable_impl already skips expired keys, so
+        // the only expired keys that can appear are those written
+        // recently (still in memtable, not yet flushed).  We look
+        // them up here and remove them from results.
+        if let Some(memtables) = core.memtables().get(cf) {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            results.retain(|(k, _)| {
+                // Check memtables in reverse (newest first)
+                for mem in memtables.iter().rev() {
+                    if let Some(record) = mem.data.get(k) {
+                        // Found in a memtable — keep only if not expired
+                        return !record.is_expired_at(now);
+                    }
+                }
+                // Not found in any memtable (from SSTable) — keep as-is
+                true
+            });
         }
 
         let elapsed_us = start.elapsed().as_micros() as u64;
@@ -894,9 +1128,19 @@ impl<C: Cache> Engine<C> {
         if let Some(memtables) = core.memtables_mut().get_mut(cf) {
             if let Some(mem) = memtables.pop() {
                 let records = mem.data.len();
-                // Convert LogRecord values to raw Vec<u8> for Table::build
+                // NOTE: TTL / expires_at metadata is stripped when converting
+                // LogRecord to raw Vec<u8> for Table::build.  Expired keys
+                // are filtered out here so they never reach the SSTable.
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos();
                 let raw_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> =
-                    mem.data.into_iter().map(|(k, r)| (k, r.value)).collect();
+                    mem.data
+                        .into_iter()
+                        .filter(|(_, r)| !r.is_expired_at(now))
+                        .map(|(k, r)| (k, r.value))
+                        .collect();
                 let table = Table::build(raw_data, &self.options);
                 core.version_set_mut().add_table(cf, table);
                 let bytes = core.memtable_bytes_mut().get_mut(cf).ok_or_else(|| {
@@ -1033,6 +1277,7 @@ impl<C: Cache> Engine<C> {
                     groups: Vec<Vec<usize>>,
                     compaction: Compaction,
                     options: EngineOptions,
+                    range_tombstones: Vec<RangeTombstone>,
                 }
 
                 let plans: Vec<CompactionPlan> = {
@@ -1056,6 +1301,11 @@ impl<C: Cache> Engine<C> {
                                 groups,
                                 compaction: core.compaction().clone(),
                                 options: options.clone(),
+                                range_tombstones: core
+                                    .range_tombstones()
+                                    .get(cf)
+                                    .cloned()
+                                    .unwrap_or_default(),
                             })
                         })
                         .collect()
@@ -1068,7 +1318,7 @@ impl<C: Cache> Engine<C> {
                     for group_indices in &plan.groups {
                         match plan
                             .compaction
-                            .compact(group_indices, &plan.tables, &plan.options)
+                            .compact(group_indices, &plan.tables, &plan.options, &plan.range_tombstones)
                         {
                             Ok((new_tables, _metrics)) => {
                                 results.push((plan.cf.clone(), group_indices.clone(), new_tables));
@@ -1388,6 +1638,97 @@ impl<C: Cache> Engine<C> {
         Ok(())
     }
 
+    // ── Transaction API ──
+
+    /// Begin a new transaction with buffered writes and snapshot isolation.
+    ///
+    /// Writes performed via the returned [`Transaction`](transaction::Transaction)
+    /// are buffered in memory until [`commit`](transaction::Transaction::commit)
+    /// is called, at which point they are applied atomically to the WAL and
+    /// memtable.  Calling [`rollback`](transaction::Transaction::rollback)
+    /// discards all buffered writes.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use apexstore::LsmConfig;
+    /// # use apexstore::core::engine::Engine;
+    /// # use apexstore::storage::cache::GlobalBlockCache;
+    /// # let dir = tempfile::tempdir().unwrap();
+    /// # let mut config = LsmConfig::default();
+    /// # config.core.dir_path = dir.path().to_path_buf();
+    /// # let engine = Engine::new_from_config(&config, GlobalBlockCache::new(100, 4096)).unwrap();
+    /// let mut txn = engine.begin_transaction();
+    /// txn.put_cf("default", b"k1", b"v1").unwrap();
+    /// txn.put_cf("accounts", b"alice", b"100").unwrap();
+    /// txn.commit().unwrap();
+    /// ```
+    pub fn begin_transaction(&self) -> transaction::Transaction<C> {
+        transaction::Transaction::new(
+            self.core.clone(),
+            self.options.clone(),
+            self.metrics.clone(),
+        )
+    }
+
+    // ── Range Delete API ──
+
+    /// Delete all keys in the range [start, end) from the specified column family.
+    ///
+    /// A range tombstone record is written to the WAL and the active range tombstone
+    /// list in the memtable.  All subsequent reads and scans will filter out keys
+    /// that fall within the range.
+    pub fn delete_range_cf(&self, cf: &str, start: &[u8], end: &[u8]) -> Result<()> {
+        let start_time = std::time::Instant::now();
+        {
+            let mut core = self.core.lock();
+
+            let range = crate::core::log_record::RangeTombstone {
+                start_key: start.to_vec(),
+                end_key: end.to_vec(),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos(),
+            };
+
+            // Write range tombstone to WAL
+            let mut record = LogRecord::range_tombstone(start.to_vec(), end.to_vec());
+            record.column_family = Some(cf.to_string());
+            core.wal_mut(cf).write_record(&record)?;
+
+            // Add to EngineCore-level range tombstones (survives flushes)
+            core.range_tombstones_mut()
+                .entry(cf.to_string())
+                .or_default()
+                .push(range.clone());
+
+            // Add to current memtable
+            let mem = core.memtables_mut().entry(cf.to_string()).or_default();
+            if mem.is_empty() {
+                mem.push(MemTable::new_unlimited());
+            }
+            let last = mem.len() - 1;
+            mem[last].add_range_tombstone(range);
+        }
+
+        let elapsed = start_time.elapsed();
+        tracing::info!(
+            target: "apexstore::engine",
+            operation = "delete_range_cf",
+            cf = cf,
+            range_start = %String::from_utf8_lossy(start),
+            range_end = %String::from_utf8_lossy(end),
+            duration_us = elapsed.as_micros() as u64,
+        );
+        Ok(())
+    }
+
+    /// Delete all keys in the range [start, end) from the default column family.
+    pub fn delete_range(&self, start: &[u8], end: &[u8]) -> Result<()> {
+        self.delete_range_cf("default", start, end)
+    }
+
     // ── Snapshot / Backup API ──
 
     /// Write an in-memory Table's data to an SSTable file at the given path.
@@ -1401,6 +1742,8 @@ impl<C: Cache> Engine<C> {
             block_cache_size_mb: options.block_cache_size_mb,
             sparse_index_interval: 16,
             bloom_false_positive_rate: 0.01,
+            encryption_enabled: false,
+            encryption_key_path: None,
         };
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let mut builder = SstableBuilder::new(path.to_path_buf(), storage_config, timestamp)?;
@@ -2954,5 +3297,213 @@ mod tests {
             assert!(info.size_bytes > 0, "Snapshot should have non-zero size");
             assert!(info.file_count > 0, "Snapshot should have at least 1 file");
         }
+    }
+
+    // ── Issue #193: TTL / auto-expiry tests ──
+
+    #[test]
+    fn test_ttl_key_expires_after_duration() {
+        use crate::infra::config::LsmConfig;
+        use std::time::Duration;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Set a key with a 1ms TTL
+        engine
+            .set_with_ttl(b"ephemeral".to_vec(), b"value".to_vec(), Duration::from_millis(1))
+            .unwrap();
+
+        // Immediately after write, key should be present
+        assert_eq!(
+            engine.get(b"ephemeral").unwrap(),
+            Some(b"value".to_vec()),
+            "Key should be visible immediately after write"
+        );
+
+        // Wait for TTL to expire
+        std::thread::sleep(Duration::from_millis(5));
+
+        // Key should now be expired
+        assert_eq!(
+            engine.get(b"ephemeral").unwrap(),
+            None,
+            "Key should be None after TTL expiry"
+        );
+    }
+
+    #[test]
+    fn test_ttl_key_without_ttl_never_expires() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Set a key without TTL
+        engine.set(b"persistent".to_vec(), b"value".to_vec()).unwrap();
+
+        // Key should be present
+        assert_eq!(
+            engine.get(b"persistent").unwrap(),
+            Some(b"value".to_vec()),
+        );
+
+        // Even after a short wait, key should still be present
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        assert_eq!(
+            engine.get(b"persistent").unwrap(),
+            Some(b"value".to_vec()),
+            "Key without TTL should never expire"
+        );
+    }
+
+    #[test]
+    fn test_ttl_scan_filters_expired_entries() {
+        use crate::infra::config::LsmConfig;
+        use std::time::Duration;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Insert a key without TTL (permanent)
+        engine.set(b"permanent".to_vec(), b"keep".to_vec()).unwrap();
+        // Insert a key with short TTL
+        engine
+            .set_with_ttl(b"temp".to_vec(), b"gone".to_vec(), Duration::from_millis(1))
+            .unwrap();
+
+        // Both keys should appear in scan before expiry
+        let results = engine.scan_cf("default", None, None, Some(10)).unwrap();
+        assert_eq!(results.len(), 2, "Both keys should appear before TTL expiry");
+
+        // Wait for TTL to expire
+        std::thread::sleep(Duration::from_millis(5));
+
+        // Only the permanent key should appear in scan
+        let results = engine.scan_cf("default", None, None, Some(10)).unwrap();
+        assert_eq!(results.len(), 1, "Only permanent key should appear in scan");
+        assert_eq!(results[0].0, b"permanent".to_vec());
+    }
+
+    #[test]
+    fn test_ttl_in_column_family() {
+        use crate::infra::config::LsmConfig;
+        use std::time::Duration;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Insert a key with TTL in a non-default column family
+        engine
+            .set_cf_with_ttl("sessions", b"session:1", b"active", Duration::from_millis(1))
+            .unwrap();
+
+        // Immediately after write, key should be present
+        assert_eq!(
+            engine.get_cf("sessions", b"session:1").unwrap(),
+            Some(b"active".to_vec())
+        );
+
+        // Wait for TTL to expire
+        std::thread::sleep(Duration::from_millis(5));
+
+        // Key should now be expired in the CF
+        assert_eq!(
+            engine.get_cf("sessions", b"session:1").unwrap(),
+            None,
+            "Key in CF should be None after TTL expiry"
+        );
+    }
+
+    #[test]
+    fn test_ttl_default_ttl_config() {
+        use crate::infra::config::LsmConfig;
+        use std::time::Duration;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        // Build engine with a default TTL and use set()
+        let mut options = EngineOptions::default();
+        options.default_ttl = Some(Duration::from_millis(1));
+        let engine = Engine::new_generic(
+            options,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+            dir.path(),
+        )
+        .unwrap();
+
+        // set() should inherit the default TTL
+        engine.set(b"auto_expire".to_vec(), b"value".to_vec()).unwrap();
+
+        // Immediately readable
+        assert_eq!(
+            engine.get(b"auto_expire").unwrap(),
+            Some(b"value".to_vec())
+        );
+
+        // Wait for default TTL to expire
+        std::thread::sleep(Duration::from_millis(5));
+
+        // Key should be expired via default_ttl
+        assert_eq!(
+            engine.get(b"auto_expire").unwrap(),
+            None,
+            "Key with default TTL should expire"
+        );
+    }
+
+    #[test]
+    fn test_ttl_log_record_new_with_ttl() {
+        use std::time::Duration;
+
+        // Test the LogRecord constructor directly
+        let record = LogRecord::new_with_ttl(b"k".to_vec(), b"v".to_vec(), Duration::from_secs(3600));
+        assert!(!record.is_expired(), "Fresh TTL record should not be expired");
+
+        // A record with 0 TTL should be expired immediately
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let expired_record = LogRecord {
+            expires_at: Some(now.saturating_sub(1)), // 1 nanosecond ago
+            ..LogRecord::new(b"k".to_vec(), b"v".to_vec())
+        };
+        assert!(expired_record.is_expired(), "Past expires_at should be expired");
+
+        // Non-TTL record should never be expired
+        let no_ttl = LogRecord::new(b"k".to_vec(), b"v".to_vec());
+        assert!(!no_ttl.is_expired(), "No TTL record should never expire");
+        assert_eq!(no_ttl.expires_at, None);
     }
 }

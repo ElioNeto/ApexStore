@@ -1,6 +1,7 @@
 use crate::core::log_record::LogRecord;
 use crate::infra::codec::{decode, encode};
 use crate::infra::error::Result;
+use crate::storage::encryption::{EncryptionConfig, Encryptor};
 use crc32fast::Hasher;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -12,10 +13,15 @@ use tracing::{debug, info, warn};
 /// WAL frame version constants for backward compatibility.
 ///
 /// - Version 0: LogRecord serialized WITHOUT `column_family` (original format).
-/// - Version 1: LogRecord serialized WITH `column_family`.
+/// - Version 1: LogRecord serialized WITH `column_family` (but no range tombstone fields).
+/// - Version 2: LogRecord serialized WITH `column_family` AND `range_start`/`range_end`.
+/// - Version 3: Same as V2, but the payload is AES-256-GCM encrypted.
+///              Format: `[12-byte IV][encrypted V2 payload]`
 pub(crate) const WAL_FRAME_VERSION_V0: u8 = 0;
 pub(crate) const WAL_FRAME_VERSION_V1: u8 = 1;
-pub(crate) const WAL_CURRENT_FRAME_VERSION: u8 = WAL_FRAME_VERSION_V1;
+pub(crate) const WAL_FRAME_VERSION_V2: u8 = 2;
+pub(crate) const WAL_FRAME_VERSION_V3_ENCRYPTED: u8 = 3;
+pub(crate) const WAL_CURRENT_FRAME_VERSION: u8 = WAL_FRAME_VERSION_V2;
 
 /// LogRecord payload format for V0 frames (without `column_family`).
 ///
@@ -39,6 +45,39 @@ impl From<LogRecordV0> for LogRecord {
             timestamp: v0.timestamp,
             is_deleted: v0.is_deleted,
             column_family: None, // legacy records have no CF → treated as "default"
+            expires_at: None,
+            range_start: None,
+            range_end: None,
+        }
+    }
+}
+
+/// LogRecord payload format for V1 frames (without `range_start` / `range_end`).
+///
+/// This struct is used exclusively for backward-compatible deserialization of
+/// WAL frames written by versions of the engine before range delete support.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct LogRecordV1 {
+    pub key: Vec<u8>,
+    pub value: Vec<u8>,
+    pub timestamp: u128,
+    pub is_deleted: bool,
+    #[serde(default)]
+    pub column_family: Option<String>,
+    // no range_start / range_end — this is the pre-range-delete format
+}
+
+impl From<LogRecordV1> for LogRecord {
+    fn from(v1: LogRecordV1) -> Self {
+        LogRecord {
+            key: v1.key,
+            value: v1.value,
+            timestamp: v1.timestamp,
+            is_deleted: v1.is_deleted,
+            column_family: v1.column_family,
+            expires_at: None,
+            range_start: None,
+            range_end: None,
         }
     }
 }
@@ -77,6 +116,8 @@ pub struct WriteAheadLog {
     /// Number of buffered writes since the last fsync.
     /// Used to amortise fsync cost across multiple write_record calls.
     batch_count: Mutex<usize>,
+    /// Optional encryptor for transparent WAL frame encryption.
+    encryptor: Encryptor,
 }
 
 /// How many `write_record` calls to accumulate before issuing an fsync.
@@ -94,7 +135,18 @@ impl WriteAheadLog {
     /// The file is stored as `<dir_path>/wal-{cf}.log`.  For the default
     /// column family the file is `<dir_path>/wal.log` for backward
     /// compatibility.
+    ///
+    /// `encryption` controls whether WAL frames are encrypted.
     pub fn new(dir_path: &std::path::Path, cf: &str) -> Result<Self> {
+        Self::new_with_encryption(dir_path, cf, &EncryptionConfig::default())
+    }
+
+    /// Open or create a WAL file with optional encryption.
+    pub fn new_with_encryption(
+        dir_path: &std::path::Path,
+        cf: &str,
+        encryption: &EncryptionConfig,
+    ) -> Result<Self> {
         let wal_path = if cf == "default" || cf.is_empty() {
             dir_path.join("wal.log")
         } else {
@@ -109,6 +161,7 @@ impl WriteAheadLog {
             file: Mutex::new(BufWriter::new(file)),
             path: wal_path,
             batch_count: Mutex::new(0),
+            encryptor: Encryptor::new(encryption),
         })
     }
 
@@ -130,24 +183,31 @@ impl WriteAheadLog {
     /// record frame.
     pub fn write_record(&self, record: &LogRecord) -> Result<()> {
         let serialized = encode(record)?;
-        let version = WAL_CURRENT_FRAME_VERSION;
+
+        // Encrypt payload if encryption is enabled (use version 3 for encrypted frames)
+        let (payload, version) = if self.encryptor.is_enabled() {
+            let encrypted = self.encryptor.encrypt_block(&serialized)?;
+            (encrypted, WAL_FRAME_VERSION_V3_ENCRYPTED)
+        } else {
+            (serialized, WAL_CURRENT_FRAME_VERSION)
+        };
 
         // `length` includes version byte + payload bytes
-        let length = 1u32 + serialized.len() as u32;
+        let length = 1u32 + payload.len() as u32;
 
         // Calculate CRC32 over (length + version + payload)
         let length_bytes = length.to_le_bytes();
         let mut hasher = Hasher::new();
         hasher.update(&length_bytes);
         hasher.update(&[version]);
-        hasher.update(&serialized);
+        hasher.update(&payload);
         let checksum = hasher.finalize();
 
         let mut writer = self.file.lock();
 
         writer.write_all(&length_bytes)?;
         writer.write_all(&[version])?;
-        writer.write_all(&serialized)?;
+        writer.write_all(&payload)?;
         writer.write_all(&checksum.to_le_bytes())?;
         writer.flush()?;
 
@@ -185,20 +245,28 @@ impl WriteAheadLog {
         let mut frames: Vec<Vec<u8>> = Vec::with_capacity(records.len());
         for record in records {
             let serialized = encode(record)?;
-            let version = WAL_CURRENT_FRAME_VERSION;
-            let length = 1u32 + serialized.len() as u32;
+
+            // Encrypt payload if encryption is enabled
+            let (payload, version) = if self.encryptor.is_enabled() {
+                let encrypted = self.encryptor.encrypt_block(&serialized)?;
+                (encrypted, WAL_FRAME_VERSION_V3_ENCRYPTED)
+            } else {
+                (serialized, WAL_CURRENT_FRAME_VERSION)
+            };
+
+            let length = 1u32 + payload.len() as u32;
             let length_bytes = length.to_le_bytes();
 
             let mut hasher = Hasher::new();
             hasher.update(&length_bytes);
             hasher.update(&[version]);
-            hasher.update(&serialized);
+            hasher.update(&payload);
             let checksum = hasher.finalize();
 
-            let mut frame = Vec::with_capacity(4 + 1 + serialized.len() + 4);
+            let mut frame = Vec::with_capacity(4 + 1 + payload.len() + 4);
             frame.extend_from_slice(&length_bytes);
             frame.push(version);
-            frame.extend_from_slice(&serialized);
+            frame.extend_from_slice(&payload);
             frame.extend_from_slice(&checksum.to_le_bytes());
             frames.push(frame);
         }
@@ -393,8 +461,8 @@ impl WriteAheadLog {
                         continue;
                     }
                 },
-                WAL_FRAME_VERSION_V1 => match decode::<LogRecord>(&payload) {
-                    Ok(r) => r,
+                WAL_FRAME_VERSION_V1 => match decode::<LogRecordV1>(&payload) {
+                    Ok(v1) => LogRecord::from(v1),
                     Err(e) => {
                         warn!(
                             "WAL recovery: V1 deserialization failed ({}), skipping corrupted frame",
@@ -404,6 +472,41 @@ impl WriteAheadLog {
                         continue;
                     }
                 },
+                WAL_FRAME_VERSION_V2 => match decode::<LogRecord>(&payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        warn!(
+                            "WAL recovery: V2 deserialization failed ({}), skipping corrupted frame",
+                            e
+                        );
+                        skipped_frames += 1;
+                        continue;
+                    }
+                },
+                WAL_FRAME_VERSION_V3_ENCRYPTED => {
+                    // Decrypt the payload first (tolerant on failure)
+                    match self.encryptor.decrypt_block(&payload) {
+                        Ok(decrypted) => match decode::<LogRecord>(&decrypted) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                warn!(
+                                    "WAL recovery: V3 encrypted deserialization failed ({}), skipping corrupted frame",
+                                    e
+                                );
+                                skipped_frames += 1;
+                                continue;
+                            }
+                        },
+                        Err(e) => {
+                            warn!(
+                                "WAL recovery: V3 encrypted decryption failed ({}), skipping corrupted frame",
+                                e
+                            );
+                            skipped_frames += 1;
+                            continue;
+                        }
+                    }
+                }
                 other => {
                     warn!(
                         "WAL recovery: unknown frame version {}, skipping corrupted frame",
@@ -526,19 +629,27 @@ impl WriteAheadLog {
 
             for record in &survivors {
                 let serialized = encode(record)?;
-                let version = WAL_CURRENT_FRAME_VERSION;
-                let length = 1u32 + serialized.len() as u32;
+
+                // Encrypt payload if encryption is enabled
+                let (payload, version) = if self.encryptor.is_enabled() {
+                    let encrypted = self.encryptor.encrypt_block(&serialized)?;
+                    (encrypted, WAL_FRAME_VERSION_V3_ENCRYPTED)
+                } else {
+                    (serialized, WAL_CURRENT_FRAME_VERSION)
+                };
+
+                let length = 1u32 + payload.len() as u32;
                 let length_bytes = length.to_le_bytes();
 
                 let mut hasher = Hasher::new();
                 hasher.update(&length_bytes);
                 hasher.update(&[version]);
-                hasher.update(&serialized);
+                hasher.update(&payload);
                 let checksum = hasher.finalize();
 
                 tmp_writer.write_all(&length_bytes)?;
                 tmp_writer.write_all(&[version])?;
-                tmp_writer.write_all(&serialized)?;
+                tmp_writer.write_all(&payload)?;
                 tmp_writer.write_all(&checksum.to_le_bytes())?;
             }
 
@@ -675,7 +786,10 @@ fn resync_after_invalid_length(
             // 3. Be followed by a known WAL frame version byte
             if (MIN_LENGTH..=MAX_WAL_RECORD_BYTES).contains(&candidate)
                 && *pos + 4 + candidate <= file_size
-                && (version_byte == WAL_FRAME_VERSION_V0 || version_byte == WAL_FRAME_VERSION_V1)
+                && (version_byte == WAL_FRAME_VERSION_V0
+                    || version_byte == WAL_FRAME_VERSION_V1
+                    || version_byte == WAL_FRAME_VERSION_V2
+                    || version_byte == WAL_FRAME_VERSION_V3_ENCRYPTED)
             {
                 return Ok(true); // Found a plausible frame start.
             }

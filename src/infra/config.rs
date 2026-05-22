@@ -44,6 +44,12 @@ pub struct StorageConfig {
     pub block_cache_size_mb: usize,
     pub sparse_index_interval: usize,
     pub bloom_false_positive_rate: f64,
+    /// Whether encryption at rest is enabled.
+    #[serde(default)]
+    pub encryption_enabled: bool,
+    /// Path to file containing the hex-encoded AES-256 key (64 hex chars).
+    #[serde(default)]
+    pub encryption_key_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +92,8 @@ impl Default for StorageConfig {
             block_cache_size_mb: 64,
             sparse_index_interval: 16,
             bloom_false_positive_rate: 0.01,
+            encryption_enabled: false,
+            encryption_key_path: None,
         }
     }
 }
@@ -302,6 +310,8 @@ pub struct LsmConfigBuilder {
     max_sstables: Option<usize>,
     min_compaction_threshold: Option<usize>,
     strategy: Option<CompactionStrategy>,
+    encryption_enabled: Option<bool>,
+    encryption_key_path: Option<String>,
 }
 
 impl LsmConfigBuilder {
@@ -355,6 +365,16 @@ impl LsmConfigBuilder {
         self
     }
 
+    pub fn encryption_enabled(mut self, enabled: bool) -> Self {
+        self.encryption_enabled = Some(enabled);
+        self
+    }
+
+    pub fn encryption_key_path(mut self, path: String) -> Self {
+        self.encryption_key_path = Some(path);
+        self
+    }
+
     pub fn build(self) -> Result<LsmConfig> {
         let defaults = LsmConfig::default();
 
@@ -376,6 +396,12 @@ impl LsmConfigBuilder {
                 bloom_false_positive_rate: self
                     .bloom_false_positive_rate
                     .unwrap_or(defaults.storage.bloom_false_positive_rate),
+                encryption_enabled: self
+                    .encryption_enabled
+                    .unwrap_or(defaults.storage.encryption_enabled),
+                encryption_key_path: self
+                    .encryption_key_path
+                    .or_else(|| defaults.storage.encryption_key_path.clone()),
             },
             compaction: CompactionConfig {
                 level_size: self.level_size.unwrap_or(defaults.compaction.level_size),

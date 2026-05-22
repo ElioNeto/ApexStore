@@ -3,6 +3,7 @@ use crate::infra::codec::encode;
 use crate::infra::config::StorageConfig;
 use crate::infra::error::{LsmError, Result};
 use crate::storage::block::Block;
+use crate::storage::encryption::{EncryptionConfig, Encryptor};
 use bloomfilter::Bloom;
 use crc32fast::Hasher as Crc32Hasher;
 use lz4_flex::compress_prepend_size;
@@ -12,6 +13,7 @@ use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
 const SST_MAGIC_V2: &[u8; 8] = b"LSMSST03";
+const SST_MAGIC_V2_ENCRYPTED: &[u8; 8] = b"LSMSST04";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockMeta {
@@ -43,14 +45,31 @@ pub struct SstableBuilder {
     record_count: u64,
     path: PathBuf,
     timestamp: u128,
+    encryptor: Encryptor,
 }
 
 impl SstableBuilder {
     pub fn new(path: PathBuf, config: StorageConfig, timestamp: u128) -> Result<Self> {
+        Self::new_with_encryption(path, config, timestamp, &EncryptionConfig::default())
+    }
+
+    pub fn new_with_encryption(
+        path: PathBuf,
+        config: StorageConfig,
+        timestamp: u128,
+        encryption: &EncryptionConfig,
+    ) -> Result<Self> {
         let file = File::create(&path)?;
         let mut writer = BufWriter::new(file);
 
-        writer.write_all(SST_MAGIC_V2)?;
+        let encryptor = Encryptor::new(encryption);
+
+        // Write appropriate magic based on encryption
+        if encryptor.is_enabled() {
+            writer.write_all(SST_MAGIC_V2_ENCRYPTED)?;
+        } else {
+            writer.write_all(SST_MAGIC_V2)?;
+        }
         let current_offset = SST_MAGIC_V2.len() as u64;
 
         let current_block = Block::from_config(&config);
@@ -67,6 +86,7 @@ impl SstableBuilder {
             record_count: 0,
             path,
             timestamp,
+            encryptor,
         })
     }
 
@@ -105,23 +125,31 @@ impl SstableBuilder {
 
         let compressed = compress_prepend_size(&encoded);
 
-        // Calculate CRC32 of the compressed data
+        // If encryption is enabled, encrypt the compressed block data.
+        // The encrypted format is: [12-byte IV][ciphertext + GCM tag]
+        let to_write = if self.encryptor.is_enabled() {
+            self.encryptor.encrypt_block(&compressed)?
+        } else {
+            compressed
+        };
+
+        // Calculate CRC32 of what's actually written to disk
         let mut hasher = Crc32Hasher::new();
-        hasher.update(&compressed);
+        hasher.update(&to_write);
         let crc32 = hasher.finalize();
 
-        self.writer.write_all(&compressed)?;
+        self.writer.write_all(&to_write)?;
         self.writer.write_all(&crc32.to_le_bytes())?;
 
         let block_meta = BlockMeta {
             first_key,
             offset: self.current_offset,
-            size: (compressed.len() as u32) + 4, // includes CRC32 bytes
+            size: (to_write.len() as u32) + 4, // includes CRC32 bytes
             uncompressed_size,
         };
 
         self.block_metas.push(block_meta);
-        self.current_offset += (compressed.len() as u64) + 4;
+        self.current_offset += (to_write.len() as u64) + 4;
 
         self.current_block = Block::from_config(&self.config);
 
@@ -177,9 +205,17 @@ impl SstableBuilder {
 
         let meta_encoded = encode(&meta_block)?;
         let meta_compressed = compress_prepend_size(&meta_encoded);
+
+        // Encrypt meta block if encryption is enabled
+        let meta_to_write = if self.encryptor.is_enabled() {
+            self.encryptor.encrypt_block(&meta_compressed)?
+        } else {
+            meta_compressed
+        };
+
         let meta_offset = self.current_offset;
 
-        self.writer.write_all(&meta_compressed)?;
+        self.writer.write_all(&meta_to_write)?;
 
         let footer_bytes = meta_offset.to_le_bytes();
         self.writer.write_all(&footer_bytes)?;

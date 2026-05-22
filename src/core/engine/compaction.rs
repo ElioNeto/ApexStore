@@ -1,7 +1,7 @@
 use crate::core::engine::EngineOptions;
 use crate::core::iterators::{MergeIterator, StorageIterator};
 use crate::core::key::KeySlice;
-use crate::core::log_record::LogRecord;
+use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::core::table::Table;
 use crate::infra::config::StorageConfig;
 use crate::infra::error::Result;
@@ -46,7 +46,7 @@ pub struct CompactionMetrics {
 ///
 /// let output_dir = dir.path().to_path_buf();
 /// let (new_tables, metrics) = strategy
-///     .execute(vec![table], &options, &storage, &output_dir)
+///     .execute(vec![table], &options, &storage, &output_dir, &[])
 ///     .unwrap();
 ///
 /// assert!(!new_tables.is_empty());
@@ -58,25 +58,46 @@ pub trait CompactionStrategy: Send + Sync {
     fn pick_tables(&self, tables: &[Table], options: &EngineOptions) -> Vec<Vec<usize>>;
 
     /// Execute compaction on the given tables and return new tables.
+    ///
+    /// `range_tombstones` is the list of active range tombstones that should be
+    /// applied during compaction (keys falling within any range tombstone are dropped).
     fn execute(
         &self,
         tables: Vec<Table>,
         options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &Path,
+        range_tombstones: &[RangeTombstone],
     ) -> Result<(Vec<Table>, CompactionMetrics)>;
 
     /// Returns the name of the strategy.
     fn name(&self) -> &'static str;
 }
 
+/// Check if a key falls within any of the given range tombstones.
+fn is_key_in_range_tombstones(key: &[u8], tombstones: &[RangeTombstone]) -> bool {
+    tombstones
+        .iter()
+        .any(|rt| rt.start_key.as_slice() <= key && key < rt.end_key.as_slice())
+}
+
 /// Shared helper for compaction execution logic
+///
+/// NOTE: TTL / `expires_at` metadata is not available at compaction time
+/// because `Table` stores only raw `(Vec<u8>, Vec<u8>)` pairs — the
+/// `LogRecord` metadata is stripped during `flush_memtable_impl()`.
+/// Expired keys are therefore filtered **before** they reach the SSTable
+/// (in `flush_memtable_impl`).  Compaction itself does not re-check TTL.
+///
+/// If TTL-awareness is needed at the compaction layer in the future, the
+/// `Table` / SSTable format will need to carry expiration metadata.
 fn execute_compaction(
     tables: &[Table],
     storage_config: &StorageConfig,
     output_dir: &Path,
     output_prefix: &str,
     level: Option<usize>,
+    range_tombstones: &[RangeTombstone],
 ) -> Result<(Vec<Table>, CompactionMetrics)> {
     let start_time = SystemTime::now();
     let mut metrics = CompactionMetrics {
@@ -102,9 +123,14 @@ fn execute_compaction(
     let mut merge_iter = MergeIterator::new(iters);
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
 
-    // Create output SSTable
+    // Create output SSTable — use encrypted builder if encryption is enabled
     let output_path = output_dir.join(format!("{}_{}.sst", output_prefix, timestamp));
-    let mut builder = SstableBuilder::new(output_path.clone(), storage_config.clone(), timestamp)?;
+    let mut builder = SstableBuilder::new_with_encryption(
+        output_path.clone(),
+        storage_config.clone(),
+        timestamp,
+        &storage_config.encryption,
+    )?;
 
     let mut record_count = 0u64;
     while merge_iter.is_valid() {
@@ -124,6 +150,11 @@ fn execute_compaction(
         // be resolved the same way — dropped).
         // Skip tombstones (empty values) during compaction
         if !value.is_empty() {
+            // Apply range tombstones: skip keys that fall within a range tombstone
+            if is_key_in_range_tombstones(key.as_slice(), range_tombstones) {
+                merge_iter.next();
+                continue;
+            }
             let key_vec: Vec<u8> = key.as_slice().to_vec();
             let record = LogRecord::new(key_vec, value.to_vec());
             builder.add(key.as_ref(), &record)?;
@@ -144,7 +175,8 @@ fn execute_compaction(
         .unwrap_or(0);
 
     // Create new Table from the SSTable
-    let mut new_table = Table::from_sstable_path(&result_path)?;
+    let mut new_table =
+        Table::from_sstable_path(&result_path, Some(&storage_config.encryption))?;
     if let Some(lvl) = level {
         new_table.level = lvl;
     }
@@ -228,8 +260,9 @@ impl CompactionStrategy for SizeTieredCompaction {
         _options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &Path,
+        range_tombstones: &[RangeTombstone],
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
-        execute_compaction(&tables, storage_config, output_dir, "sst", None)
+        execute_compaction(&tables, storage_config, output_dir, "sst", None, range_tombstones)
     }
 
     fn name(&self) -> &'static str {
@@ -298,8 +331,16 @@ impl CompactionStrategy for LeveledCompaction {
         _options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &Path,
+        range_tombstones: &[RangeTombstone],
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
-        execute_compaction(&tables, storage_config, output_dir, "sst_L1", Some(1))
+        execute_compaction(
+            &tables,
+            storage_config,
+            output_dir,
+            "sst_L1",
+            Some(1),
+            range_tombstones,
+        )
     }
 
     fn name(&self) -> &'static str {
@@ -361,16 +402,17 @@ impl CompactionStrategy for LazyLevelingCompaction {
         _options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &Path,
+        range_tombstones: &[RangeTombstone],
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
         // Determine which strategy to use based on table levels
         let has_l0 = tables.iter().any(|t| t.level == 0);
 
         if has_l0 {
             self.size_tiered
-                .execute(tables, _options, storage_config, output_dir)
+                .execute(tables, _options, storage_config, output_dir, range_tombstones)
         } else {
             self.leveled
-                .execute(tables, _options, storage_config, output_dir)
+                .execute(tables, _options, storage_config, output_dir, range_tombstones)
         }
     }
 
@@ -507,6 +549,8 @@ impl Compaction {
             block_cache_size_mb: config.storage.block_cache_size_mb,
             sparse_index_interval: config.storage.sparse_index_interval,
             bloom_false_positive_rate: config.storage.bloom_false_positive_rate,
+            encryption_enabled: config.storage.encryption_enabled,
+            encryption_key_path: config.storage.encryption_key_path.clone(),
         };
 
         Self::new(strategy_type, options, storage_config, output_dir)
@@ -523,6 +567,7 @@ impl Compaction {
         table_indices: &[usize],
         all_tables: &[Table],
         options: &EngineOptions,
+        range_tombstones: &[RangeTombstone],
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
         // Defensive bounds check: skip indices out of range to avoid panics
         // from off-by-one errors in group index selection.
@@ -537,7 +582,7 @@ impl Compaction {
         }
 
         self.strategy
-            .execute(tables, options, &self.storage_config, &self.output_dir)
+            .execute(tables, options, &self.storage_config, &self.output_dir, range_tombstones)
     }
 
     /// Get the strategy name
