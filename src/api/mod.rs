@@ -24,9 +24,20 @@ async fn get_keys(engine: web::Data<LsmEngine>) -> impl Responder {
     }
 }
 
+/// Handler for `GET /metrics`.
+/// Returns Prometheus-formatted engine metrics.
+#[get("/metrics")]
+async fn get_metrics(engine: web::Data<LsmEngine>) -> impl Responder {
+    let metrics = engine.metrics();
+    HttpResponse::Ok()
+        .content_type("text/plain; charset=utf-8")
+        .body(metrics.format_prometheus())
+}
+
 /// Register API routes.
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(get_keys);
+    cfg.service(get_metrics);
 }
 
 /// Start the REST API server.
