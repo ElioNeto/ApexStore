@@ -89,8 +89,17 @@ const WAL_SYNC_INTERVAL: usize = 4;
 const MAX_WAL_RECORD_BYTES: usize = 32 * 1024 * 1024; // 32 MiB
 
 impl WriteAheadLog {
-    pub fn new(dir_path: &std::path::Path) -> Result<Self> {
-        let wal_path = dir_path.join("wal.log");
+    /// Open or create a WAL file for the given column family.
+    ///
+    /// The file is stored as `<dir_path>/wal-{cf}.log`.  For the default
+    /// column family the file is `<dir_path>/wal.log` for backward
+    /// compatibility.
+    pub fn new(dir_path: &std::path::Path, cf: &str) -> Result<Self> {
+        let wal_path = if cf == "default" || cf.is_empty() {
+            dir_path.join("wal.log")
+        } else {
+            dir_path.join(format!("wal-{}.log", cf))
+        };
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -636,7 +645,7 @@ mod tests {
 
     fn create_test_wal() -> (TempDir, WriteAheadLog) {
         let temp_dir = TempDir::new().unwrap();
-        let wal = WriteAheadLog::new(temp_dir.path()).unwrap();
+        let wal = WriteAheadLog::new(temp_dir.path(), "default").unwrap();
         (temp_dir, wal)
     }
 
@@ -818,7 +827,7 @@ mod tests {
         fs::write(&wal_path, &frame).unwrap();
 
         // Now recover via WriteAheadLog
-        let wal = WriteAheadLog::new(temp_dir.path()).unwrap();
+        let wal = WriteAheadLog::new(temp_dir.path(), "default").unwrap();
         let recovered = wal.recover().unwrap();
         assert_eq!(recovered.len(), 1);
 

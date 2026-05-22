@@ -128,7 +128,11 @@ pub(crate) struct EngineCore<C: Cache> {
     memtable_bytes: HashMap<String, usize>,
     version_set: VersionSet<C>,
     compaction: Compaction,
-    wal: WriteAheadLog,
+    /// Per-column-family WALs.  The "default" CF uses `wal.log`;
+    /// other CFs use `wal-{cf}.log`.
+    wals: HashMap<String, WriteAheadLog>,
+    /// Database directory path, used to create new per-CF WALs lazily.
+    dir_path: std::path::PathBuf,
 }
 
 impl<C: Cache> EngineCore<C> {
@@ -156,11 +160,15 @@ impl<C: Cache> EngineCore<C> {
     pub(crate) fn compaction_mut(&mut self) -> &mut Compaction {
         &mut self.compaction
     }
-    pub(crate) fn wal(&self) -> &WriteAheadLog {
-        &self.wal
-    }
-    pub(crate) fn wal_mut(&mut self) -> &mut WriteAheadLog {
-        &mut self.wal
+    /// Get a mutable reference to the WAL for a specific column family.
+    /// Creates a new WAL file if one doesn't exist yet.
+    pub(crate) fn wal_mut(&mut self, cf: &str) -> &mut WriteAheadLog {
+        if !self.wals.contains_key(cf) {
+            let wal = WriteAheadLog::new(&self.dir_path, cf)
+                .expect("Failed to create WAL for CF");
+            self.wals.insert(cf.to_string(), wal);
+        }
+        self.wals.get_mut(cf).unwrap()
     }
 }
 
@@ -361,22 +369,52 @@ impl<C: Cache> Engine<C> {
             sst_dir.clone(),
         );
 
-        let wal = WriteAheadLog::new(dir_path)?;
-        let recovered_records = wal.recover()?;
-
-        // Build EngineCore with all mutable state
         let version_set = VersionSet::new(options.clone(), cache);
 
+        // ── Recover all per-CF WALs ──────────────────────────────────
+        // Start with the default WAL, then discover any wal-{cf}.log files.
         let mut core = EngineCore {
             memtables: HashMap::new(),
             memtable_bytes: HashMap::new(),
             version_set,
             compaction,
-            wal,
+            wals: HashMap::new(),
+            dir_path: dir_path.to_path_buf(),
         };
 
-        // Replay WAL records into the core
-        Self::replay_wal_records_core(&mut core, recovered_records)?;
+        // Create and recover the "default" CF WAL
+        {
+            let default_wal = WriteAheadLog::new(dir_path, "default")?;
+            let records = default_wal.recover()?;
+            core.wals.insert("default".to_string(), default_wal);
+            Self::replay_wal_records_core(&mut core, records)?;
+        }
+
+        // Discover additional per-CF WALs (wal-{cf}.log)
+        if let Ok(entries) = std::fs::read_dir(dir_path) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                // Match wal-{cf}.log where cf != "default"
+                if let Some(cf) = name_str.strip_prefix("wal-").and_then(|s| s.strip_suffix(".log")) {
+                    if cf != "default" && !core.wals.contains_key(cf) {
+                        match WriteAheadLog::new(dir_path, cf) {
+                            Ok(wal) => {
+                                let records = wal.recover()?;
+                                core.wals.insert(cf.to_string(), wal);
+                                Self::replay_wal_records_core(&mut core, records)?;
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Failed to open WAL for CF '{}': {:?}",
+                                    cf, e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         let engine = Self {
             options: options.clone(),
@@ -437,7 +475,7 @@ impl<C: Cache> Engine<C> {
             // Write to WAL first (before modifying memtable) for crash safety
             let mut record = LogRecord::new(key.clone(), value.clone());
             record.column_family = Some(cf.to_string());
-            core.wal_mut().write_record(&record)?;
+            core.wal_mut(cf).write_record(&record)?;
 
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
@@ -510,7 +548,7 @@ impl<C: Cache> Engine<C> {
             // Write tombstone to WAL first (before modifying memtable) for crash safety
             let mut record = LogRecord::tombstone(key.clone());
             record.column_family = Some(cf.to_string());
-            core.wal_mut().write_record(&record)?;
+            core.wal_mut(cf).write_record(&record)?;
 
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
@@ -883,11 +921,10 @@ impl<C: Cache> Engine<C> {
                 })?;
                 *bytes = 0;
 
-                // ✅ FIX issue #107: Clear WAL while we hold the core lock
-                // ✅ FIX issue #122: Only remove records for the flushed CF,
-                // not the entire WAL (other CFs' data must survive).
-                core.wal_mut()
-                    .retain(|r| r.column_family.as_deref() != Some(cf))?;
+                // ✅ Per-CF WAL: clear the flushed CF's WAL directly
+                // instead of calling retain() on a global WAL (which was O(N)
+                // per flush).  Each CF has its own WAL file, so clear() is O(1).
+                core.wal_mut(cf).clear()?;
 
                 tracing::info!(
                     target: "apexstore::engine",
@@ -1117,12 +1154,18 @@ impl<C: Cache> Engine<C> {
         }
         drop(handle_opt);
 
-        // 3. Sync the WAL so all buffered data is durably on disk.
-        //    The WAL is the sole persistence mechanism across restarts.
+        // 3. Sync all per-CF WALs so all buffered data is durably on disk.
+        //    The WALs are the sole persistence mechanism across restarts.
         {
             let core = self.core.lock();
-            if let Err(e) = core.wal().sync() {
-                tracing::error!("Engine::close(): failed to sync WAL: {:?}", e);
+            for (cf, wal) in core.wals.iter() {
+                if let Err(e) = wal.sync() {
+                    tracing::error!(
+                        "Engine::close(): failed to sync WAL for CF '{}': {:?}",
+                        cf,
+                        e
+                    );
+                }
             }
         }
     }
@@ -1148,8 +1191,13 @@ impl<C: Cache> Engine<C> {
             stats.mem_kb = core.memtable_bytes().get(cf).copied().unwrap_or(0) / 1024;
         }
 
-        // WAL stats
-        stats.wal_kb = core.wal().size()? as usize / 1024;
+        // WAL stats — sum across all per-CF WALs
+        stats.wal_kb = core
+            .wals
+            .values()
+            .filter_map(|wal| wal.size().ok())
+            .sum::<u64>() as usize
+            / 1024;
 
         Ok(stats)
     }
@@ -1175,7 +1223,12 @@ impl<C: Cache> Engine<C> {
             }
         }
 
-        combined.wal_kb = core.wal().size()? as usize / 1024;
+        combined.wal_kb = core
+            .wals
+            .values()
+            .filter_map(|wal| wal.size().ok())
+            .sum::<u64>() as usize
+            / 1024;
 
         Ok(combined)
     }
@@ -1239,7 +1292,7 @@ impl<C: Cache> Engine<C> {
                     record
                 })
                 .collect();
-            core.wal_mut().write_batch(&records)?;
+            core.wal_mut(cf).write_batch(&records)?;
 
             // Apply to memtable
             for (key, value) in items {
@@ -1311,7 +1364,7 @@ impl<C: Cache> Engine<C> {
                     record
                 })
                 .collect();
-            core.wal_mut().write_batch(&records)?;
+            core.wal_mut(cf).write_batch(&records)?;
 
             // Apply to memtable
             for key in keys {
@@ -1395,17 +1448,15 @@ impl<C: Cache> Engine<C> {
     /// Create a point-in-time consistent snapshot by copying all engine data
     /// (SSTable files and WAL) to `backup_dir`.
     pub fn create_snapshot(&self, backup_dir: &Path) -> Result<()> {
-        // Save WAL before flushing (flush clears WAL)
-        let wal_saved = {
+        // Save WALs before flushing — flush clears per-CF WALs.
+        let saved_wals: Vec<(String, Vec<u8>)> = {
             let core = self.core.lock();
-            let wal_path = core.wal().path.clone();
-            if wal_path.exists() {
-                let saved = self._sst_dir.join("__snapshot_wal_save.log");
-                std::fs::copy(&wal_path, &saved).ok();
-                Some(saved)
-            } else {
-                None
-            }
+            core.wals
+                .iter()
+                .filter_map(|(cf, wal)| {
+                    std::fs::read(&wal.path).ok().map(|data| (cf.clone(), data))
+                })
+                .collect()
         };
 
         // Flush all memtables to in-memory tables (consistent state)
@@ -1437,16 +1488,24 @@ impl<C: Cache> Engine<C> {
             }
         }
 
-        // Copy WAL (saved version before flush, which has all records)
-        if let Some(saved_wal) = &wal_saved {
-            if saved_wal.exists() {
-                let dest = backup_dir.join("wal.log");
-                std::fs::copy(saved_wal, &dest)?;
-                std::fs::remove_file(saved_wal).ok();
+        // Copy saved WALs into the backup directory.
+        // Always write at least an empty wal.log so list_snapshots can
+        // identify this directory as a valid snapshot.
+        let has_any_data = saved_wals.iter().any(|(_, data)| !data.is_empty());
+        if has_any_data {
+            for (cf, data) in &saved_wals {
+                if data.is_empty() {
+                    continue;
+                }
+                let dest = if cf == "default" || cf.is_empty() {
+                    backup_dir.join("wal.log")
+                } else {
+                    backup_dir.join(format!("wal-{}.log", cf))
+                };
+                std::fs::write(&dest, data)?;
             }
         } else {
-            let dest = backup_dir.join("wal.log");
-            std::fs::write(&dest, b"")?;
+            std::fs::write(backup_dir.join("wal.log"), b"")?;
         }
 
         Ok(())
@@ -1537,6 +1596,12 @@ impl<C: Cache> Engine<C> {
             } else if path.file_name().is_some_and(|n| n == "wal.log") {
                 let dest = data_dir.join("wal.log");
                 std::fs::copy(&path, &dest)?;
+            } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                // Copy per-CF WAL files: wal-{cf}.log
+                if name.starts_with("wal-") && name.ends_with(".log") {
+                    let dest = data_dir.join(name);
+                    std::fs::copy(&path, &dest)?;
+                }
             }
         }
 
