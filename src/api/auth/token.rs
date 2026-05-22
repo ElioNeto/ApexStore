@@ -4,6 +4,7 @@ use super::AuthError;
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// API token with metadata
@@ -102,6 +103,20 @@ pub fn generate_token() -> String {
     let random_bytes: Vec<u8> = (0..32).map(|_| rng.gen::<u8>()).collect();
 
     format!("apx_{}", general_purpose::STANDARD.encode(&random_bytes))
+}
+
+impl FromStr for Permission {
+    type Err = AuthError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "read" | "r" => Ok(Permission::Read),
+            "write" | "w" => Ok(Permission::Write),
+            "delete" | "d" => Ok(Permission::Delete),
+            "admin" | "a" => Ok(Permission::Admin),
+            _ => Err(AuthError::InvalidPermission(s.to_string())),
+        }
+    }
 }
 
 /// Hash token using SHA-256

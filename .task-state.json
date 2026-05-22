@@ -440,6 +440,132 @@
         "cargo test e cargo clippy passam"
       ],
       "fetched_body": true
+    },
+    {
+      "number": 184,
+      "priority": "high",
+      "title": "[BUG] Snapshot restore may lose data when all data was flushed to SSTables",
+      "status": "in_progress",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "create_snapshot() flushes all memtables to SSTables before snapshotting",
+        "create_snapshot() writes snapshot.manifest mapping CF to SSTable files",
+        "create_snapshot() copies all .sst files from sstables directory",
+        "restore_snapshot() copies files and loads SSTables into VersionSet",
+        "restore_snapshot() writes disk.sst.manifest for engine startup",
+        "Engine startup (new_generic) discovers SSTables from disk.sst.manifest",
+        "cargo test e cargo clippy passam"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 181,
+      "priority": "high",
+      "title": "[BUG] SSTable count mismatch — engine reports 5 files but 19 exist on disk",
+      "status": "in_progress",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "atomic_replace() returns paths of removed tables for cleanup",
+        "Compact_cf_core deletes orphaned SSTable files after atomic_replace",
+        "Background compaction Phase 3 deletes orphaned SSTable files",
+        "reconcile_tables() method added to Engine for manual cleanup",
+        "Old SSTable files properly removed from disk after compaction",
+        "cargo test e cargo clippy passam"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 179,
+      "priority": "medium",
+      "title": "[BUG] CLI has no subcommand to create/manage API tokens",
+      "status": "completed",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "CLI has `token create`, `token list`, `token revoke` subcommands",
+        "FromStr implementation for Permission with support for read/write/delete/admin",
+        "Tokens persisted in the engine under __token: prefix",
+        "cargo clippy --all-targets --all-features -- -D warnings passes",
+        "cargo test --all-features --workspace passes (153 lib tests + 23 integration tests pass)"
+      ],
+      "fetched_body": true
+    }
+  ],
+  "todos": [
+    {
+      "id": "T25",
+      "description": "Issue #179: Add token create/list/revoke subcommands to CLI with engine persistence",
+      "status": "done",
+      "files": [
+        "src/api/auth/token.rs",
+        "src/api/auth/error.rs",
+        "src/api/auth/middleware.rs",
+        "src/api/mod.rs",
+        "src/cli/mod.rs",
+        "tests/randomized_competitive.rs",
+        "tests/stress_log_simulation.rs",
+        "src/core/engine/mod.rs"
+      ],
+      "depends_on": [],
+      "notes": "Added: (1) Permission::from_str for parsing permissions from CLI args; (2) InvalidPermission variant to AuthError; (3) Token subcommand group (create/list/revoke); (4) Token persistence using engine with __token: prefix; (5) Fixed pre-existing clippy issues in engine/mod.rs, randomized_competitive.rs, stress_log_simulation.rs; (6) Fixed pre-existing type mismatch in api/mod.rs with bearer middleware"
+    },
+    {
+      "id": "T184_1",
+      "description": "Issue #184: Modify create_snapshot() to flush memtables, persist tables, write snapshot.manifest, copy all .sst files",
+      "status": "done",
+      "files": ["src/core/engine/mod.rs"],
+      "depends_on": [],
+      "notes": "create_snapshot() now writes snapshot.manifest mapping CFs to SSTable filenames, and copies orphaned .sst files from sst_dir"
+    },
+    {
+      "id": "T184_2",
+      "description": "Issue #184: Modify restore_snapshot() to read manifest, load SSTables into VersionSet, write disk.sst.manifest",
+      "status": "done",
+      "files": ["src/core/engine/mod.rs"],
+      "depends_on": ["T184_1"],
+      "notes": "restore_snapshot() now reads snapshot.manifest, registers SSTables in the running engine, and writes disk.sst.manifest"
+    },
+    {
+      "id": "T184_3",
+      "description": "Issue #184: Add discover_sstables_from_disk() to engine startup (new_generic) for SSTable discovery after WAL replay",
+      "status": "done",
+      "files": ["src/core/engine/mod.rs"],
+      "depends_on": ["T184_2"],
+      "notes": "new_generic() now calls discover_sstables_from_disk() after WAL replay to load SSTables from disk"
+    },
+    {
+      "id": "T181_1",
+      "description": "Issue #181: Modify atomic_replace() in VersionSet to return Vec<PathBuf> of removed table paths",
+      "status": "done",
+      "files": ["src/core/engine/version_set.rs"],
+      "depends_on": [],
+      "notes": "atomic_replace() now collects and returns the paths of old SSTable files that were removed"
+    },
+    {
+      "id": "T181_2",
+      "description": "Issue #181: Update compact_cf_core and background compaction to delete orphaned SSTable files after atomic_replace",
+      "status": "done",
+      "files": ["src/core/engine/mod.rs"],
+      "depends_on": ["T181_1"],
+      "notes": "Both sync and background compaction now delete old SSTable files from disk after atomic_replace"
+    },
+    {
+      "id": "T181_3",
+      "description": "Issue #181: Add reconcile_tables() method to Engine to clean up orphaned SSTable files",
+      "status": "done",
+      "files": ["src/core/engine/mod.rs"],
+      "depends_on": ["T181_2"],
+      "notes": "reconcile_tables() scans sst_dir and removes .sst files not tracked by VersionSet"
+    },
+    {
+      "id": "T184_T181_TEST",
+      "description": "Run cargo test and cargo clippy to verify all changes compile and pass",
+      "status": "pending",
+      "files": [],
+      "depends_on": ["T184_1", "T184_2", "T184_3", "T181_1", "T181_2", "T181_3"],
+      "notes": "cargo test --all-features --workspace must pass, cargo clippy must pass"
     }
   ]
 }

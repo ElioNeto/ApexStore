@@ -344,8 +344,19 @@ fn compact_cf_core<C: Cache>(
         let (new_tables, metrics) =
             core.compaction_mut()
                 .compact(indices, &tables, options, &rt)?;
-        core.version_set_mut()
+        let removed_paths = core.version_set_mut()
             .atomic_replace(cf, indices, new_tables);
+        // Delete orphaned SSTable files from disk
+        for path in &removed_paths {
+            if path.exists() {
+                if let Err(e) = std::fs::remove_file(path) {
+                    tracing::warn!(
+                        "compact_cf_core: failed to remove orphaned SSTable {:?}: {:?}",
+                        path, e
+                    );
+                }
+            }
+        }
         all_metrics.bytes_read += metrics.bytes_read;
         all_metrics.bytes_written += metrics.bytes_written;
         all_metrics.files_merged += metrics.files_merged;
@@ -480,6 +491,10 @@ impl<C: Cache> Engine<C> {
                 }
             }
         }
+
+        // ── Discover SSTables from disk (for snapshot restore recovery) ──
+        // Check for a disk.sst.manifest written by restore_snapshot().
+        Self::discover_sstables_from_disk(&mut core, dir_path, &sst_dir)?;
 
         let engine = Self {
             options: options.clone(),
@@ -1364,8 +1379,19 @@ impl<C: Cache> Engine<C> {
                 // ── Phase 3: Re-acquire lock and apply results ──
                 let mut core = core.lock();
                 for (cf, group_indices, new_tables) in results {
-                    core.version_set_mut()
+                    let removed_paths = core.version_set_mut()
                         .atomic_replace(&cf, &group_indices, new_tables);
+                    // Delete orphaned SSTable files from disk
+                    for path in &removed_paths {
+                        if path.exists() {
+                            if let Err(e) = std::fs::remove_file(path) {
+                                tracing::warn!(
+                                    "background compaction: failed to remove orphaned SSTable {:?}: {:?}",
+                                    path, e
+                                );
+                            }
+                        }
+                    }
                 }
             }));
 
@@ -1839,7 +1865,6 @@ impl<C: Cache> Engine<C> {
             let tables = core.version_set().get_tables(&cf);
             let mut cf_filenames = Vec::new();
             for (i, table) in tables.iter().enumerate() {
-                let fname_string;
                 let fname = if let Some(ref path) = table.path {
                     path.file_name()
                         .map(|n| n.to_os_string())
@@ -1849,7 +1874,7 @@ impl<C: Cache> Engine<C> {
                 } else {
                     std::ffi::OsString::from(format!("{}_{}.sst", cf, i))
                 };
-                fname_string = fname.to_string_lossy().to_string();
+                let fname_string = fname.to_string_lossy().to_string();
                 let dest = backup_dir.join(&fname_string);
                 if let Some(ref path) = table.path {
                     std::fs::copy(path, &dest)?;
@@ -1993,6 +2018,9 @@ impl<C: Cache> Engine<C> {
         std::fs::create_dir_all(data_dir)?;
         std::fs::create_dir_all(sst_dir)?;
 
+        // Track which SSTable filenames we copy from the snapshot
+        let mut copied_sst_files: Vec<String> = Vec::new();
+
         for entry in std::fs::read_dir(snapshot_dir)? {
             let entry = entry?;
             let path = entry.path();
@@ -2001,8 +2029,10 @@ impl<C: Cache> Engine<C> {
             }
             if path.extension().is_some_and(|ext| ext == "sst") {
                 let Some(fname) = path.file_name() else { continue; };
-                let dest = sst_dir.join(fname);
+                let fname_str = fname.to_string_lossy().to_string();
+                let dest = sst_dir.join(&fname_str);
                 std::fs::copy(&path, &dest)?;
+                copied_sst_files.push(fname_str);
             } else if path.file_name().is_some_and(|n| n == "wal.log") {
                 let dest = data_dir.join("wal.log");
                 std::fs::copy(&path, &dest)?;
@@ -2015,7 +2045,167 @@ impl<C: Cache> Engine<C> {
             }
         }
 
+        // Load the manifest and register SSTables in the engine's VersionSet
+        let manifest = Self::load_snapshot_manifest(snapshot_dir)?;
+
+        // Write the disk manifest for new_generic() to discover on startup
+        if let Some(ref m) = manifest {
+            let disk_manifest_path = data_dir.join("disk.sst.manifest");
+            let json = serde_json::to_string(m)
+                .map_err(|e| crate::LsmError::InvalidArgument(
+                    format!("Failed to serialize disk manifest: {}", e)
+                ))?;
+            std::fs::write(&disk_manifest_path, &json)?;
+        }
+
+        // Register SSTables in the running engine's VersionSet
+        if let Some(m) = manifest {
+            let mut core = self.core.lock();
+            let sst_dir = sst_dir.clone();
+            let enc = &self.options.encryption;
+            for (cf, filenames) in &m.column_families {
+                for fname in filenames {
+                    let sst_path = sst_dir.join(fname);
+                    if sst_path.exists() {
+                        match Table::from_sstable_path(&sst_path, Some(enc)) {
+                            Ok(table) => {
+                                core.version_set_mut().add_table(cf, table);
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "restore_snapshot: failed to load SSTable {} for CF {}: {:?}",
+                                    fname, cf, e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
+    }
+
+    /// Discover SSTables on disk and load them into the VersionSet.
+    ///
+    /// Called during engine startup (`new_generic`) after WAL replay.
+    /// First checks for a `disk.sst.manifest` written by `restore_snapshot()`.
+    /// If no manifest exists, falls back to loading all `.sst` files from the
+    /// sst_dir into the "default" column family (legacy behavior).
+    fn discover_sstables_from_disk(
+        core: &mut EngineCore<C>,
+        data_dir: &Path,
+        sst_dir: &Path,
+    ) -> Result<()> {
+        let enc = core.encryption.clone();
+        let manifest_path = data_dir.join("disk.sst.manifest");
+        if manifest_path.exists() {
+            // Use the manifest written by restore_snapshot()
+            let json_str = std::fs::read_to_string(&manifest_path)
+                .map_err(|e| crate::LsmError::InvalidArgument(
+                    format!("Failed to read disk manifest: {}", e)
+                ))?;
+            let manifest: SnapshotManifest = serde_json::from_str(&json_str)
+                .map_err(|e| crate::LsmError::InvalidArgument(
+                    format!("Failed to parse disk manifest: {}", e)
+                ))?;
+            for (cf, filenames) in &manifest.column_families {
+                for fname in filenames {
+                    let sst_path = sst_dir.join(fname);
+                    if sst_path.exists() {
+                        match Table::from_sstable_path(&sst_path, Some(&enc)) {
+                            Ok(table) => {
+                                core.version_set_mut().add_table(cf, table);
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "discover_sstables: failed to load {} for CF {}: {:?}",
+                                    fname, cf, e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Fallback: scan for .sst files and add them to default CF
+            if let Ok(entries) = std::fs::read_dir(sst_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|ext| ext == "sst") {
+                        if let Some(fname) = path.file_name() {
+                            let fname_str = fname.to_string_lossy();
+                            tracing::info!(
+                                "discover_sstables: loading orphaned SSTable {} into default CF",
+                                fname_str
+                            );
+                            match Table::from_sstable_path(&path, Some(&enc)) {
+                                Ok(table) => {
+                                    core.version_set_mut().add_table("default", table);
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "discover_sstables: failed to load {}: {:?}",
+                                        fname_str, e
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Reconcile in-memory table state with `.sst` files on disk.
+    ///
+    /// 1. Lists all `.sst` files in the sst_dir.
+    /// 2. Compares them with the paths tracked by the VersionSet.
+    /// 3. Removes orphaned `.sst` files that are no longer referenced.
+    ///
+    /// Returns the number of orphaned files removed.
+    pub fn reconcile_tables(&self) -> Result<usize> {
+        let mut removed = 0usize;
+
+        // Collect all paths tracked by VersionSet
+        let tracked_paths: std::collections::HashSet<PathBuf> = {
+            let core = self.core.lock();
+            let mut paths = std::collections::HashSet::new();
+            for cf in core.version_set().column_families() {
+                for table in core.version_set().get_tables(&cf) {
+                    if let Some(ref p) = table.path {
+                        paths.insert(p.clone());
+                    }
+                }
+            }
+            paths
+        };
+
+        // Scan sst_dir for orphaned .sst files
+        if let Ok(entries) = std::fs::read_dir(&self._sst_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "sst")
+                    && !tracked_paths.contains(&path)
+                {
+                    if let Err(e) = std::fs::remove_file(&path) {
+                        tracing::warn!(
+                            "reconcile_tables: failed to remove orphaned SSTable {:?}: {:?}",
+                            path, e
+                        );
+                    } else {
+                        tracing::info!(
+                            "reconcile_tables: removed orphaned SSTable {:?}",
+                            path
+                        );
+                        removed += 1;
+                    }
+                }
+            }
+        }
+
+        Ok(removed)
     }
 }
 
@@ -3534,8 +3724,10 @@ mod tests {
         config.core.dir_path = dir.path().to_path_buf();
 
         // Build engine with a default TTL and use set()
-        let mut options = EngineOptions::default();
-        options.default_ttl = Some(Duration::from_millis(1));
+        let options = EngineOptions {
+            default_ttl: Some(Duration::from_millis(1)),
+            ..Default::default()
+        };
         let engine = Engine::new_generic(
             options,
             crate::storage::cache::GlobalBlockCache::new(100, 4096),

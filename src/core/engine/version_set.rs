@@ -266,6 +266,9 @@ impl<C: Cache> VersionSet<C> {
 
     /// Atomically replace specific tables with new ones.
     ///
+    /// Returns the list of old SSTable file paths that were removed, so the
+    /// caller can clean up orphaned `.sst` files from disk.
+    ///
     /// New tables are inserted at the position of the first (minimum-index) removed table,
     /// preserving the invariant that tables in the Vec are ordered oldest-first.
     /// This prevents stale-data reads when flushes add tables during three-phase
@@ -277,7 +280,8 @@ impl<C: Cache> VersionSet<C> {
         cf: &str,
         indices: &[usize],
         new_tables: Vec<crate::core::table::Table>,
-    ) {
+    ) -> Vec<std::path::PathBuf> {
+        let mut removed_paths = Vec::new();
         if let Some(tables) = self.tables.get_mut(cf) {
             if new_tables.is_empty() {
                 // Only removing — no insertion needed
@@ -285,10 +289,22 @@ impl<C: Cache> VersionSet<C> {
                 sorted_indices.sort_unstable_by(|a, b| b.cmp(a));
                 for &idx in &sorted_indices {
                     if idx < tables.len() {
+                        if let Some(ref path) = tables[idx].path {
+                            removed_paths.push(path.clone());
+                        }
                         tables.remove(idx);
                     }
                 }
-                return;
+                return removed_paths;
+            }
+
+            // Record old table paths before removal
+            for &idx in indices {
+                if idx < tables.len() {
+                    if let Some(ref path) = tables[idx].path {
+                        removed_paths.push(path.clone());
+                    }
+                }
             }
 
             // The insertion point: where the first (oldest) removed table was
@@ -312,6 +328,7 @@ impl<C: Cache> VersionSet<C> {
             let insert_at = insert_at.min(tables.len());
             let _ = tables.splice(insert_at..insert_at, new_tables);
         }
+        removed_paths
     }
 
     /// Return statistics about the tables in a column family.

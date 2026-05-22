@@ -2,10 +2,12 @@ pub mod auth;
 pub mod config;
 pub mod rate_limiter;
 
+pub use self::auth::TokenManager;
 pub use self::config::ServerConfig;
 use self::rate_limiter::{RateLimiter, RateLimiterState};
 use crate::LsmEngine;
 use actix_web::{delete, get, post, put, web, App, HttpResponse, HttpServer, Responder};
+use actix_web_httpauth::middleware::HttpAuthentication;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -242,13 +244,18 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     let engine_data = web::Data::from(engine.clone());
     let rate_limiter_state =
         web::Data::new(RateLimiterState::new(config.rate_limit_requests_per_minute));
+    let token_manager = web::Data::new(TokenManager::new());
+    let auth_enabled = web::Data::new(config.auth.enabled);
 
     let mut server_builder = HttpServer::new(move || {
         App::new()
             .wrap(RateLimiter)
             .wrap(actix_web::middleware::Logger::default())
+            .wrap(HttpAuthentication::bearer(self::auth::bearer_validator))
             .app_data(engine_data.clone())
             .app_data(rate_limiter_state.clone())
+            .app_data(token_manager.clone())
+            .app_data(auth_enabled.clone())
             .configure(configure)
     })
     .max_connections(config.max_connections)

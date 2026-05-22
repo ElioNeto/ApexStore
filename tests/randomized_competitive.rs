@@ -28,8 +28,10 @@ const OPS_COUNT: usize = 10_000;
 /// Number of concurrent threads for parallel tests
 const CONCURRENT_THREADS: usize = 8;
 
-/// Maximum key/value size for fuzzing
+/// Maximum key/value size for fuzzing (unused currently, kept for reference)
+#[allow(dead_code)]
 const MAX_KEY_SIZE: usize = 4096;
+#[allow(dead_code)]
 const MAX_VAL_SIZE: usize = 65536;
 
 /// Small memtable to force flushes
@@ -90,7 +92,7 @@ fn test_random_ops_linearizability() {
                             got,
                             expected,
                             "LINEARIZABILITY VIOLATION: read returned wrong value for key {:?}",
-                            String::from_utf8_lossy(&key)
+                            String::from_utf8_lossy(key)
                         );
                     }
                 } else {
@@ -184,7 +186,7 @@ fn test_concurrent_random_ops() {
             let mut local_keys: Vec<Vec<u8>> = Vec::new();
             let mut errors = 0u64;
 
-            for i in 0..ops_per_thread {
+            for _i in 0..ops_per_thread {
                 match rng.gen_range(0..100) {
                     0..=59 => {
                         let len: usize = rng.gen_range(1..32);
@@ -223,11 +225,11 @@ fn test_concurrent_random_ops() {
     }
 
     let mut total_errors = 0u64;
-    let mut total_keys = 0usize;
+    let mut _total_keys = 0usize;
     for h in handles {
         let (tid, err, keys) = h.join().unwrap();
         total_errors += err;
-        total_keys += keys;
+        _total_keys += keys;
         eprintln!(
             "    Thread {}: {} ops done, {} errors, {} keys left",
             tid, ops_per_thread, err, keys
@@ -632,7 +634,7 @@ fn test_performance_baseline() {
 
     // Sequential read throughput
     let start = Instant::now();
-    for i in 0..count {
+    for _i in 0..count {
         let key = format!("perf_{}", rng.gen_range(0..count));
         let _ = engine.get(key.as_bytes());
     }
@@ -641,7 +643,7 @@ fn test_performance_baseline() {
 
     // Sequential delete throughput
     let start = Instant::now();
-    for i in 0..count {
+    for _i in 0..count {
         let key = format!("perf_{}", rng.gen_range(0..count));
         let _ = engine.delete(key.as_bytes());
     }
@@ -705,7 +707,6 @@ fn test_performance_baseline() {
 #[test]
 fn test_competitive_gap_analysis() {
     let (_dir, engine) = create_engine();
-    let mut rng = rand::thread_rng();
 
     eprintln!("\n  ┌─────────────────────────────────────────────────────────────┐");
     eprintln!("  │  COMPETITIVE GAP ANALYSIS                                  │");

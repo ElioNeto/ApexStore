@@ -11,10 +11,12 @@
 //!   apexstore-cli --db <PATH> flush
 //!   apexstore-cli --db <PATH> compact
 
+use crate::api::auth::token::{ApiToken, Permission};
+use crate::api::auth::TokenManager;
 use crate::core::engine::{Engine, MAX_SCAN_LIMIT};
 use crate::infra::config::LsmConfig;
 use crate::storage::cache::GlobalBlockCache;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::sync::Arc;
 
 type CliEngine = Engine<Arc<GlobalBlockCache>>;
@@ -35,6 +37,9 @@ struct Cli {
     #[command(subcommand)]
     command: Command,
 }
+
+/// Token prefix used for storing API tokens in the engine
+const TOKEN_PREFIX: &str = "__token:";
 
 #[derive(Parser, Debug)]
 enum Command {
@@ -102,6 +107,29 @@ enum Command {
     Flush,
     /// Trigger compaction
     Compact,
+    /// Manage API tokens
+    #[command(subcommand)]
+    Token(TokenCommand),
+}
+
+/// Token management subcommands
+#[derive(Subcommand, Debug)]
+enum TokenCommand {
+    /// Create a new API token with optional permissions
+    Create {
+        /// Human-readable name for the token
+        name: String,
+        /// Permissions to grant (default: read). Options: read, write, delete, admin
+        #[arg(short, long, default_values = &["read"])]
+        permissions: Vec<String>,
+    },
+    /// List all API tokens
+    List,
+    /// Revoke (delete) an API token by its ID
+    Revoke {
+        /// Token ID to revoke
+        id: String,
+    },
 }
 
 pub fn main() -> crate::infra::error::Result<()> {
@@ -136,6 +164,7 @@ pub fn main() -> crate::infra::error::Result<()> {
         Command::Stats => cmd_stats(&engine),
         Command::Flush => cmd_flush(&engine),
         Command::Compact => cmd_compact(&engine),
+        Command::Token(sub) => cmd_token(&engine, sub),
     }
 }
 
@@ -276,4 +305,112 @@ fn cmd_compact(engine: &CliEngine) -> crate::infra::error::Result<()> {
         println!("(nothing to compact)");
     }
     Ok(())
+}
+
+// ── Token command implementations ──────────────────────────────────────────
+
+/// Load all tokens from the engine (persisted under `__token:*` keys).
+fn load_tokens_from_engine(engine: &CliEngine) -> crate::infra::error::Result<Vec<ApiToken>> {
+    let (results, _cursor) =
+        engine.search_prefix(TOKEN_PREFIX, None, MAX_SCAN_LIMIT)?;
+    let mut tokens = Vec::new();
+    for (_key, value) in &results {
+        if let Ok(token) = serde_json::from_slice::<ApiToken>(value) {
+            tokens.push(token);
+        }
+    }
+    Ok(tokens)
+}
+
+/// Save a list of tokens to the engine (replaces all existing token entries).
+fn save_tokens_to_engine(
+    engine: &CliEngine,
+    tokens: &[ApiToken],
+) -> crate::infra::error::Result<()> {
+    // Remove all existing __token:* keys
+    let existing = load_tokens_from_engine(engine)?;
+    for token in &existing {
+        let key = format!("{}{}", TOKEN_PREFIX, token.id);
+        engine.delete_cf("default", key.as_bytes())?;
+    }
+    // Write all tokens
+    for token in tokens {
+        let key = format!("{}{}", TOKEN_PREFIX, token.id);
+        let value = serde_json::to_vec(token)?;
+        engine.put_cf("default", key.as_bytes().to_vec(), value)?;
+    }
+    Ok(())
+}
+
+fn cmd_token(engine: &CliEngine, sub: TokenCommand) -> crate::infra::error::Result<()> {
+    match sub {
+        TokenCommand::Create { name, permissions } => {
+            let parsed_perms: Vec<Permission> = permissions
+                .iter()
+                .map(|p| {
+                    p.parse::<Permission>()
+                        .map_err(|e| crate::infra::error::LsmError::InvalidArgument(e.to_string()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let manager = TokenManager::new();
+            let (raw_token, api_token) = manager
+                .create_token(name, None, parsed_perms)
+                .map_err(|e| crate::infra::error::LsmError::InvalidArgument(e.to_string()))?;
+
+            // Persist the token
+            let mut tokens = load_tokens_from_engine(engine)?;
+            tokens.push(api_token.clone());
+            save_tokens_to_engine(engine, &tokens)?;
+
+            println!("Token created successfully!");
+            println!("  ID:    {}", api_token.id);
+            println!("  Name:  {}", api_token.name);
+            println!("  Token: {}", raw_token);
+            println!();
+            println!("⚠  Store this token securely. It will not be shown again.");
+            Ok(())
+        }
+        TokenCommand::List => {
+            let tokens = load_tokens_from_engine(engine)?;
+            if tokens.is_empty() {
+                println!("No tokens found.");
+                return Ok(());
+            }
+            println!("{:<38} {:<20} {:<10} {:<20}", "ID", "Name", "Perms", "Created");
+            println!("{}", "-".repeat(90));
+            for token in &tokens {
+                let perms_str: Vec<String> = token
+                    .permissions
+                    .iter()
+                    .map(|p| format!("{:?}", p))
+                    .collect();
+                let epoch_secs = token.created_at / 1_000_000_000;
+                // Format as a simple date string
+                let created = chrono::DateTime::from_timestamp(epoch_secs as i64, 0)
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .unwrap_or_else(|| epoch_secs.to_string());
+                println!(
+                    "{:<38} {:<20} {:<10} {:<20}",
+                    token.id,
+                    token.name,
+                    perms_str.join(","),
+                    created,
+                );
+            }
+            Ok(())
+        }
+        TokenCommand::Revoke { id } => {
+            let mut tokens = load_tokens_from_engine(engine)?;
+            let before = tokens.len();
+            tokens.retain(|t| t.id != id);
+            if tokens.len() == before {
+                println!("Token not found: {}", id);
+                return Ok(());
+            }
+            save_tokens_to_engine(engine, &tokens)?;
+            println!("Token revoked: {}", id);
+            Ok(())
+        }
+    }
 }

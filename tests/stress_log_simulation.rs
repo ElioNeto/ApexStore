@@ -18,6 +18,7 @@ const LOG_COUNT: usize = 50_000;
 const SMALL_MEMTABLE: usize = 65_536; // 64KB — forces ~800 flushes
 const LEVELS: &[&str] = &["INFO", "WARN", "ERROR", "DEBUG", "TRACE"];
 
+#[allow(dead_code)]
 struct Stats {
     label: &'static str,
     duration: Duration,
