@@ -5,16 +5,11 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 /// The role of this node in replication topology.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum ReplicationRole {
+    #[default]
     Primary,
     Replica,
-}
-
-impl Default for ReplicationRole {
-    fn default() -> Self {
-        Self::Primary
-    }
 }
 
 impl std::fmt::Display for ReplicationRole {

@@ -9,6 +9,10 @@
 
 use std::collections::HashMap;
 
+type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+type DataMap = HashMap<Vec<u8>, (Vec<u8>, u64)>;
+type DataEntries = Vec<(Vec<u8>, Vec<u8>, u64)>;
+
 /// The direction of synchronisation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SyncDirection {
@@ -51,12 +55,12 @@ pub trait RemoteBackend: Send + Sync {
     /// Fetch all key-value pairs with timestamps from the remote.
     fn fetch_all(
         &self,
-    ) -> Result<HashMap<Vec<u8>, (Vec<u8>, u64)>, Box<dyn std::error::Error + Send + Sync>>;
+    ) -> BoxResult<DataMap>;
     /// Push key-value pairs to the remote.
     fn push(
         &self,
-        entries: &[(Vec<u8>, Vec<u8>, u64)],
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+        entries: &DataEntries,
+    ) -> BoxResult<()>;
 }
 
 /// Engine trait for interacting with the local KV store.
@@ -64,12 +68,12 @@ pub trait LocalEngine: Send + Sync {
     /// Return all key-value pairs with timestamps.
     fn all_entries(
         &self,
-    ) -> Result<Vec<(Vec<u8>, Vec<u8>, u64)>, Box<dyn std::error::Error + Send + Sync>>;
+    ) -> BoxResult<DataEntries>;
     /// Apply a set of key-value pairs (upsert).
     fn apply_batch(
         &self,
-        entries: &[(Vec<u8>, Vec<u8>, u64)],
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+        entries: &DataEntries,
+    ) -> BoxResult<()>;
 }
 
 /// Orchestrates diff computation and bi-directional sync between a local
@@ -89,7 +93,7 @@ impl DataSync {
     ///
     /// Returns a vector of [`DiffEntry`] for keys that exist in one side but
     /// not the other, or that have different values/timestamps.
-    pub fn diff(&self) -> Result<Vec<DiffEntry>, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn diff(&self) -> BoxResult<Vec<DiffEntry>> {
         let local_map: HashMap<Vec<u8>, (Vec<u8>, u64)> = self
             .local
             .all_entries()?
@@ -151,7 +155,7 @@ impl DataSync {
     pub fn sync(
         &self,
         direction: SyncDirection,
-    ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> BoxResult<SyncResult> {
         let diffs = self.diff()?;
         let resolved = self.resolve_conflicts_impl(&diffs, direction)?;
 
@@ -171,7 +175,7 @@ impl DataSync {
         &self,
         entries: Vec<DiffEntry>,
         direction: SyncDirection,
-    ) -> Result<Vec<(Vec<u8>, Vec<u8>, u64)>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> BoxResult<DataEntries> {
         self.resolve_conflicts_impl(&entries, direction)
     }
 
@@ -179,7 +183,7 @@ impl DataSync {
         &self,
         entries: &[DiffEntry],
         direction: SyncDirection,
-    ) -> Result<Vec<(Vec<u8>, Vec<u8>, u64)>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> BoxResult<DataEntries> {
         let mut resolved = Vec::with_capacity(entries.len());
 
         for entry in entries {
@@ -232,6 +236,7 @@ mod tests {
     use std::sync::Mutex;
 
     struct MemLocal {
+        #[allow(clippy::type_complexity)]
         data: Mutex<Vec<(Vec<u8>, Vec<u8>, u64)>>,
     }
 
@@ -246,14 +251,14 @@ mod tests {
     impl LocalEngine for MemLocal {
         fn all_entries(
             &self,
-        ) -> Result<Vec<(Vec<u8>, Vec<u8>, u64)>, Box<dyn std::error::Error + Send + Sync>> {
+        ) -> BoxResult<DataEntries> {
             Ok(self.data.lock().unwrap().clone())
         }
 
         fn apply_batch(
             &self,
-            entries: &[(Vec<u8>, Vec<u8>, u64)],
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            entries: &DataEntries,
+        ) -> BoxResult<()> {
             let mut data = self.data.lock().unwrap();
             for (k, v, ts) in entries {
                 data.push((k.clone(), v.clone(), *ts));
@@ -263,6 +268,7 @@ mod tests {
     }
 
     struct MemRemote {
+        #[allow(clippy::type_complexity)]
         data: Mutex<HashMap<Vec<u8>, (Vec<u8>, u64)>>,
     }
 
@@ -277,14 +283,14 @@ mod tests {
     impl RemoteBackend for MemRemote {
         fn fetch_all(
             &self,
-        ) -> Result<HashMap<Vec<u8>, (Vec<u8>, u64)>, Box<dyn std::error::Error + Send + Sync>> {
+        ) -> BoxResult<DataMap> {
             Ok(self.data.lock().unwrap().clone())
         }
 
         fn push(
             &self,
-            entries: &[(Vec<u8>, Vec<u8>, u64)],
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            entries: &DataEntries,
+        ) -> BoxResult<()> {
             let mut data = self.data.lock().unwrap();
             for (k, v, ts) in entries {
                 data.insert(k.clone(), (v.clone(), *ts));

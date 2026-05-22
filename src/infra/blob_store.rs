@@ -87,7 +87,7 @@ impl BlobStore {
         let chunk_count = if data.is_empty() {
             1
         } else {
-            ((data.len() + chunk_size - 1) / chunk_size) as u32
+            data.len().div_ceil(chunk_size) as u32
         };
 
         // Write each chunk.

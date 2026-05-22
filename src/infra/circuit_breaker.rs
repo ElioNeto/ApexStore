@@ -59,14 +59,6 @@ impl CircuitBreaker {
         }
     }
 
-    /// Create a circuit breaker with sensible defaults:
-    /// - 5 failures to open
-    /// - 3 successes to close
-    /// - 30 second cooldown
-    pub fn default() -> Self {
-        Self::new(5, 3, Duration::from_secs(30))
-    }
-
     /// Attempt to execute the closure `f` through the circuit breaker.
     ///
     /// Returns `Ok(T)` on success, or an error string if the circuit is open
@@ -193,7 +185,7 @@ impl CircuitBreaker {
 
 impl Default for CircuitBreaker {
     fn default() -> Self {
-        Self::default()
+        Self::new(5, 3, Duration::from_secs(30))
     }
 }
 

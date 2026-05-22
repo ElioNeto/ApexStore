@@ -155,7 +155,7 @@ fn stream_json_array<R: Read, F: FnMut(Value) -> Result<bool>>(
                 match seq.next_element::<Value>() {
                     Ok(Some(item)) => {
                         // Use `&mut self.0` to call FnMut without consuming it
-                        let cont = (&mut self.0)(item).map_err(de::Error::custom)?;
+                        let cont = (self.0)(item).map_err(de::Error::custom)?;
                         if !cont {
                             return Ok(());
                         }
@@ -169,7 +169,7 @@ fn stream_json_array<R: Read, F: FnMut(Value) -> Result<bool>>(
 
     let mut de = serde_json::Deserializer::from_reader(reader);
     de.deserialize_any(CallbackVisitor(f))
-        .map_err(|e| LsmError::JsonError(e))?;
+        .map_err(LsmError::JsonError)?;
     Ok(())
 }
 
@@ -211,7 +211,7 @@ pub fn export_json<C: Cache, W: Write>(
         )?;
 
         count += 1;
-        if count % EXPORT_PAGE_SIZE as u64 == 0 {
+        if count.is_multiple_of(EXPORT_PAGE_SIZE as u64) {
             if let Some(ref cb) = progress {
                 cb(count, 0);
             }
@@ -244,18 +244,18 @@ pub fn export_csv<C: Cache, W: Write>(
     let mut count = 0u64;
 
     // Write header
-    wtr.write_record(&["key", "value"])
+    wtr.write_record(["key", "value"])
         .map_err(|e| LsmError::InvalidArgument(format!("CSV write error: {}", e)))?;
 
     for_each_kv(engine, cf, |key, value| {
         let key_str = String::from_utf8_lossy(key);
         let val_str = String::from_utf8_lossy(value);
 
-        wtr.write_record(&[key_str.as_ref(), val_str.as_ref()])
+        wtr.write_record([key_str.as_ref(), val_str.as_ref()])
             .map_err(|e| LsmError::InvalidArgument(format!("CSV write error: {}", e)))?;
 
         count += 1;
-        if count % EXPORT_PAGE_SIZE as u64 == 0 {
+        if count.is_multiple_of(EXPORT_PAGE_SIZE as u64) {
             if let Some(ref cb) = progress {
                 cb(count, 0);
             }
@@ -305,7 +305,7 @@ pub fn import_json<C: Cache, R: Read>(
         batch.push((pair.key.into_bytes(), pair.value.into_bytes()));
 
         if batch.len() >= IMPORT_BATCH_SIZE {
-            engine.set_batch_cf(&cf, &batch)?;
+            engine.set_batch_cf(cf, &batch)?;
             count += batch.len() as u64;
             batch.clear();
             if let Some(ref cb) = progress {
@@ -318,7 +318,7 @@ pub fn import_json<C: Cache, R: Read>(
 
     // Flush remaining batch
     if !batch.is_empty() {
-        engine.set_batch_cf(&cf, &batch)?;
+        engine.set_batch_cf(cf, &batch)?;
         count += batch.len() as u64;
     }
 
@@ -394,7 +394,7 @@ pub fn import_csv<C: Cache, R: Read>(
         batch.push((key, value));
 
         if batch.len() >= IMPORT_BATCH_SIZE {
-            engine.set_batch_cf(&cf, &batch)?;
+            engine.set_batch_cf(cf, &batch)?;
             count += batch.len() as u64;
             batch.clear();
             if let Some(ref cb) = progress {
@@ -405,7 +405,7 @@ pub fn import_csv<C: Cache, R: Read>(
 
     // Flush remaining batch
     if !batch.is_empty() {
-        engine.set_batch_cf(&cf, &batch)?;
+        engine.set_batch_cf(cf, &batch)?;
         count += batch.len() as u64;
     }
 

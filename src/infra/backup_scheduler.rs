@@ -373,7 +373,7 @@ mod tests {
 
         let scheduler = BackupScheduler::new(snapshot_fn, list_fn, backup_dir.clone());
         let info = scheduler.backup_now().unwrap();
-        assert!(info.id.len() > 0);
+        assert!(!info.id.is_empty());
         assert!(info.path.exists());
 
         let backups = scheduler.list_backups().unwrap();
