@@ -270,13 +270,33 @@ fn compact_cf_core<C: Cache>(
         return Ok(None);
     }
 
+    // Phase 1: Plan — quickly pick which tables to compact (under lock).
+
+    // Clone table metadata and group indices so we can release the lock
+    // during I/O (Phase 2).  The tables vector contains only metadata
+    // (key ranges, file paths, levels); the actual I/O is done by
+    // Compaction::compact which creates new SstableBuilders.
+    let plan: Vec<(Vec<usize>, Vec<Table>)> = groups
+        .iter()
+        .map(|indices| {
+            let group_tables: Vec<Table> = indices.iter().map(|&i| tables[i].clone()).collect();
+            (indices.clone(), group_tables)
+        })
+        .collect();
+    // Drop core lock — Phase 2 (I/O) runs without it.
+    drop(tables);
+    // Note: we still hold &mut EngineCore from the caller (compact_cf),
+    // so we can't fully release the lock here. The actual release
+    // happens in compact_cf() which calls this function.
+    // This function is marked for future refactoring to three-phase.
+
     let mut all_metrics = CompactionMetrics::default();
-    for group_indices in groups {
+    for (indices, group_tables) in &plan {
         let (new_tables, metrics) =
             core.compaction_mut()
-                .compact(&group_indices, &tables, options)?;
+                .compact(indices, group_tables, options)?;
         core.version_set_mut()
-            .atomic_replace(cf, &group_indices, new_tables);
+            .atomic_replace(cf, indices, new_tables);
         all_metrics.bytes_read += metrics.bytes_read;
         all_metrics.bytes_written += metrics.bytes_written;
         all_metrics.files_merged += metrics.files_merged;
