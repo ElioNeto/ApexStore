@@ -2,7 +2,7 @@
 description: Revisa diff antes do validator — qualidade, testes, segurança, convenções. Não edita.
 mode: subagent
 temperature: 0.0
-maxSteps: 100
+maxSteps: 9999
 permission:
   read: allow
   list: allow

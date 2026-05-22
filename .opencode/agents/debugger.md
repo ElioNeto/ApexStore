@@ -2,7 +2,7 @@
 description: Recebe JSON de saída do workflow-agent, diagnostica a falha e propõe patch mínimo.
 mode: subagent
 temperature: 0.0
-maxSteps: 12
+maxSteps: 9999
 permission:
   read: allow
   list: allow

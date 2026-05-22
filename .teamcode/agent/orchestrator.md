@@ -3,7 +3,7 @@ name: orchestrator
 description: Seleciona issue desbloqueada, resolve dependências recursivamente, coordena planner→implementer→reviewer→validator.
 mode: primary
 temperature: 0.0
-maxSteps: 160
+maxSteps: 9999
 permission:
   read: allow
   list: allow

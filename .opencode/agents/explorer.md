@@ -2,7 +2,7 @@
 description: Fast agent specialized for exploring codebases, finding files, and answering structural questions.
 mode: subagent
 temperature: 0.0
-maxSteps: 60
+maxSteps: 9999
 permission:
   read: allow
   list: allow

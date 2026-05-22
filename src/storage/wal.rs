@@ -512,6 +512,17 @@ impl WriteAheadLog {
         Ok(())
     }
 
+    /// Flush the BufWriter and fsync the underlying file.
+    ///
+    /// Called during graceful shutdown to ensure all buffered data is
+    /// durably on disk before the engine is dropped.
+    pub fn sync(&self) -> Result<()> {
+        let mut guard = self.file.lock();
+        guard.flush()?;
+        guard.get_ref().sync_all()?;
+        Ok(())
+    }
+
     /// Return the current size of the WAL file in bytes.
     pub fn size(&self) -> Result<u64> {
         std::fs::metadata(&self.path)

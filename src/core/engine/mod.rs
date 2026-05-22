@@ -892,19 +892,25 @@ impl<C: Cache> Engine<C> {
     }
 
     /// Flush the oldest memtable for the given column family.
-    /// Returns true if compaction should be triggered after the lock is released.
     /// Flush the current memtable to an SSTable.
     /// Public wrapper used by benchmarks and tests.
     pub fn flush_memtable(&self) -> Result<()> {
+        self.flush_memtable_cf("default")
+    }
+
+    /// Flush the memtable for a specific column family to an SSTable.
+    pub fn flush_memtable_cf(&self, cf: &str) -> Result<()> {
         let start = std::time::Instant::now();
-        let mut core = self.core.lock();
-        self.flush_memtable_impl("default", &mut core)?;
+        {
+            let mut core = self.core.lock();
+            self.flush_memtable_impl(cf, &mut core)?;
+        }
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_flush(elapsed_us);
         tracing::info!(
             target: "apexstore::engine",
             operation = "flush_memtable",
-            cf = "default",
+            cf = cf,
             duration_us = elapsed_us,
         );
         Ok(())
@@ -1126,25 +1132,44 @@ impl<C: Cache> Engine<C> {
         *thread_guard = Some(handle);
     }
 
-    /// Close the engine: signal compaction thread to stop and wait for it to finish.
+    /// Close the engine gracefully.
     ///
-    /// Locks `compaction_thread` first, then sets `compaction_running = false`
-    /// inside the lock. This ordering eliminates the window where a concurrently
-    /// executing `maybe_compact()` could spawn a new thread and store its handle
-    /// after `close()` has already taken the handle but before it sets the flag.
+    /// 1. Signals the compaction thread to stop and waits for it to finish.
+    /// 2. Syncs the WAL file descriptor so all buffered data is durable.
+    ///
+    /// # Why not flush memtables?
+    ///
+    /// The engine does **not** persist a manifest of on-disk SSTables.
+    /// Startup recovers state exclusively by replaying the WAL.  Flushing
+    /// memtables and calling `WAL::retain()` would therefore *remove* the
+    /// only durable record of those writes, causing data loss on restart.
+    /// Instead, `close()` focuses on durability of the WAL itself.
     pub fn close(&self) {
-        // Lock compaction_thread first so that any concurrent maybe_compact():
-        //   a) blocks until we release the lock, at which point running=false
-        //      prevents it from spawning; or
-        //   b) has already stored its handle under the lock, so we'll find it here.
+        // 1. Lock compaction_thread first, then signal stop.
+        //    This ordering prevents a TOCTOU race with maybe_compact():
+        //    while we hold the lock, no new compaction thread can be
+        //    spawned that would store its handle after we've taken it.
         let mut handle_opt = self.compaction_thread.lock();
         self.compaction_running.store(false, Ordering::Release);
+
+        // 2. Wait for the compaction thread to finish (releases its core
+        //    lock, so we can safely acquire it in the sync step below).
         if let Some(handle) = handle_opt.take() {
             match handle.join() {
                 Ok(()) => {}
                 Err(e) => {
                     tracing::error!("Compaction thread panicked on shutdown: {:?}", e);
                 }
+            }
+        }
+        drop(handle_opt);
+
+        // 3. Sync the WAL so all buffered data is durably on disk.
+        //    The WAL is the sole persistence mechanism across restarts.
+        {
+            let core = self.core.lock();
+            if let Err(e) = core.wal().sync() {
+                tracing::error!("Engine::close(): failed to sync WAL: {:?}", e);
             }
         }
     }
