@@ -25,6 +25,7 @@ use self::compaction::{Compaction, CompactionMetrics, CompactionOptions, Compact
 use self::version_set::VersionSet;
 use crate::core::iterators::{MergeIterator, StorageIterator};
 use crate::core::key::KeySlice;
+use crate::core::memtable::MemTable;
 
 pub const DEFAULT_SCAN_LIMIT: usize = 128;
 pub const MAX_SCAN_LIMIT: usize = 1024;
@@ -216,76 +217,6 @@ pub type LsmEngineGeneric<C> = Engine<C>;
 pub type LsmEngine = Engine<Arc<crate::storage::cache::GlobalBlockCache>>;
 pub type ScanRangeResult = crate::infra::error::Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<String>)>;
 
-pub(crate) struct MemTable {
-    data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
-    size: usize,
-}
-
-impl MemTable {
-    fn new() -> Self {
-        Self {
-            data: std::collections::BTreeMap::new(),
-            size: 0,
-        }
-    }
-
-    fn put(&mut self, key: Vec<u8>, value: Vec<u8>) {
-        let old = self.data.insert(key.clone(), value.clone());
-        self.size += key.len() + value.len();
-        if let Some(old_val) = old {
-            self.size -= old_val.len();
-        }
-    }
-
-    fn delete(&mut self, key: Vec<u8>) {
-        if let Some(old) = self.data.remove(&key) {
-            self.size += key.len();
-            self.size -= old.len();
-        }
-    }
-}
-
-struct InternalMemTableIterator<'a> {
-    inner: std::collections::btree_map::Iter<'a, Vec<u8>, Vec<u8>>,
-    current: Option<(&'a Vec<u8>, &'a Vec<u8>)>,
-}
-
-impl<'a> InternalMemTableIterator<'a> {
-    fn new(data: &'a std::collections::BTreeMap<Vec<u8>, Vec<u8>>) -> Self {
-        let mut inner = data.iter();
-        let current = inner.next();
-        Self { inner, current }
-    }
-}
-
-impl<'a> StorageIterator for InternalMemTableIterator<'a> {
-    type KeyType = KeySlice<'a>;
-
-    fn next(&mut self) {
-        self.current = self.inner.next();
-    }
-    fn key(&self) -> Self::KeyType {
-        match self.current {
-            Some((k, _)) => KeySlice::new(k.as_slice()),
-            None => KeySlice::new(&[]), // Caller should check is_valid() first
-        }
-    }
-    fn value(&self) -> &[u8] {
-        match self.current {
-            Some((_, v)) => v.as_slice(),
-            None => &[], // Caller should check is_valid() first
-        }
-    }
-    fn is_valid(&self) -> bool {
-        self.current.is_some()
-    }
-    fn seek(&mut self, _key: &[u8]) {
-        while self.is_valid() && self.key().as_ref() < _key {
-            self.next();
-        }
-    }
-}
-
 #[allow(dead_code)]
 impl<C: Cache> Engine<C> {
     // ========== pub(crate) accessors for internal crate use ==========
@@ -452,26 +383,19 @@ impl<C: Cache> Engine<C> {
     /// Replay WAL records to reconstruct memtable state (operates on EngineCore directly).
     fn replay_wal_records_core(core: &mut EngineCore<C>, records: Vec<LogRecord>) -> Result<()> {
         for record in records {
-            if record.is_deleted {
-                let cf = record.column_family.as_deref().unwrap_or("default");
-                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
-                if mem.is_empty() {
-                    mem.push(MemTable::new());
-                }
-                let last = mem.len() - 1;
-                mem[last].delete(record.key.clone());
-                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() += record.key.len();
-            } else {
-                let cf = record.column_family.as_deref().unwrap_or("default");
-                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
-                if mem.is_empty() {
-                    mem.push(MemTable::new());
-                }
-                let last = mem.len() - 1;
-                mem[last].put(record.key.clone(), record.value.clone());
-                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
-                    record.key.len() + record.value.len();
+            let cf = record.column_family.as_deref().unwrap_or("default");
+            let mem = core.memtables_mut().entry(cf.to_string()).or_default();
+            if mem.is_empty() {
+                mem.push(MemTable::new_unlimited());
             }
+            let last = mem.len() - 1;
+            if record.is_deleted {
+                mem[last].delete(record.key.clone());
+            } else {
+                mem[last].put(record.key.clone(), record.value.clone());
+            }
+            *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
+                record.key.len() + record.value.len();
         }
         Ok(())
     }
@@ -498,7 +422,7 @@ impl<C: Cache> Engine<C> {
 
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
-                mem.push(MemTable::new());
+                mem.push(MemTable::new_unlimited());
             }
             let last = mem.len() - 1;
             mem[last].put(key.clone(), value.clone());
@@ -571,7 +495,7 @@ impl<C: Cache> Engine<C> {
 
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
-                mem.push(MemTable::new());
+                mem.push(MemTable::new_unlimited());
             }
             let last = mem.len() - 1;
             mem[last].delete(key.clone());
@@ -626,6 +550,10 @@ impl<C: Cache> Engine<C> {
         if let Some(memtables) = core.memtables().get(cf) {
             for mem in memtables.iter().rev() {
                 if let Some(v) = mem.data.get(key) {
+                    // Skip tombstones (deleted records)
+                    if v.is_deleted {
+                        return Ok(None);
+                    }
                     let elapsed_us = start.elapsed().as_micros() as u64;
                     self.metrics.record_get(elapsed_us);
                     self.metrics.record_cache_hit();
@@ -635,11 +563,11 @@ impl<C: Cache> Engine<C> {
                         cf = cf,
                         key = %key_str,
                         found = true,
-                        value_size = v.len(),
+                        value_size = v.value.len(),
                         duration_us = elapsed_us,
                         source = "memtable",
                     );
-                    return Ok(Some(v.clone()));
+                    return Ok(Some(v.value.clone()));
                 }
             }
         }
@@ -707,7 +635,7 @@ impl<C: Cache> Engine<C> {
         // 1. Memtables (newer first)
         if let Some(memtables) = core.memtables().get(cf) {
             for mem in memtables.iter().rev() {
-                iters.push(Box::new(InternalMemTableIterator::new(&mem.data)));
+                iters.push(Box::new(crate::storage::iterator::MemTableIterator::new(&mem.data)));
             }
         }
 
@@ -831,7 +759,7 @@ impl<C: Cache> Engine<C> {
 
         if let Some(memtables) = core.memtables().get("default") {
             for mem in memtables.iter().rev() {
-                iters.push(Box::new(InternalMemTableIterator::new(&mem.data)));
+                iters.push(Box::new(crate::storage::iterator::MemTableIterator::new(&mem.data)));
             }
         }
 
@@ -920,7 +848,13 @@ impl<C: Cache> Engine<C> {
         if let Some(memtables) = core.memtables_mut().get_mut(cf) {
             if let Some(mem) = memtables.pop() {
                 let records = mem.data.len();
-                let table = Table::build(mem.data.into_iter().collect(), &self.options);
+                // Convert LogRecord values to raw Vec<u8> for Table::build
+                let raw_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> = mem
+                    .data
+                    .into_iter()
+                    .map(|(k, r)| (k, r.value))
+                    .collect();
+                let table = Table::build(raw_data, &self.options);
                 core.version_set_mut().add_table(cf, table);
                 let bytes = core.memtable_bytes_mut().get_mut(cf).ok_or_else(|| {
                     crate::LsmError::InvalidArgument(format!(
@@ -1292,7 +1226,7 @@ impl<C: Cache> Engine<C> {
             for (key, value) in items {
                 let mem = core.memtables_mut().entry(cf.to_string()).or_default();
                 if mem.is_empty() {
-                    mem.push(MemTable::new());
+                    mem.push(MemTable::new_unlimited());
                 }
                 let last = mem.len() - 1;
                 mem[last].put(key.as_ref().to_vec(), value.as_ref().to_vec());
@@ -1364,7 +1298,7 @@ impl<C: Cache> Engine<C> {
             for key in keys {
                 let mem = core.memtables_mut().entry(cf.to_string()).or_default();
                 if mem.is_empty() {
-                    mem.push(MemTable::new());
+                    mem.push(MemTable::new_unlimited());
                 }
                 let last = mem.len() - 1;
                 mem[last].delete(key.as_ref().to_vec());

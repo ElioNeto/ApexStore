@@ -9,12 +9,35 @@ pub struct MemTable {
 }
 
 impl MemTable {
+    /// Create a new MemTable with a maximum size limit.
+    ///
+    /// When `max_size_bytes` is 0 the table has no effective limit and
+    /// `should_flush()` always returns `false`.
     pub fn new(max_size_bytes: usize) -> Self {
         Self {
             data: BTreeMap::new(),
             size_bytes: 0,
             max_size_bytes,
         }
+    }
+
+    /// Create a new MemTable with no size limit (convenience).
+    pub fn new_unlimited() -> Self {
+        Self::new(0)
+    }
+
+    /// Insert a key-value pair, wrapping it in a `LogRecord`.
+    ///
+    /// Equivalent to `self.insert(LogRecord::new(key, value))`.
+    pub fn put(&mut self, key: Vec<u8>, value: Vec<u8>) {
+        self.insert(LogRecord::new(key, value));
+    }
+
+    /// Insert a tombstone (delete marker) for the given key.
+    ///
+    /// Equivalent to `self.insert(LogRecord::tombstone(key))`.
+    pub fn delete(&mut self, key: Vec<u8>) {
+        self.insert(LogRecord::tombstone(key));
     }
 
     pub fn insert(&mut self, record: LogRecord) {
