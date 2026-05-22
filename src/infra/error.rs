@@ -1,4 +1,3 @@
-use bincode;
 use std::io;
 use std::time::SystemTimeError;
 use thiserror::Error;
@@ -31,9 +30,9 @@ pub enum LsmError {
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
 
-    /// Bincode encode/decode failures from `infra::codec`.
+    /// Postcard encode/decode failures from `infra::codec`.
     #[error("Codec error: {0}")]
-    Codec(#[from] bincode::Error),
+    Codec(#[from] postcard::Error),
 
     /// JSON encode/decode failures (serde_json), e.g. from `features::FeatureClient`.
     #[error("JSON error: {0}")]

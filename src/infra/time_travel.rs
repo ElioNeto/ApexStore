@@ -180,7 +180,7 @@ mod tests {
 
         // Range that covers both snapshots should return snap2 (closest to end)
         let result = engine.query_range(ts1, ts2 + 1).unwrap();
-        assert_eq!(result.get(b"a").unwrap(), b"2");
+        assert_eq!(result.get(&b"a"[..]).unwrap(), b"2");
 
         // Range before any snapshot
         assert!(engine.query_range(0, ts1 - 1).is_none());
