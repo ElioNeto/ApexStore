@@ -50,7 +50,11 @@ async fn put_key(
     body: web::Json<SetBody>,
 ) -> impl Responder {
     let key = path.into_inner();
-    match engine.put_cf("default", key.as_bytes().to_vec(), body.value.as_bytes().to_vec()) {
+    match engine.put_cf(
+        "default",
+        key.as_bytes().to_vec(),
+        body.value.as_bytes().to_vec(),
+    ) {
         Ok(_) => HttpResponse::Ok()
             .content_type("application/json")
             .json(json!({ "status": "ok" })),
@@ -83,7 +87,10 @@ async fn delete_key(engine: web::Data<LsmEngine>, path: web::Path<String>) -> im
 /// Handler for `GET /keys` — list keys with optional prefix and limit.
 #[get("/keys")]
 async fn get_keys(engine: web::Data<LsmEngine>, query: web::Query<KeysQuery>) -> impl Responder {
-    let limit = query.limit.unwrap_or(100).min(crate::core::engine::MAX_SCAN_LIMIT);
+    let limit = query
+        .limit
+        .unwrap_or(100)
+        .min(crate::core::engine::MAX_SCAN_LIMIT);
 
     let result = if let Some(ref prefix) = query.prefix {
         let (results, _cursor) = match engine.search_prefix(prefix, None, limit) {
@@ -95,12 +102,16 @@ async fn get_keys(engine: web::Data<LsmEngine>, query: web::Query<KeysQuery>) ->
                     .json(json!({ "error": "internal server error" }));
             }
         };
-        let keys: Vec<String> = results.into_iter().map(|(k, _)| String::from_utf8_lossy(&k).to_string()).collect();
+        let keys: Vec<String> = results
+            .into_iter()
+            .map(|(k, _)| String::from_utf8_lossy(&k).to_string())
+            .collect();
         serde_json::to_value(&keys).unwrap_or_default()
     } else {
         match engine.keys() {
             Ok(keys) => {
-                let limited: Vec<String> = keys.into_iter()
+                let limited: Vec<String> = keys
+                    .into_iter()
                     .take(limit)
                     .map(|k| String::from_utf8_lossy(&k).to_string())
                     .collect();

@@ -103,9 +103,7 @@ pub fn main() -> crate::infra::error::Result<()> {
     let cli = Cli::parse();
 
     // Build config from CLI args
-    let config = LsmConfig::builder()
-        .dir_path(cli.db_path)
-        .build()?;
+    let config = LsmConfig::builder().dir_path(cli.db_path).build()?;
 
     // Open engine with a shared block cache
     let cache = GlobalBlockCache::new(100, 4096);
@@ -154,11 +152,7 @@ fn cmd_set(
     Ok(())
 }
 
-fn cmd_delete(
-    engine: &CliEngine,
-    cf: &str,
-    key: &str,
-) -> crate::infra::error::Result<()> {
+fn cmd_delete(engine: &CliEngine, cf: &str, key: &str) -> crate::infra::error::Result<()> {
     engine.delete_cf(cf, key.as_bytes())?;
     println!("ok");
     Ok(())
@@ -205,7 +199,12 @@ fn cmd_keys(
         }
         None => {
             // Full scan with unbounded range
-            let results = engine.scan_cf(cf, None as Option<&[u8]>, None as Option<&[u8]>, Some(limit))?;
+            let results = engine.scan_cf(
+                cf,
+                None as Option<&[u8]>,
+                None as Option<&[u8]>,
+                Some(limit),
+            )?;
             for (key, _value) in &results {
                 println!("{}", String::from_utf8_lossy(key));
             }

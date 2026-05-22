@@ -145,8 +145,8 @@ mod tests {
     #[test]
     fn test_token_validation() {
         let raw_token = generate_token();
-        let api_token = ApiToken::new("test".to_string(), &raw_token, None, vec![Permission::Read])
-            .unwrap();
+        let api_token =
+            ApiToken::new("test".to_string(), &raw_token, None, vec![Permission::Read]).unwrap();
         assert!(api_token.validate_token(&raw_token));
         assert!(!api_token.validate_token("wrong_token"));
     }

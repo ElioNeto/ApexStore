@@ -164,8 +164,7 @@ impl<C: Cache> EngineCore<C> {
     /// Creates a new WAL file if one doesn't exist yet.
     pub(crate) fn wal_mut(&mut self, cf: &str) -> &mut WriteAheadLog {
         if !self.wals.contains_key(cf) {
-            let wal = WriteAheadLog::new(&self.dir_path, cf)
-                .expect("Failed to create WAL for CF");
+            let wal = WriteAheadLog::new(&self.dir_path, cf).expect("Failed to create WAL for CF");
             self.wals.insert(cf.to_string(), wal);
         }
         self.wals.get_mut(cf).unwrap()
@@ -396,7 +395,10 @@ impl<C: Cache> Engine<C> {
                 let name = entry.file_name();
                 let name_str = name.to_string_lossy();
                 // Match wal-{cf}.log where cf != "default"
-                if let Some(cf) = name_str.strip_prefix("wal-").and_then(|s| s.strip_suffix(".log")) {
+                if let Some(cf) = name_str
+                    .strip_prefix("wal-")
+                    .and_then(|s| s.strip_suffix(".log"))
+                {
                     if cf != "default" && !core.wals.contains_key(cf) {
                         match WriteAheadLog::new(dir_path, cf) {
                             Ok(wal) => {
@@ -405,10 +407,7 @@ impl<C: Cache> Engine<C> {
                                 Self::replay_wal_records_core(&mut core, records)?;
                             }
                             Err(e) => {
-                                tracing::warn!(
-                                    "Failed to open WAL for CF '{}': {:?}",
-                                    cf, e
-                                );
+                                tracing::warn!("Failed to open WAL for CF '{}': {:?}", cf, e);
                             }
                         }
                     }
@@ -692,7 +691,9 @@ impl<C: Cache> Engine<C> {
         // 1. Memtables (newer first)
         if let Some(memtables) = core.memtables().get(cf) {
             for mem in memtables.iter().rev() {
-                iters.push(Box::new(crate::storage::iterator::MemTableIterator::new(&mem.data)));
+                iters.push(Box::new(crate::storage::iterator::MemTableIterator::new(
+                    &mem.data,
+                )));
             }
         }
 
@@ -816,7 +817,9 @@ impl<C: Cache> Engine<C> {
 
         if let Some(memtables) = core.memtables().get("default") {
             for mem in memtables.iter().rev() {
-                iters.push(Box::new(crate::storage::iterator::MemTableIterator::new(&mem.data)));
+                iters.push(Box::new(crate::storage::iterator::MemTableIterator::new(
+                    &mem.data,
+                )));
             }
         }
 
@@ -906,11 +909,8 @@ impl<C: Cache> Engine<C> {
             if let Some(mem) = memtables.pop() {
                 let records = mem.data.len();
                 // Convert LogRecord values to raw Vec<u8> for Table::build
-                let raw_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> = mem
-                    .data
-                    .into_iter()
-                    .map(|(k, r)| (k, r.value))
-                    .collect();
+                let raw_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> =
+                    mem.data.into_iter().map(|(k, r)| (k, r.value)).collect();
                 let table = Table::build(raw_data, &self.options);
                 core.version_set_mut().add_table(cf, table);
                 let bytes = core.memtable_bytes_mut().get_mut(cf).ok_or_else(|| {

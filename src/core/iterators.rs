@@ -288,7 +288,10 @@ mod tests {
 
         // Seek to "date" — should position at "date"
         merged.seek(b"date");
-        assert!(merged.is_valid(), "should be valid after seek to existing key");
+        assert!(
+            merged.is_valid(),
+            "should be valid after seek to existing key"
+        );
         assert_eq!(merged.key(), b"date", "should seek to 'date'");
         assert_eq!(merged.value(), b"v4");
 
@@ -297,25 +300,32 @@ mod tests {
         assert_eq!(merged.key(), b"elderberry");
 
         // Seek before all keys
-        let mut merged2 = MergeIterator::new(vec![
-            MockIter::new(vec!["banana", "date"], vec!["v2", "v4"]),
-        ]);
+        let mut merged2 = MergeIterator::new(vec![MockIter::new(
+            vec!["banana", "date"],
+            vec!["v2", "v4"],
+        )]);
         merged2.seek(b"apple");
         assert!(merged2.is_valid());
         assert_eq!(merged2.key(), b"banana");
 
         // Seek to non-existing key between two keys
-        let mut merged3 = MergeIterator::new(vec![
-            MockIter::new(vec!["apple", "cherry", "date"], vec!["v1", "v3", "v4"]),
-        ]);
+        let mut merged3 = MergeIterator::new(vec![MockIter::new(
+            vec!["apple", "cherry", "date"],
+            vec!["v1", "v3", "v4"],
+        )]);
         merged3.seek(b"blueberry");
         assert!(merged3.is_valid());
-        assert_eq!(merged3.key(), b"cherry", "should land on first key >= target");
+        assert_eq!(
+            merged3.key(),
+            b"cherry",
+            "should land on first key >= target"
+        );
 
         // Seek past the last key
-        let mut merged4 = MergeIterator::new(vec![
-            MockIter::new(vec!["apple", "banana"], vec!["v1", "v2"]),
-        ]);
+        let mut merged4 = MergeIterator::new(vec![MockIter::new(
+            vec!["apple", "banana"],
+            vec!["v1", "v2"],
+        )]);
         merged4.seek(b"zebra");
         assert!(!merged4.is_valid(), "should be invalid after seek past end");
     }
