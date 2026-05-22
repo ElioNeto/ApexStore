@@ -43,8 +43,8 @@ impl<C: Cache> VersionSet<C> {
     ) -> Self {
         // Derive KV cache capacity from block cache size (rough estimate: entry ~200 bytes)
         let kv_capacity = (options.block_cache_size_mb * 1024 * 1024 / 200).max(1000);
-        let kv_capacity =
-            NonZeroUsize::new(kv_capacity).expect("kv_capacity >= 1000, NonZeroUsize is safe");
+        let kv_capacity = NonZeroUsize::new(kv_capacity)
+            .unwrap_or_else(|| NonZeroUsize::new(1000).expect("1000 is non-zero"));
         // Build EncryptionConfig from the infra config
         let encryption = if storage_config.encryption_enabled {
             EncryptionConfig::from_key_path(storage_config.encryption_key_path.as_deref())

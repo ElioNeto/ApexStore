@@ -159,7 +159,7 @@ impl<C: Cache> Transaction<C> {
                     .collect();
 
                 // ── Phase 2: Write to WAL ────────────────────────────
-                core.wal_mut(cf).write_batch(&records)?;
+                core.wal_mut(cf)?.write_batch(&records)?;
 
                 // ── Phase 3: Apply to memtable ───────────────────────
                 let mem = core.memtables_mut().entry(cf.clone()).or_default();
@@ -255,7 +255,7 @@ impl<C: Cache> Transaction<C> {
                     ))
                 })?;
                 *bytes = 0;
-                core.wal_mut(cf).clear()?;
+                core.wal_mut(cf)?.clear()?;
 
                 tracing::info!(
                     target: "apexstore::engine::transaction",

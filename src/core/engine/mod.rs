@@ -12,7 +12,7 @@ use crate::storage::encryption::EncryptionConfig;
 use crate::storage::wal::WriteAheadLog;
 use fs2::FileExt;
 use parking_lot::Mutex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -150,6 +150,14 @@ pub struct SnapshotInfo {
     pub file_count: usize,
 }
 
+/// Manifest file written by create_snapshot() and read by restore_snapshot()
+/// and engine startup.  Maps each column family to its list of SSTable filenames.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotManifest {
+    /// Map from column family name → list of SSTable filenames (relative to snapshot dir)
+    pub column_families: HashMap<String, Vec<String>>,
+}
+
 /// All mutable state of the engine, protected behind a Mutex.
 pub(crate) struct EngineCore<C: Cache> {
     memtables: HashMap<String, Vec<MemTable>>,
@@ -194,13 +202,17 @@ impl<C: Cache> EngineCore<C> {
     }
     /// Get a mutable reference to the WAL for a specific column family.
     /// Creates a new WAL file if one doesn't exist yet.
-    pub(crate) fn wal_mut(&mut self, cf: &str) -> &mut WriteAheadLog {
+    pub(crate) fn wal_mut(&mut self, cf: &str) -> Result<&mut WriteAheadLog> {
         if !self.wals.contains_key(cf) {
-            let wal = WriteAheadLog::new_with_encryption(&self.dir_path, cf, &self.encryption)
-                .expect("Failed to create WAL for CF");
+            let wal = WriteAheadLog::new_with_encryption(&self.dir_path, cf, &self.encryption)?;
             self.wals.insert(cf.to_string(), wal);
         }
-        self.wals.get_mut(cf).unwrap()
+        self.wals.get_mut(cf).ok_or_else(|| {
+            crate::infra::error::LsmError::InvalidArgument(format!(
+                "WAL not found for column family: {}",
+                cf
+            ))
+        })
     }
 
     pub(crate) fn range_tombstones(&self) -> &HashMap<String, Vec<crate::core::log_record::RangeTombstone>> {
@@ -578,7 +590,7 @@ impl<C: Cache> Engine<C> {
                     record.expires_at = Some(now.saturating_add(default_ttl.as_nanos()));
                 }
             }
-            core.wal_mut(cf).write_record(&record)?;
+            core.wal_mut(cf)?.write_record(&record)?;
 
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
@@ -703,7 +715,7 @@ impl<C: Cache> Engine<C> {
             // Write tombstone to WAL first (before modifying memtable) for crash safety
             let mut record = LogRecord::tombstone(key.clone());
             record.column_family = Some(cf.to_string());
-            core.wal_mut(cf).write_record(&record)?;
+            core.wal_mut(cf)?.write_record(&record)?;
 
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
@@ -1169,7 +1181,7 @@ impl<C: Cache> Engine<C> {
                 // ✅ Per-CF WAL: clear the flushed CF's WAL directly
                 // instead of calling retain() on a global WAL (which was O(N)
                 // per flush).  Each CF has its own WAL file, so clear() is O(1).
-                core.wal_mut(cf).clear()?;
+                core.wal_mut(cf)?.clear()?;
 
                 tracing::info!(
                     target: "apexstore::engine",
@@ -1543,7 +1555,7 @@ impl<C: Cache> Engine<C> {
                     record
                 })
                 .collect();
-            core.wal_mut(cf).write_batch(&records)?;
+            core.wal_mut(cf)?.write_batch(&records)?;
 
             // Apply to memtable
             for (key, value) in items {
@@ -1615,7 +1627,7 @@ impl<C: Cache> Engine<C> {
                     record
                 })
                 .collect();
-            core.wal_mut(cf).write_batch(&records)?;
+            core.wal_mut(cf)?.write_batch(&records)?;
 
             // Apply to memtable
             for key in keys {
@@ -1710,7 +1722,7 @@ impl<C: Cache> Engine<C> {
             // Write range tombstone to WAL
             let mut record = LogRecord::range_tombstone(start.to_vec(), end.to_vec());
             record.column_family = Some(cf.to_string());
-            core.wal_mut(cf).write_record(&record)?;
+            core.wal_mut(cf)?.write_record(&record)?;
 
             // Add to EngineCore-level range tombstones (survives flushes)
             core.range_tombstones_mut()
@@ -1817,25 +1829,57 @@ impl<C: Cache> Engine<C> {
         // Lock core and copy / persist data
         let core = self.core.lock();
 
+        // Build manifest mapping CF → SSTable filenames
+        let mut manifest = SnapshotManifest {
+            column_families: HashMap::new(),
+        };
+
         // Copy or persist each table
         for cf in core.version_set().column_families() {
             let tables = core.version_set().get_tables(&cf);
+            let mut cf_filenames = Vec::new();
             for (i, table) in tables.iter().enumerate() {
-                if let Some(ref path) = table.path {
-                    let fname = path
-                        .file_name()
+                let fname_string;
+                let fname = if let Some(ref path) = table.path {
+                    path.file_name()
                         .map(|n| n.to_os_string())
                         .unwrap_or_else(|| {
                             std::ffi::OsString::from(format!("cf_{}_table_{}.sst", cf, i))
-                        });
-                    let dest = backup_dir.join(fname);
+                        })
+                } else {
+                    std::ffi::OsString::from(format!("{}_{}.sst", cf, i))
+                };
+                fname_string = fname.to_string_lossy().to_string();
+                let dest = backup_dir.join(&fname_string);
+                if let Some(ref path) = table.path {
                     std::fs::copy(path, &dest)?;
                 } else {
-                    let sst_path = backup_dir.join(format!("{}_{}.sst", cf, i));
-                    Self::persist_table_to_sstable(table, &sst_path, &self.options)?;
+                    Self::persist_table_to_sstable(table, &dest, &self.options)?;
+                }
+                cf_filenames.push(fname_string);
+            }
+            manifest.column_families.insert(cf, cf_filenames);
+        }
+
+        // Also copy all orphaned .sst files from the sstables directory
+        // so that the snapshot contains a complete copy of the data dir.
+        if let Ok(entries) = std::fs::read_dir(&self._sst_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "sst") {
+                    let fname = path.file_name().unwrap_or_default();
+                    let dest = backup_dir.join(fname);
+                    if !dest.exists() {
+                        let _ = std::fs::copy(&path, &dest);
+                    }
                 }
             }
         }
+
+        // Write the manifest
+        let manifest_json = serde_json::to_string(&manifest)
+            .map_err(|e| crate::LsmError::InvalidArgument(format!("Failed to serialize manifest: {}", e)))?;
+        std::fs::write(backup_dir.join("snapshot.manifest"), &manifest_json)?;
 
         // Copy saved WALs into the backup directory.
         // Always write at least an empty wal.log so list_snapshots can
@@ -1858,6 +1902,18 @@ impl<C: Cache> Engine<C> {
         }
 
         Ok(())
+    }
+
+    /// Load a `SnapshotManifest` from a snapshot directory, if present.
+    fn load_snapshot_manifest(snapshot_dir: &Path) -> Result<Option<SnapshotManifest>> {
+        let manifest_path = snapshot_dir.join("snapshot.manifest");
+        if !manifest_path.exists() {
+            return Ok(None);
+        }
+        let json_str = std::fs::read_to_string(&manifest_path)?;
+        let manifest: SnapshotManifest = serde_json::from_str(&json_str)
+            .map_err(|e| crate::LsmError::InvalidArgument(format!("Failed to parse snapshot manifest: {}", e)))?;
+        Ok(Some(manifest))
     }
 
     /// List all snapshots found inside `backup_dir`.
@@ -1927,7 +1983,11 @@ impl<C: Cache> Engine<C> {
         let data_dir = self
             ._sst_dir
             .parent()
-            .expect("sst_dir must have a parent (engine data dir)");
+            .ok_or_else(|| {
+                crate::infra::error::LsmError::InvalidArgument(
+                    "sst_dir must have a parent (engine data dir)".to_string(),
+                )
+            })?;
         let sst_dir = &self._sst_dir;
 
         std::fs::create_dir_all(data_dir)?;
@@ -1940,7 +2000,8 @@ impl<C: Cache> Engine<C> {
                 continue;
             }
             if path.extension().is_some_and(|ext| ext == "sst") {
-                let dest = sst_dir.join(path.file_name().unwrap());
+                let Some(fname) = path.file_name() else { continue; };
+                let dest = sst_dir.join(fname);
                 std::fs::copy(&path, &dest)?;
             } else if path.file_name().is_some_and(|n| n == "wal.log") {
                 let dest = data_dir.join("wal.log");
