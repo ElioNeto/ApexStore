@@ -58,7 +58,7 @@ fn bench_single_write(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(value_size), &(), |b, &_| {
             let (temp_dir, data_dir) = setup_temp_dir("single_write");
-            let mut engine = apexstore::LsmEngine::new_from_config(
+            let engine = apexstore::LsmEngine::new_from_config(
                 &LsmConfig::builder()
                     .dir_path(data_dir.clone())
                     .memtable_max_size(16 * 1024 * 1024)
@@ -100,7 +100,7 @@ fn bench_batch_write(c: &mut Criterion) {
             &batch_size,
             |b, &bs| {
                 let (temp_dir, data_dir) = setup_temp_dir("batch_write");
-                let mut engine = apexstore::LsmEngine::new_from_config(
+                let engine = apexstore::LsmEngine::new_from_config(
                     &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(bs * 220)
@@ -145,7 +145,7 @@ fn bench_memtable_flush(c: &mut Criterion) {
             &memtable_size,
             |b, &ms| {
                 let (temp_dir, data_dir) = setup_temp_dir("memtable_flush");
-                let mut engine = apexstore::LsmEngine::new_from_config(
+                let engine = apexstore::LsmEngine::new_from_config(
                     &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(ms)
@@ -192,7 +192,7 @@ fn bench_sstable_flush(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::from_parameter(records), &records, |b, &_r| {
         let (temp_dir, data_dir) = setup_temp_dir("sstable_flush");
-        let mut engine = apexstore::LsmEngine::new_from_config(
+        let engine = apexstore::LsmEngine::new_from_config(
             &LsmConfig::builder()
                 .dir_path(data_dir.clone())
                 .memtable_max_size(10 * 1024 * 1024)
@@ -249,7 +249,7 @@ fn bench_write_by_size(c: &mut Criterion) {
             &(),
             |b, &_| {
                 let (temp_dir, data_dir) = setup_temp_dir("write_by_size");
-                let mut engine = apexstore::LsmEngine::new_from_config(
+                let engine = apexstore::LsmEngine::new_from_config(
                     &LsmConfig::builder()
                         .dir_path(data_dir.clone())
                         .memtable_max_size(16 * 1024 * 1024)

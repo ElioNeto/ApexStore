@@ -82,7 +82,7 @@ fn sstable_config(data_dir: PathBuf, num_keys: usize) -> LsmConfig {
 fn bench_read_latency_memtable_1k(c: &mut Criterion) {
     let mut group = c.benchmark_group("read_latency_memtable_1k");
     let (temp_dir, data_dir) = setup_temp_dir("latency_mem_1k");
-    let mut engine = apexstore::LsmEngine::new_from_config(
+    let engine = apexstore::LsmEngine::new_from_config(
         &memtable_config(data_dir, 1_000),
         GlobalBlockCache::new(100, 4096),
     )
@@ -114,7 +114,7 @@ fn bench_read_latency_memtable_1k(c: &mut Criterion) {
 fn bench_read_latency_memtable_100k(c: &mut Criterion) {
     let mut group = c.benchmark_group("read_latency_memtable_100k");
     let (temp_dir, data_dir) = setup_temp_dir("latency_mem_100k");
-    let mut engine = apexstore::LsmEngine::new_from_config(
+    let engine = apexstore::LsmEngine::new_from_config(
         &memtable_config(data_dir, 100_000),
         GlobalBlockCache::new(100, 4096),
     )
@@ -150,7 +150,7 @@ fn bench_read_latency_memtable_100k(c: &mut Criterion) {
 fn bench_read_latency_sstable_1k(c: &mut Criterion) {
     let mut group = c.benchmark_group("read_latency_sstable_1k");
     let (temp_dir, data_dir) = setup_temp_dir("latency_sst_1k");
-    let mut engine = apexstore::LsmEngine::new_from_config(
+    let engine = apexstore::LsmEngine::new_from_config(
         &sstable_config(data_dir, 1_000),
         GlobalBlockCache::new(100, 4096),
     )
@@ -182,7 +182,7 @@ fn bench_read_latency_sstable_1k(c: &mut Criterion) {
 fn bench_read_latency_sstable_100k(c: &mut Criterion) {
     let mut group = c.benchmark_group("read_latency_sstable_100k");
     let (temp_dir, data_dir) = setup_temp_dir("latency_sst_100k");
-    let mut engine = apexstore::LsmEngine::new_from_config(
+    let engine = apexstore::LsmEngine::new_from_config(
         &sstable_config(data_dir, 100_000),
         GlobalBlockCache::new(100, 4096),
     )
@@ -218,7 +218,7 @@ fn bench_read_latency_sstable_100k(c: &mut Criterion) {
 fn bench_write_latency_1k(c: &mut Criterion) {
     let mut group = c.benchmark_group("write_latency_1k");
     let (temp_dir, data_dir) = setup_temp_dir("latency_write_1k");
-    let mut engine = apexstore::LsmEngine::new_from_config(
+    let engine = apexstore::LsmEngine::new_from_config(
         &memtable_config(data_dir, 1_000),
         GlobalBlockCache::new(100, 4096),
     )
@@ -257,7 +257,7 @@ fn bench_write_latency_1k(c: &mut Criterion) {
 fn bench_write_latency_100k(c: &mut Criterion) {
     let mut group = c.benchmark_group("write_latency_100k");
     let (temp_dir, data_dir) = setup_temp_dir("latency_write_100k");
-    let mut engine = apexstore::LsmEngine::new_from_config(
+    let engine = apexstore::LsmEngine::new_from_config(
         &LsmConfig::builder()
             .dir_path(data_dir)
             .memtable_max_size(4 * 1024 * 1024) // 4MB — will trigger multiple flushes

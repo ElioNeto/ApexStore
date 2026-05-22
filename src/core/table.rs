@@ -27,6 +27,11 @@ impl Clone for Table {
 }
 
 impl Table {
+    /// Build an in-memory Table from key-value data.
+    ///
+    /// A Bloom filter is created for the table to accelerate negative
+    /// lookups (keys that definitely do not exist).  The false-positive
+    /// rate is set to ~1 %.
     pub fn build(
         data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
         _options: &crate::core::engine::EngineOptions,
@@ -37,13 +42,31 @@ impl Table {
             } else {
                 (Vec::new(), Vec::new())
             };
+
+        // Build an in-memory Bloom filter so the engine can quickly reject
+        // lookups for absent keys without searching the BTreeMap.
+        let bloom_filter = if !data.is_empty() {
+            let num_items = data.len();
+            match bloomfilter::Bloom::<[u8]>::new_for_fp_rate(num_items, 0.01) {
+                Ok(mut bf) => {
+                    for key in data.keys() {
+                        bf.set(key);
+                    }
+                    Some(bf)
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
         Self {
             data,
             level: 0,
             path: None,
             min_key,
             max_key,
-            bloom_filter: None,
+            bloom_filter,
         }
     }
 

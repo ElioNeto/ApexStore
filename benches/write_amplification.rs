@@ -50,7 +50,7 @@ fn bench_write_amplification_leveled(c: &mut Criterion) {
                 .build()
                 .unwrap();
 
-            let mut engine =
+            let engine =
                 LsmEngine::new_from_config(&config, GlobalBlockCache::new(1, 4096)).unwrap();
 
             // Write enough keys to trigger multiple flushes and compactions
@@ -99,7 +99,7 @@ fn bench_write_amplification_size_tiered(c: &mut Criterion) {
                 .build()
                 .unwrap();
 
-            let mut engine =
+            let engine =
                 LsmEngine::new_from_config(&config, GlobalBlockCache::new(1, 4096)).unwrap();
 
             let num_keys = 10_000usize;

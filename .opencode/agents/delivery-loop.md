@@ -2,7 +2,7 @@
 description: Implementa tarefas, valida TODOs, executa a pipeline local e itera até sucesso
 mode: subagent
 temperature: 0.0
-maxSteps: 40
+maxSteps: 9999
 permission:
   # Permite todas as ferramentas sem exceção
   "*": allow

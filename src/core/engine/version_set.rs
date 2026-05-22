@@ -123,10 +123,6 @@ impl<C: Cache> VersionSet<C> {
         self.clear_cache();
     }
 
-    pub fn current_version(&self) -> crate::core::version::Version<C> {
-        crate::core::version::Version::new()
-    }
-
     pub fn table_count(&self, cf: &str) -> usize {
         self.tables.get(cf).map_or(0, |v| v.len())
     }

@@ -120,9 +120,23 @@ impl<I: StorageIterator> StorageIterator for MergeIterator<I> {
         !self.heap.is_empty()
     }
 
-    fn seek(&mut self, _key: &[u8]) {
-        // Simplified seek for now: rebuild heap from pointers and seek each
-        unimplemented!("Seek not required for basic scan/keys optimization")
+    fn seek(&mut self, key: &[u8]) {
+        // Collect current entries from the heap (preserves original indices).
+        let entries: Vec<HeapEntry<I>> = self.heap.drain().collect();
+
+        // Seek each sub-iterator to the target key.
+        for entry in entries {
+            let mut entry = entry;
+            entry.iter.seek(key);
+            if entry.iter.is_valid() {
+                self.heap.push(entry);
+            }
+        }
+
+        // Reset current_key and skip duplicates (newer entries for the same
+        // key that the seek may have positioned on).
+        self.current_key = None;
+        self.skip_duplicates();
     }
 }
 
@@ -258,5 +272,85 @@ mod tests {
         // Verify the heap-based MergeIterator correctly interleaved keys
         // Each heap push is O(log N) — the BinaryHeap implementation provides
         // this guarantee at the type level.
+    }
+
+    #[test]
+    fn test_merge_iterator_seek() {
+        let iter_a = MockIter::new(
+            vec!["apple", "cherry", "elderberry"],
+            vec!["v1", "v3", "v5"],
+        );
+        let iter_b = MockIter::new(vec!["banana", "date", "fig"], vec!["v2", "v4", "v6"]);
+        let iter_c = MockIter::new(vec!["grape", "honeydew"], vec!["v7", "v8"]);
+
+        let iters = vec![iter_a, iter_b, iter_c];
+        let mut merged = MergeIterator::new(iters);
+
+        // Seek to "date" — should position at "date"
+        merged.seek(b"date");
+        assert!(
+            merged.is_valid(),
+            "should be valid after seek to existing key"
+        );
+        assert_eq!(merged.key(), b"date", "should seek to 'date'");
+        assert_eq!(merged.value(), b"v4");
+
+        // Next after seek should be "elderberry"
+        merged.next();
+        assert_eq!(merged.key(), b"elderberry");
+
+        // Seek before all keys
+        let mut merged2 = MergeIterator::new(vec![MockIter::new(
+            vec!["banana", "date"],
+            vec!["v2", "v4"],
+        )]);
+        merged2.seek(b"apple");
+        assert!(merged2.is_valid());
+        assert_eq!(merged2.key(), b"banana");
+
+        // Seek to non-existing key between two keys
+        let mut merged3 = MergeIterator::new(vec![MockIter::new(
+            vec!["apple", "cherry", "date"],
+            vec!["v1", "v3", "v4"],
+        )]);
+        merged3.seek(b"blueberry");
+        assert!(merged3.is_valid());
+        assert_eq!(
+            merged3.key(),
+            b"cherry",
+            "should land on first key >= target"
+        );
+
+        // Seek past the last key
+        let mut merged4 = MergeIterator::new(vec![MockIter::new(
+            vec!["apple", "banana"],
+            vec!["v1", "v2"],
+        )]);
+        merged4.seek(b"zebra");
+        assert!(!merged4.is_valid(), "should be invalid after seek past end");
+    }
+
+    #[test]
+    fn test_merge_iterator_seek_with_duplicates() {
+        // Two iterators with overlapping keys — the lower-index one should win
+        let iter_a = MockIter::new(vec!["apple", "cherry"], vec!["v1", "v3"]);
+        let iter_b = MockIter::new(vec!["apple", "date"], vec!["v1_new", "v4"]);
+
+        let iters = vec![iter_a, iter_b];
+        let mut merged = MergeIterator::new(iters);
+
+        // Seek to "apple" — iter_a (index 0) has it, should see "v1" (newer wins = lower index)
+        merged.seek(b"apple");
+        assert!(merged.is_valid());
+        assert_eq!(merged.key(), b"apple");
+        // iter_a has index 0 (lower) so it should win
+        // But the current MockIter.seek positions on the FIRST key >= key
+        // So both iter_a and iter_b will be at "apple"
+        // lower index wins
+
+        merged.next();
+        // After "apple" (from iter_a), next should be "cherry" (iter_a's next)
+        // because "cherry" < "date"
+        assert_eq!(merged.key(), b"cherry");
     }
 }

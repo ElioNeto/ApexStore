@@ -17,7 +17,7 @@ fn create_test_engine(
 fn test_cli_scan_pagination_basic() -> Result<(), Box<dyn std::error::Error>> {
     let base_dir = tempdir()?;
     let config = create_test_engine(base_dir.path())?;
-    let mut engine = LsmEngine::new_from_config(
+    let engine = LsmEngine::new_from_config(
         &config,
         apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
     )?;
@@ -41,7 +41,7 @@ fn test_cli_scan_pagination_basic() -> Result<(), Box<dyn std::error::Error>> {
 fn test_cli_scan_pagination_cursor() -> Result<(), Box<dyn std::error::Error>> {
     let base_dir = tempdir()?;
     let config = create_test_engine(base_dir.path())?;
-    let mut engine = LsmEngine::new_from_config(
+    let engine = LsmEngine::new_from_config(
         &config,
         apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
     )?;
@@ -71,7 +71,7 @@ fn test_cli_scan_pagination_cursor() -> Result<(), Box<dyn std::error::Error>> {
 fn test_cli_prefix_search_pagination() -> Result<(), Box<dyn std::error::Error>> {
     let base_dir = tempdir()?;
     let config = create_test_engine(base_dir.path())?;
-    let mut engine = LsmEngine::new_from_config(
+    let engine = LsmEngine::new_from_config(
         &config,
         apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
     )?;
@@ -102,7 +102,7 @@ fn test_cli_prefix_search_pagination() -> Result<(), Box<dyn std::error::Error>>
 fn test_scan_range_boundary() -> Result<(), Box<dyn std::error::Error>> {
     let base_dir = tempdir()?;
     let config = create_test_engine(base_dir.path())?;
-    let mut engine = LsmEngine::new_from_config(
+    let engine = LsmEngine::new_from_config(
         &config,
         apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
     )?;

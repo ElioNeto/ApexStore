@@ -2,7 +2,7 @@
 description: Implementa uma única issue por vez seguindo o .task-state.json. Commit somente após testes e pipeline verdes.
 mode: subagent
 temperature: 0.0
-maxSteps: 280
+maxSteps: 9999
 permission:
   read: allow
   list: allow

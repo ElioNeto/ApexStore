@@ -1,13 +1,13 @@
 use crate::core::log_record::LogRecord;
 use crate::infra::codec::{decode, encode};
-use crate::infra::error::{LsmError, Result};
+use crate::infra::error::Result;
 use crc32fast::Hasher;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 /// WAL frame version constants for backward compatibility.
 ///
@@ -74,13 +74,32 @@ pub struct WriteAheadLog {
     /// Exposed read-only so callers (e.g. `LsmEngine::stats_all`) can
     /// query the file size without going through the write lock.
     pub(crate) path: PathBuf,
+    /// Number of buffered writes since the last fsync.
+    /// Used to amortise fsync cost across multiple write_record calls.
+    batch_count: Mutex<usize>,
 }
+
+/// How many `write_record` calls to accumulate before issuing an fsync.
+///
+/// A value of 1 means every write fsyncs (maximum durability).
+/// Higher values improve write throughput at the cost of a wider
+/// durability window in the event of a crash.
+const WAL_SYNC_INTERVAL: usize = 4;
 
 const MAX_WAL_RECORD_BYTES: usize = 32 * 1024 * 1024; // 32 MiB
 
 impl WriteAheadLog {
-    pub fn new(dir_path: &std::path::Path) -> Result<Self> {
-        let wal_path = dir_path.join("wal.log");
+    /// Open or create a WAL file for the given column family.
+    ///
+    /// The file is stored as `<dir_path>/wal-{cf}.log`.  For the default
+    /// column family the file is `<dir_path>/wal.log` for backward
+    /// compatibility.
+    pub fn new(dir_path: &std::path::Path, cf: &str) -> Result<Self> {
+        let wal_path = if cf == "default" || cf.is_empty() {
+            dir_path.join("wal.log")
+        } else {
+            dir_path.join(format!("wal-{}.log", cf))
+        };
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -89,10 +108,17 @@ impl WriteAheadLog {
         Ok(Self {
             file: Mutex::new(BufWriter::new(file)),
             path: wal_path,
+            batch_count: Mutex::new(0),
         })
     }
 
-    /// Append a single record to the WAL and fsync.
+    /// Append a single record to the WAL with batched fsync.
+    ///
+    /// Instead of fsyncing after every write (which limits throughput to
+    /// ~1 100 ops/s on typical hardware), the method accumulates
+    /// [`WAL_SYNC_INTERVAL`] records before issuing an fsync.  Callers
+    /// that need strict durability after every operation should use
+    /// [`WriteAheadLog::sync()`] explicitly.
     ///
     /// The on-disk format is:
     /// `[length: u32 LE][version: u8][payload: bytes][crc32: u32 LE]`
@@ -124,7 +150,16 @@ impl WriteAheadLog {
         writer.write_all(&serialized)?;
         writer.write_all(&checksum.to_le_bytes())?;
         writer.flush()?;
-        writer.get_ref().sync_all()?;
+
+        // Accumulate writes and fsync only every WAL_SYNC_INTERVAL calls.
+        let mut count = self.batch_count.lock();
+        *count += 1;
+        if *count >= WAL_SYNC_INTERVAL {
+            *count = 0;
+            // Drop the batch lock before fsync so we don't hold two locks.
+            drop(count);
+            writer.get_ref().sync_all()?;
+        }
 
         debug!(
             "WAL persisted: key={:?}, ts={}",
@@ -133,11 +168,66 @@ impl WriteAheadLog {
         Ok(())
     }
 
+    /// Append multiple records to the WAL with a single fsync.
+    ///
+    /// This is more efficient than calling `write_record` N times because
+    /// the lock is acquired only once and `flush() + sync_all()` is called
+    /// only once, regardless of the batch size.
+    ///
+    /// Each record uses the same on-disk frame format as `write_record`:
+    /// `[length: u32 LE][version: u8][payload: bytes][crc32: u32 LE]`
+    pub fn write_batch(&self, records: &[LogRecord]) -> Result<()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+
+        // Pre-encode all records and build frame data
+        let mut frames: Vec<Vec<u8>> = Vec::with_capacity(records.len());
+        for record in records {
+            let serialized = encode(record)?;
+            let version = WAL_CURRENT_FRAME_VERSION;
+            let length = 1u32 + serialized.len() as u32;
+            let length_bytes = length.to_le_bytes();
+
+            let mut hasher = Hasher::new();
+            hasher.update(&length_bytes);
+            hasher.update(&[version]);
+            hasher.update(&serialized);
+            let checksum = hasher.finalize();
+
+            let mut frame = Vec::with_capacity(4 + 1 + serialized.len() + 4);
+            frame.extend_from_slice(&length_bytes);
+            frame.push(version);
+            frame.extend_from_slice(&serialized);
+            frame.extend_from_slice(&checksum.to_le_bytes());
+            frames.push(frame);
+        }
+
+        let mut writer = self.file.lock();
+        for frame in &frames {
+            writer.write_all(frame)?;
+        }
+        writer.flush()?;
+        writer.get_ref().sync_all()?;
+
+        // Reset the single-write batch counter since we just fsynced.
+        let mut count = self.batch_count.lock();
+        *count = 0;
+        drop(count);
+
+        debug!("WAL batch persisted: {} records", records.len());
+        Ok(())
+    }
+
     /// Replay all records persisted in the WAL.
     ///
-    /// Called once during engine initialisation.  Returns an error if the
-    /// file contains a truncated or malformed frame, indicating a partial
-    /// write that was not fsynced before a crash.
+    /// Called once during engine initialisation.  Unlike the strict-error
+    /// behaviour of earlier versions, this implementation uses **tolerant
+    /// recovery**: corrupted frames (CRC mismatch, invalid length, unknown
+    /// version, deserialisation failure) are **skipped** with a warning
+    /// rather than aborting the entire recovery.  The engine can therefore
+    /// start up even if the WAL contains a limited amount of bit rot or
+    /// partial writes, recovering as many records as possible.
     ///
     /// The expected on-disk format is:
     /// `[length: u32 LE][version: u8][payload: bytes][crc32: u32 LE]`
@@ -149,13 +239,48 @@ impl WriteAheadLog {
     /// Frames with `version == 1` are deserialised with full `column_family`
     /// support.
     ///
-    /// WALs created by versions prior to the CRC32 addition will be rejected
-    /// with a `CorruptedData` error. The engine requires all WAL frames to
-    /// include the checksum for crash recovery safety.
+    /// # Locking
+    ///
+    /// Opens a **new** file handle internally.  If you need to read from
+    /// the same file descriptor that is currently being written (e.g. to
+    /// ensure buffered-but-not-yet-persisted data is visible), use
+    /// [`WriteAheadLog::recover_locked`] instead.
     pub fn recover(&self) -> Result<Vec<LogRecord>> {
+        self.recover_locked()
+    }
+
+    /// Read all records from the WAL, first **flushing** the writer so
+    /// that any buffered-but-not-yet-persisted records are visible during
+    /// recovery.
+    ///
+    /// Opens a **separate read-only handle** to the WAL file (using the
+    /// stored path) rather than `try_clone()` on the write handle, because
+    /// the write handle is opened with `append(true)` (write-only) and
+    /// cloning it yields another write-only fd that cannot be read.
+    ///
+    /// Like [`WriteAheadLog::recover`], corrupted frames are skipped with
+    /// a warning and the method returns as many valid records as possible.
+    pub fn recover_locked(&self) -> Result<Vec<LogRecord>> {
+        // 1. Lock and flush so all pending data is visible.
+        let mut guard = self.file.lock();
+        guard.flush()?;
+        guard.get_ref().sync_all()?;
+
+        // 2. Open a second, read-only handle to the file.
+        //    We hold the lock so no concurrent rename/rotation can happen.
+        let reader_file = OpenOptions::new().read(true).open(&self.path)?;
+        let file_size = reader_file
+            .metadata()
+            .map(|m| m.len() as usize)
+            .unwrap_or(0);
+        drop(guard);
+
+        // 3. Read frames with tolerant recovery.
+        let mut reader = BufReader::new(reader_file);
         let mut records = Vec::new();
-        let file = File::open(&self.path)?;
-        let mut reader = BufReader::new(file);
+        let mut skipped_frames: u64 = 0;
+        // Track reader position approximately via consumed bytes.
+        let mut pos: usize = 0;
 
         loop {
             let buf = reader.fill_buf()?;
@@ -164,64 +289,84 @@ impl WriteAheadLog {
             }
 
             if buf.len() < 4 {
-                // Trailing incomplete length prefix — partial WAL frame from crash
-                debug!(
-                    "WAL recovery: trailing incomplete frame at offset {}, discarding",
-                    buf.len()
-                );
+                // Trailing incomplete length prefix — partial WAL frame from crash.
+                debug!("WAL recovery: trailing incomplete frame at offset, discarding");
                 break;
             }
 
             let mut lengthbuf = [0u8; 4];
             reader.read_exact(&mut lengthbuf)?;
+            pos += 4;
             let length = u32::from_le_bytes(lengthbuf) as usize;
 
+            // --- Validate length (tolerant) ---
             if length == 0 || length > MAX_WAL_RECORD_BYTES {
-                return Err(LsmError::CorruptedData(
-                    "Invalid WAL record length".to_string(),
-                ));
+                warn!(
+                    "WAL recovery: invalid record length {}, skipping corrupted frame",
+                    length
+                );
+                skipped_frames += 1;
+                // Try to re-sync to the next valid frame boundary.
+                if !resync_after_invalid_length(&mut reader, &mut pos, file_size)? {
+                    break;
+                }
+                continue;
             }
 
-            if length < 1 {
-                return Err(LsmError::CorruptedData(
-                    "WAL record too short (missing version byte)".to_string(),
-                ));
+            // --- Quick plausibility check: do we have enough bytes left? ---
+            // A frame needs: version (1) + payload (length-1) + checksum (4)
+            let frame_remaining = 1 + (length - 1) + 4; // version + payload + checksum
+            if pos + frame_remaining > file_size {
+                warn!(
+                    "WAL recovery: plausible length {} but not enough bytes remain, resyncing",
+                    length
+                );
+                skipped_frames += 1;
+                if !resync_after_invalid_length(&mut reader, &mut pos, file_size)? {
+                    break;
+                }
+                continue;
             }
 
-            // Read version byte
+            // --- Read version byte ---
             let mut versionbuf = [0u8; 1];
             reader.read_exact(&mut versionbuf)?;
+            pos += 1;
             let version = versionbuf[0];
 
-            // The payload is length - 1 (excluding the version byte itself)
+            // --- Read payload ---
             let payload_len = length - 1;
             let mut payload = vec![0u8; payload_len];
-            if let Err(e) = reader.read_exact(&mut payload) {
-                if e.kind() == io::ErrorKind::UnexpectedEof {
-                    // Trailing partial payload — crash during write_record
+            match reader.read_exact(&mut payload) {
+                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                    // Trailing partial payload — crash during write_record.
                     debug!(
                         "WAL recovery: partial payload at end of log, discarding trailing frame"
                     );
                     break;
                 }
-                return Err(e.into());
+                Err(e) => return Err(e.into()),
+                Ok(_) => {}
             }
+            pos += payload_len;
 
-            // Read stored checksum
+            // --- Read stored checksum ---
             let mut checksumbuf = [0u8; 4];
-            if let Err(e) = reader.read_exact(&mut checksumbuf) {
-                if e.kind() == io::ErrorKind::UnexpectedEof {
-                    // Trailing partial checksum — crash during write_record fsync
+            match reader.read_exact(&mut checksumbuf) {
+                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                    // Trailing partial checksum — crash during fsync.
                     debug!(
                         "WAL recovery: partial checksum at end of log, discarding trailing frame"
                     );
                     break;
                 }
-                return Err(e.into());
+                Err(e) => return Err(e.into()),
+                Ok(_) => {}
             }
             let stored_checksum = u32::from_le_bytes(checksumbuf);
+            pos += 4;
 
-            // Recalculate and validate checksum over (length + version + payload)
+            // --- Validate CRC32 (tolerant) ---
             let mut hasher = Hasher::new();
             hasher.update(&lengthbuf);
             hasher.update(&[version]);
@@ -229,35 +374,54 @@ impl WriteAheadLog {
             let calculated = hasher.finalize();
 
             if stored_checksum != calculated {
-                return Err(LsmError::CorruptedData(
-                    "WAL record CRC32 mismatch: log may be truncated or corrupted".to_string(),
-                ));
+                warn!("WAL recovery: CRC32 mismatch, skipping corrupted frame");
+                skipped_frames += 1;
+                // Reader is already past the corrupted frame — continue.
+                continue;
             }
 
-            // Deserialize based on version
+            // --- Deserialize based on version (tolerant) ---
             let record = match version {
-                WAL_FRAME_VERSION_V0 => {
-                    let v0: LogRecordV0 = decode(&payload).map_err(|_| {
-                        LsmError::CorruptedData("WAL record V0 deserialization failed".to_string())
-                    })?;
-                    LogRecord::from(v0)
-                }
-                WAL_FRAME_VERSION_V1 => {
-                    let r: LogRecord = decode(&payload).map_err(|_| {
-                        LsmError::CorruptedData("WAL record V1 deserialization failed".to_string())
-                    })?;
-                    r
-                }
+                WAL_FRAME_VERSION_V0 => match decode::<LogRecordV0>(&payload) {
+                    Ok(v0) => LogRecord::from(v0),
+                    Err(e) => {
+                        warn!(
+                            "WAL recovery: V0 deserialization failed ({}), skipping corrupted frame",
+                            e
+                        );
+                        skipped_frames += 1;
+                        continue;
+                    }
+                },
+                WAL_FRAME_VERSION_V1 => match decode::<LogRecord>(&payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        warn!(
+                            "WAL recovery: V1 deserialization failed ({}), skipping corrupted frame",
+                            e
+                        );
+                        skipped_frames += 1;
+                        continue;
+                    }
+                },
                 other => {
-                    return Err(LsmError::CorruptedData(format!(
-                        "Unknown WAL frame version: {}",
+                    warn!(
+                        "WAL recovery: unknown frame version {}, skipping corrupted frame",
                         other
-                    )));
+                    );
+                    skipped_frames += 1;
+                    continue;
                 }
             };
 
             records.push(record);
         }
+
+        info!(
+            "WAL recovery: {} records recovered, {} frames skipped",
+            records.len(),
+            skipped_frames
+        );
 
         Ok(records)
     }
@@ -266,41 +430,57 @@ impl WriteAheadLog {
     ///
     /// # Crash Safety
     ///
-    /// All mutations happen on the **single file descriptor** already held
-    /// inside the `BufWriter`, while the `Mutex` is held.  There is no
-    /// second `open()` call and therefore no window between a truncate and
-    /// a reopen where a crash could leave the WAL in an inconsistent state.
+    /// The implementation uses **atomic file rotation** instead of
+    /// in-place truncation:
     ///
-    /// Execution order under the lock:
+    /// 1. An empty temporary file (`wal.log.new`) is created outside the
+    ///    lock (pure I/O, no lock contention).
+    /// 2. The `Mutex` is acquired.
+    /// 3. The old `BufWriter` is flushed and fsynced so any pending data
+    ///    is durable before the rotation.
+    /// 4. The temporary file is atomically renamed over `wal.log` via
+    ///    `std::fs::rename` (atomic on Linux).
+    /// 5. The in-memory `BufWriter` is replaced with a new handle to the
+    ///    (now empty) file.
     ///
-    /// 1. `flush()`    — drain the `BufWriter` user-space buffer to the OS
-    /// 2. `sync_all()` — fsync: ensure all bytes are on durable storage
-    /// 3. `set_len(0)` — atomically truncate the file to zero bytes
-    /// 4. `seek(0)`    — reset the write cursor to offset 0
-    ///
-    /// # Implementation note
-    ///
-    /// After truncation and seek the `BufWriter`'s own buffer is empty
-    /// (flushed in step 1), so the next write will correctly start at
-    /// offset 0 without needing to recreate the `BufWriter`.  We no
-    /// longer use `try_clone()` (which can fail on some platforms) to
-    /// create a new file handle.
+    /// If a crash occurs **before** the rename, the old WAL file is
+    /// untouched and will be replayed on next startup.  If a crash occurs
+    /// **after** the rename, the WAL is already empty — the engine finds
+    /// no frames to replay, which is correct because all data has been
+    /// flushed to SSTables.  There is no window where the WAL can be left
+    /// in an inconsistent state.
     pub fn clear(&self) -> Result<()> {
+        let tmp_path = self.path.with_extension("log.new");
+
+        // 1. Create an empty temp file (I/O — done without the lock so
+        //    concurrent writers are not blocked during file creation).
+        {
+            let tmp_file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&tmp_path)?;
+            tmp_file.sync_all()?;
+        }
+
+        // 2. Acquire the lock — no writes can interleave from here on.
         let mut guard = self.file.lock();
 
-        // 1. Flush the BufWriter's in-process buffer to the OS page cache.
+        // 3. Flush + fsync the old BufWriter so all pending data is durable.
         guard.flush()?;
+        guard.get_ref().sync_all()?;
 
-        // 2-4. Operate on the underlying File directly.
-        //      get_mut() gives us &mut File without releasing the BufWriter.
-        let file = guard.get_mut();
-        file.sync_all()?; // 2. fsync — durable before we erase
-        file.set_len(0)?; // 3. truncate in-place
-        file.seek(SeekFrom::Start(0))?; // 4. reset write position
+        // 4. Atomically replace wal.log with the empty temp file.
+        std::fs::rename(&tmp_path, &self.path)?;
 
-        // BufWriter was flushed in step 1 — its internal buffer is empty.
-        // The underlying File now has length 0 and position 0.
-        // No need to recreate the BufWriter; the next write is correct.
+        // 5. Replace the in-memory BufWriter with a fresh handle to the
+        //    new (now empty) file.
+        let new_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        *guard = BufWriter::new(new_file);
+
         Ok(())
     }
 
@@ -372,12 +552,89 @@ impl WriteAheadLog {
         Ok(())
     }
 
+    /// Flush the BufWriter and fsync the underlying file.
+    ///
+    /// Called during graceful shutdown to ensure all buffered data is
+    /// durably on disk before the engine is dropped.  Also resets the
+    /// batch counter so the next `write_record` starts a fresh batch.
+    pub fn sync(&self) -> Result<()> {
+        let mut guard = self.file.lock();
+        guard.flush()?;
+        guard.get_ref().sync_all()?;
+        let mut count = self.batch_count.lock();
+        *count = 0;
+        Ok(())
+    }
+
     /// Return the current size of the WAL file in bytes.
     pub fn size(&self) -> Result<u64> {
         std::fs::metadata(&self.path)
             .map(|m| m.len())
             .map_err(crate::infra::error::LsmError::Io)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: resync after invalid length
+// ---------------------------------------------------------------------------
+
+/// After reading an invalid frame length, scan forward byte-by-byte to find
+/// the next plausible frame boundary.
+///
+/// To reduce false positives, this function checks not only that the 4-byte
+/// candidate forms a valid length, but also that the **following byte** is
+/// a known WAL frame version (`0x00` for V0 or `0x01` for V1) — payload
+/// data is very unlikely to match both criteria by chance.
+///
+/// Returns `true` if a candidate was found (the reader is positioned right
+/// before the candidate's 4-byte length prefix), or `false` if the search
+/// reached EOF without finding a plausible frame start.
+///
+/// The scan is limited to [`MAX_WAL_RECORD_BYTES`] bytes to avoid an
+/// infinite loop on heavily corrupted data.
+fn resync_after_invalid_length(
+    reader: &mut BufReader<File>,
+    pos: &mut usize,
+    file_size: usize,
+) -> io::Result<bool> {
+    /// Minimum realistic frame length (version byte + serialised LogRecord payload).
+    ///
+    /// A LogRecord with both key and value empty serialises to 34 bytes
+    /// (Vec length prefixes 0+0 = 16, u128 timestamp = 16, bool = 1,
+    /// Option<String> = 1), so the WAL frame length field is at least
+    /// `1 + 34 = 35`.  Any candidate smaller than this is certainly a
+    /// false positive from payload data.
+    const MIN_LENGTH: usize = 35;
+    let max_scan = MAX_WAL_RECORD_BYTES;
+    let mut skip_byte = [0u8; 1];
+
+    for _ in 0..max_scan {
+        // Consume one byte forward.
+        if reader.read(&mut skip_byte)? == 0 {
+            return Ok(false); // EOF — no valid frame found.
+        }
+        *pos += 1;
+
+        // Peek at the next 4 bytes (fill_buf does NOT consume).
+        let buf = reader.fill_buf()?;
+        if buf.len() >= 5 {
+            let candidate = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+            let version_byte = buf[4];
+            // A plausible frame must:
+            // 1. Have a length in [MIN_LENGTH, MAX_WAL_RECORD_BYTES]
+            // 2. Fit within the file: candidate + version(1) + payload(candidate-1) + checksum(4) = candidate + 4
+            // 3. Be followed by a known WAL frame version byte
+            if (MIN_LENGTH..=MAX_WAL_RECORD_BYTES).contains(&candidate)
+                && *pos + 4 + candidate <= file_size
+                && (version_byte == WAL_FRAME_VERSION_V0 || version_byte == WAL_FRAME_VERSION_V1)
+            {
+                return Ok(true); // Found a plausible frame start.
+            }
+        }
+    }
+
+    // Exhausted scan limit without finding a valid frame.
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -388,7 +645,7 @@ mod tests {
 
     fn create_test_wal() -> (TempDir, WriteAheadLog) {
         let temp_dir = TempDir::new().unwrap();
-        let wal = WriteAheadLog::new(temp_dir.path()).unwrap();
+        let wal = WriteAheadLog::new(temp_dir.path(), "default").unwrap();
         (temp_dir, wal)
     }
 
@@ -405,7 +662,9 @@ mod tests {
     }
 
     #[test]
-    fn test_wal_crc32_corruption_detection() {
+    fn test_wal_crc32_corruption_skipped() {
+        // With tolerant recovery, a corrupted frame is skipped rather than
+        // causing the entire recovery to fail.
         let (temp_dir, wal) = create_test_wal();
 
         let record = LogRecord::new(b"test_key".to_vec(), b"test_value".to_vec());
@@ -427,15 +686,9 @@ mod tests {
         file.write_all(&data).unwrap();
         drop(file);
 
-        // Recovery should fail with CRC32 mismatch
-        let result = wal.recover();
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            LsmError::CorruptedData(msg) => {
-                assert!(msg.contains("CRC32 mismatch"));
-            }
-            _ => panic!("Expected CorruptedData error"),
-        }
+        // Recovery should succeed but skip the corrupted frame
+        let records = wal.recover().unwrap();
+        assert_eq!(records.len(), 0, "corrupted frame should be skipped");
     }
 
     #[test]
@@ -574,7 +827,7 @@ mod tests {
         fs::write(&wal_path, &frame).unwrap();
 
         // Now recover via WriteAheadLog
-        let wal = WriteAheadLog::new(temp_dir.path()).unwrap();
+        let wal = WriteAheadLog::new(temp_dir.path(), "default").unwrap();
         let recovered = wal.recover().unwrap();
         assert_eq!(recovered.len(), 1);
 
@@ -585,6 +838,63 @@ mod tests {
 
         let cf = recovered[0].column_family.as_deref().unwrap_or("default");
         assert_eq!(cf, "default");
+    }
+
+    #[test]
+    fn test_wal_tolerant_recovery_after_crc_corruption() {
+        // Write two valid records, corrupt the first one, then verify that
+        // recovery skips the corrupted frame and recovers the second one.
+        let (temp_dir, wal) = create_test_wal();
+
+        let record1 = LogRecord::new(b"key1".to_vec(), b"value1".to_vec());
+        let record2 = LogRecord::new(b"key2".to_vec(), b"value2".to_vec());
+        wal.write_record(&record1).unwrap();
+        wal.write_record(&record2).unwrap();
+
+        // Corrupt the first frame
+        let wal_path = temp_dir.path().join("wal.log");
+        let mut data = fs::read(&wal_path).unwrap();
+        if data.len() > 9 {
+            // Flip a bit in the version byte of the first frame (offset 4)
+            data[4] ^= 0x01;
+        }
+        fs::write(&wal_path, data).unwrap();
+
+        // Recovery should skip the corrupted first frame and recover valid
+        // frames that follow.
+        let records = wal.recover().unwrap();
+        assert_eq!(records.len(), 1, "should recover the second (valid) frame");
+        assert_eq!(records[0], record2);
+    }
+
+    #[test]
+    fn test_wal_tolerant_recovery_invalid_length() {
+        // Write two valid records, corrupt the length of the first one,
+        // then verify that recovery resyncs and finds the second one.
+        let (temp_dir, wal) = create_test_wal();
+
+        let record1 = LogRecord::new(b"key1".to_vec(), b"value1".to_vec());
+        let record2 = LogRecord::new(b"key2".to_vec(), b"value2".to_vec());
+        wal.write_record(&record1).unwrap();
+        wal.write_record(&record2).unwrap();
+
+        // Corrupt the length prefix of the first frame (set it to 0xFFFFFFFF)
+        let wal_path = temp_dir.path().join("wal.log");
+        let mut data = fs::read(&wal_path).unwrap();
+        if data.len() > 4 {
+            // Set length of first frame to an invalid value
+            data[0..4].copy_from_slice(&[0xff, 0xff, 0xff, 0xff]);
+        }
+        fs::write(&wal_path, data).unwrap();
+
+        // Recovery should resync and recover the second frame
+        let records = wal.recover().unwrap();
+        assert_eq!(
+            records.len(),
+            1,
+            "should recover the second (valid) frame after resync"
+        );
+        assert_eq!(records[0], record2);
     }
 
     #[test]

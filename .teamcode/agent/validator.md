@@ -3,7 +3,7 @@ name: validator
 description: Valida critérios de aceite da issue com evidência objetiva. Nunca edita código.
 mode: subagent
 temperature: 0.0
-maxSteps: 140
+maxSteps: 9999
 permission:
   read: allow
   list: allow

@@ -2,7 +2,7 @@
 description: Agente autossuficiente que executa qualquer tarefa até o sucesso absoluto
 mode: primary
 temperature: 0.0
-steps: 150
+steps: 9999
 permission:
   # Permite todas as ferramentas sem exceção
   "*": allow
