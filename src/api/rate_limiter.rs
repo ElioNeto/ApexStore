@@ -40,7 +40,8 @@ impl IpTrack {
     fn prune(&mut self, window: Duration) {
         let now = Instant::now();
         self.timestamps.retain(|t| now.duration_since(*t) < window);
-        self.endpoint_counts.clear();
+        // endpoint_counts are pruned implicitly when the whole IpTrack
+        // is removed (retain below checks timestamps.is_empty()).
     }
 }
 
@@ -97,13 +98,23 @@ impl RateLimiterState {
         });
 
         let track = requests.entry(peer).or_insert_with(IpTrack::new);
+
+        // Per-endpoint limit: use dedicated endpoint counter
+        if let Some(ep) = endpoint {
+            let count = track.endpoint_counts.get(ep).copied().unwrap_or(0);
+            if count >= limit {
+                return true;
+            }
+            track.timestamps.push(now);
+            *track.endpoint_counts.entry(ep.to_string()).or_insert(0) += 1;
+            return false;
+        }
+
+        // Global per-IP limit: use total timestamp count
         if track.timestamps.len() >= limit {
             return true;
         }
         track.timestamps.push(now);
-        if let Some(ep) = endpoint {
-            *track.endpoint_counts.entry(ep.to_string()).or_insert(0) += 1;
-        }
         false
     }
 

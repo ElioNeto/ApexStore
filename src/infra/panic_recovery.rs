@@ -48,20 +48,22 @@ pub struct PanicInfo {
 /// Wraps `thread::spawn` with `std::panic::catch_unwind` so that panics
 /// are captured instead of crashing the process.
 pub struct PanicRecovery {
-    /// Recent panic history (circular buffer).
-    panics: Mutex<Vec<PanicInfo>>,
+    /// Recent panic history (circular buffer) — shared via Arc so spawned
+    /// threads can record panics on the same instance.
+    panics: Arc<Mutex<Vec<PanicInfo>>>,
     /// Maximum number of recent panics to retain.
     max_history: usize,
-    /// Callback invoked on each panic.
-    on_panic_callback: Mutex<Option<PanicCallback>>,
+    /// Callback invoked on each panic — shared via Arc so spawned threads
+    /// can invoke the same callback.
+    on_panic_callback: Arc<Mutex<Option<PanicCallback>>>,
 }
 
 impl Default for PanicRecovery {
     fn default() -> Self {
         Self {
-            panics: Mutex::new(Vec::with_capacity(16)),
+            panics: Arc::new(Mutex::new(Vec::with_capacity(16))),
             max_history: 16,
-            on_panic_callback: Mutex::new(None),
+            on_panic_callback: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -120,13 +122,15 @@ impl PanicRecovery {
     // ── Internal helpers ──
 
     /// Create a clone of self internals for use in spawned threads.
+    ///
+    /// The returned instance shares the same `panics` buffer and
+    /// `on_panic_callback` via `Arc`, so panics in spawned threads are
+    /// visible on the original `PanicRecovery`.
     fn clone_inner(&self) -> Self {
-        // We only need the callback reference for the spawned thread
-        // For simplicity, we share via the existing instance
         Self {
-            panics: Mutex::new(Vec::with_capacity(self.max_history)),
+            panics: self.panics.clone(),
             max_history: self.max_history,
-            on_panic_callback: Mutex::new(None),
+            on_panic_callback: self.on_panic_callback.clone(),
         }
     }
 

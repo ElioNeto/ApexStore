@@ -133,7 +133,7 @@ impl BackupScheduler {
                     drop(cfg);
 
                     // Create timestamp-based backup directory
-                    let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+                    let timestamp = Utc::now().format("%Y%m%d_%H%M%S_%3f").to_string();
                     let backup_path = backup_dir.join(&timestamp);
 
                     if let Err(e) = std::fs::create_dir_all(&backup_path) {
@@ -184,7 +184,7 @@ impl BackupScheduler {
 
         std::fs::create_dir_all(&backup_dir)?;
 
-        let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S_%3f").to_string();
         let backup_path = backup_dir.join(&timestamp);
 
         (self.snapshot_fn)(&backup_path)?;

@@ -178,10 +178,12 @@ mod tests {
         let ps = PubSub::new(16);
         assert_eq!(ps.subscriber_count("test"), None);
 
-        ps.subscribe("test");
+        let _rx = ps.subscribe("test");
         assert_eq!(ps.subscriber_count("test"), Some(1));
+        drop(_rx);
 
-        ps.subscribe("test");
+        let _rx1 = ps.subscribe("test");
+        let _rx2 = ps.subscribe("test");
         assert_eq!(ps.subscriber_count("test"), Some(2));
     }
 

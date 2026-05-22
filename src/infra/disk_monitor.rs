@@ -111,9 +111,10 @@ impl DiskMonitor {
     /// Perform a single disk space check.
     ///
     /// Returns `Ok(available_bytes)` on success, or an error describing the
-    /// failure.
+    /// failure.  Also evaluates thresholds and invokes the critical callback
+    /// when the available space drops below the critical threshold.
     pub fn check_space(&self) -> Result<u64, String> {
-        check_available_space(&self.inner.dir_path)
+        self.inner.check_space()
     }
 }
 
@@ -175,8 +176,8 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let mut monitor = DiskMonitor::new(
             &dir_path,
-            10 * 1024 * 1024 * 1024, // 10 GiB warn (always above available)
-            1,                         // 1 byte critical (always below available)
+            1,          // 1 byte warn (unlikely to trigger)
+            u64::MAX,   // critical threshold (always fires)
             Duration::from_secs(1),
         );
         monitor.on_critical(move || {
