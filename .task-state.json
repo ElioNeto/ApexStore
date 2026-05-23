@@ -1035,6 +1035,46 @@
       "files": ["src/api/auth/manager.rs", "src/api/mod.rs"],
       "depends_on": [],
       "notes": "Added engine field to TokenManager, new_with_engine(engine) constructor, load_tokens_from_engine on startup, persist_token/delete_persisted_token helpers. create_token() and delete_token() now persist to engine with __token:{id} key. start_server() passes engine to new_with_engine()."
+    },
+    {
+      "id": "T267_1",
+      "description": "Issue #267: Persist TTL metadata (expires_at) in flush_memtable_impl via __ttl:{key} side-table entries in SSTable and in-memory Table",
+      "status": "done",
+      "files": ["src/core/engine/mod.rs", "src/core/engine/version_set.rs", "src/core/table.rs"],
+      "depends_on": [],
+      "notes": "In flush_memtable_impl, for each key with expires_at, write a __ttl:{key} -> expires_at entry to both the SstableBuilder and the in-memory Table.data BTreeMap. This preserves TTL metadata across flushes and restarts."
+    },
+    {
+      "id": "T267_2",
+      "description": "Issue #267: Check is_expired() in VersionSet::get() when reading from SSTable via SstableReader",
+      "status": "done",
+      "files": ["src/core/engine/version_set.rs"],
+      "depends_on": [],
+      "notes": "In VersionSet::get(), after reading a LogRecord from SstableReader, check record.is_expired() and treat expired keys as not-found (continue to next table)."
+    },
+    {
+      "id": "T267_3",
+      "description": "Issue #267: Check TTL expiry in get_cf() after version_set lookup",
+      "status": "done",
+      "files": ["src/core/engine/mod.rs"],
+      "depends_on": [],
+      "notes": "In get_cf(), after version_set().get() returns a value, look up __ttl:{key} in the version_set and check if the expires_at timestamp is in the past. If expired, return None."
+    },
+    {
+      "id": "T267_4",
+      "description": "Issue #267: Filter expired TTL keys and internal __ttl: prefix in scan_cf",
+      "status": "done",
+      "files": ["src/core/engine/mod.rs"],
+      "depends_on": [],
+      "notes": "In scan_cf(), filter out keys starting with __ttl: prefix (internal metadata). For keys from SSTables (not found in memtables), check the __ttl:{key} side-table and skip expired ones."
+    },
+    {
+      "id": "T267_5",
+      "description": "Issue #267: Run cargo test, cargo clippy, cargo fmt to verify",
+      "status": "done",
+      "files": [],
+      "depends_on": ["T267_1", "T267_2", "T267_3", "T267_4"],
+      "notes": "362 lib tests + 32 integration tests pass. cargo clippy -- -D warnings: passes. cargo fmt: passes."
     }
   ]
 }

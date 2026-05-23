@@ -7,14 +7,11 @@ pub struct Table {
     /// Cached bloom filter to avoid opening an SstableReader just for might_contain().
     /// Loaded from the SSTable's MetaBlock when a table is created from a file path.
     pub bloom_filter: Option<bloomfilter::Bloom<[u8]>>,
-    // NOTE: TTL / expires_at metadata is not stored in Table.
-    // When a LogRecord is converted to raw (Vec<u8>, Vec<u8>) during
-    // flush_memtable_impl, the expires_at field is discarded.
-    // TTL expiry is therefore checked at the MemTable level (get_cf,
-    // scan_cf) and during flush (expired keys are filtered before
-    // Table::build).  Compaction operates on Tables and cannot
-    // re-check TTL.  If TTL-at-rest is needed in the future, the
-    // Table struct and SSTable format must be extended.
+    // TTL / expires_at metadata is preserved via __ttl:{key} entries
+    // in the raw data map (see flush_memtable_impl).  These entries
+    // are written alongside real data and persist through flushes and
+    // restarts so that reads and scans can correctly detect expiry.
+    // Compaction operates on Tables and preserves these side entries.
 }
 
 impl Clone for Table {

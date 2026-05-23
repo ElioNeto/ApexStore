@@ -144,13 +144,19 @@ impl<C: Cache> VersionSet<C> {
                             Ok(reader) => match reader.get(key) {
                                 Ok(Some(record)) => {
                                     // Tombstone: SSTable reader sets is_deleted flag
-                                    if !record.is_deleted {
-                                        let value = record.value;
-                                        self.put_cached(key.to_vec(), value.clone());
-                                        return Some(value);
+                                    if record.is_deleted {
+                                        // Tombstone → key is deleted, stop searching
+                                        return None;
                                     }
-                                    // Tombstone → key is deleted, stop searching
-                                    return None;
+                                    // TTL expiry: key was stored with an expiration time
+                                    // in the SSTable's LogRecord metadata.
+                                    if record.is_expired() {
+                                        // Key has expired — treat as not found
+                                        continue 'table_loop;
+                                    }
+                                    let value = record.value;
+                                    self.put_cached(key.to_vec(), value.clone());
+                                    return Some(value);
                                 }
                                 // Not found in this SSTable — continue to next table
                                 Ok(None) => continue 'table_loop,
