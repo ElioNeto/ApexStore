@@ -51,9 +51,7 @@ impl MemoryLimiter {
                 .is_ok()
             {
                 // Update peak (best-effort, not critical for correctness)
-                let _ = self
-                    .peak
-                    .fetch_max(new, Ordering::Relaxed);
+                let _ = self.peak.fetch_max(new, Ordering::Relaxed);
                 return true;
             }
         }

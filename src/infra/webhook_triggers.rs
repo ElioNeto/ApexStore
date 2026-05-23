@@ -84,7 +84,8 @@ impl WebhookRegistry {
     /// Returns `true` if the (prefix, url) pair existed and was removed.
     pub fn unregister(&mut self, prefix: &str, url: &str) -> bool {
         let before = self.entries.len();
-        self.entries.retain(|e| !(e.prefix == prefix && e.url == url));
+        self.entries
+            .retain(|e| !(e.prefix == prefix && e.url == url));
         self.entries.len() < before
     }
 
@@ -94,12 +95,7 @@ impl WebhookRegistry {
     /// `publisher` for each matching webhook URL.
     ///
     /// Returns the number of webhooks that were triggered.
-    pub fn trigger(
-        &self,
-        key: &[u8],
-        value: Option<&[u8]>,
-        publisher: &dyn CdcPublisher,
-    ) -> usize {
+    pub fn trigger(&self, key: &[u8], value: Option<&[u8]>, publisher: &dyn CdcPublisher) -> usize {
         let key_str = String::from_utf8_lossy(key);
         let matching: Vec<&WebhookEntry> = self
             .entries
@@ -182,12 +178,17 @@ mod tests {
     #[test]
     fn test_register_and_list() {
         let mut reg = WebhookRegistry::new();
-        reg.register("orders/", "https://hook.example.com/orders").unwrap();
-        reg.register("users/", "https://hook.example.com/users").unwrap();
+        reg.register("orders/", "https://hook.example.com/orders")
+            .unwrap();
+        reg.register("users/", "https://hook.example.com/users")
+            .unwrap();
 
         let list = reg.list();
         assert_eq!(list.len(), 2);
-        assert!(list.contains(&("orders/".to_string(), "https://hook.example.com/orders".to_string())));
+        assert!(list.contains(&(
+            "orders/".to_string(),
+            "https://hook.example.com/orders".to_string()
+        )));
         assert_eq!(reg.len(), 2);
     }
 

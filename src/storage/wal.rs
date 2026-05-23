@@ -1095,7 +1095,10 @@ mod tests {
         // Recovery should succeed (tolerant recovery - may or may not find the
         // second frame depending on payload size and resync heuristics)
         let result = wal.recover();
-        assert!(result.is_ok(), "recovery should succeed after invalid length");
+        assert!(
+            result.is_ok(),
+            "recovery should succeed after invalid length"
+        );
         let records = result.unwrap();
         // With V2 frame format (larger payload), resync may not always find
         // the second frame within the scan window. The key invariant is that

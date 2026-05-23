@@ -126,11 +126,9 @@ impl Encryptor {
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
 
-        let ciphertext = cipher
-            .encrypt(nonce, plaintext)
-            .map_err(|e| {
-                LsmError::CompactionFailed(format!("AES-256-GCM encryption failed: {}", e))
-            })?;
+        let ciphertext = cipher.encrypt(nonce, plaintext).map_err(|e| {
+            LsmError::CompactionFailed(format!("AES-256-GCM encryption failed: {}", e))
+        })?;
 
         let mut result = Vec::with_capacity(12 + ciphertext.len());
         result.extend_from_slice(&nonce_bytes);
@@ -162,14 +160,12 @@ impl Encryptor {
         let (nonce_bytes, encrypted) = data.split_at(12);
         let nonce = Nonce::from_slice(nonce_bytes);
 
-        let plaintext = cipher
-            .decrypt(nonce, encrypted)
-            .map_err(|e| {
-                LsmError::CorruptedData(format!(
-                    "AES-256-GCM decryption failed (wrong key or corrupted data): {}",
-                    e
-                ))
-            })?;
+        let plaintext = cipher.decrypt(nonce, encrypted).map_err(|e| {
+            LsmError::CorruptedData(format!(
+                "AES-256-GCM decryption failed (wrong key or corrupted data): {}",
+                e
+            ))
+        })?;
 
         Ok(plaintext)
     }
@@ -199,11 +195,17 @@ mod tests {
         let encryptor = Encryptor::new(&test_config());
         let plaintext = b"Hello, ApexStore encryption!";
         let ciphertext = encryptor.encrypt_block(plaintext).unwrap();
-        assert_ne!(ciphertext, plaintext, "ciphertext should differ from plaintext");
+        assert_ne!(
+            ciphertext, plaintext,
+            "ciphertext should differ from plaintext"
+        );
         assert!(ciphertext.len() > 12, "ciphertext should contain IV");
 
         let decrypted = encryptor.decrypt_block(&ciphertext).unwrap();
-        assert_eq!(decrypted, plaintext, "round-trip should produce original plaintext");
+        assert_eq!(
+            decrypted, plaintext,
+            "round-trip should produce original plaintext"
+        );
     }
 
     #[test]

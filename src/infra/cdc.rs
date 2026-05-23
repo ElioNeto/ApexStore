@@ -206,7 +206,10 @@ mod tests {
         let collector = CdcCollector::new();
         collector.publish(make_event()).unwrap();
         assert_eq!(collector.events().len(), 1);
-        assert!(matches!(collector.events()[0].event_type, CdcEventType::Put));
+        assert!(matches!(
+            collector.events()[0].event_type,
+            CdcEventType::Put
+        ));
     }
 
     #[test]

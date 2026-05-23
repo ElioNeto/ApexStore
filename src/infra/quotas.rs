@@ -74,7 +74,8 @@ impl TenantUsage {
 
     fn prune_requests(&mut self, window: Duration) {
         let now = Instant::now();
-        self.request_timestamps.retain(|t| now.duration_since(*t) < window);
+        self.request_timestamps
+            .retain(|t| now.duration_since(*t) < window);
     }
 }
 
@@ -181,11 +182,13 @@ impl QuotaManager {
         }
 
         if bytes_delta >= 0 {
-            tenant_usage.storage_bytes =
-                tenant_usage.storage_bytes.saturating_add(bytes_delta as u64);
+            tenant_usage.storage_bytes = tenant_usage
+                .storage_bytes
+                .saturating_add(bytes_delta as u64);
         } else {
-            tenant_usage.storage_bytes =
-                tenant_usage.storage_bytes.saturating_sub((-bytes_delta) as u64);
+            tenant_usage.storage_bytes = tenant_usage
+                .storage_bytes
+                .saturating_sub((-bytes_delta) as u64);
         }
 
         tenant_usage.request_timestamps.push(Instant::now());

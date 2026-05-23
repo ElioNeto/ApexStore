@@ -86,7 +86,10 @@ impl MultiModelEngine {
         }
         let mut doc = HashMap::new();
         doc.insert("key".to_string(), key.to_string());
-        doc.insert("value".to_string(), format!("<stub: document for '{}'>", key));
+        doc.insert(
+            "value".to_string(),
+            format!("<stub: document for '{}'>", key),
+        );
         Ok(doc)
     }
 
@@ -95,7 +98,11 @@ impl MultiModelEngine {
     /// # Stub
     ///
     /// Currently returns an empty vector.
-    pub fn query_time_series(&self, start_ts: u128, end_ts: u128) -> Result<Vec<TimeSeriesPoint>, String> {
+    pub fn query_time_series(
+        &self,
+        start_ts: u128,
+        end_ts: u128,
+    ) -> Result<Vec<TimeSeriesPoint>, String> {
         if !self.time_series_enabled {
             return Err("Time-series queries are disabled".to_string());
         }

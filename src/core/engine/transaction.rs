@@ -102,10 +102,8 @@ impl<C: Cache> Transaction<C> {
     where
         K: AsRef<[u8]>,
     {
-        self.writes.insert(
-            (cf.to_string(), key.as_ref().to_vec()),
-            (Vec::new(), true),
-        );
+        self.writes
+            .insert((cf.to_string(), key.as_ref().to_vec()), (Vec::new(), true));
         Ok(())
     }
 
@@ -273,22 +271,18 @@ impl<C: Cache> Transaction<C> {
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::config::LsmConfig;
     use crate::core::engine::Engine;
+    use crate::infra::config::LsmConfig;
     use crate::storage::cache::GlobalBlockCache;
     use std::sync::Arc;
-    use tempfile::{TempDir, tempdir};
+    use tempfile::{tempdir, TempDir};
 
     /// Helper to create a test engine with a temp directory.
     fn test_engine() -> (Engine<Arc<GlobalBlockCache>>, TempDir) {
         let dir = tempdir().unwrap();
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
-        let engine = Engine::new_from_config(
-            &config,
-            GlobalBlockCache::new(100, 4096),
-        )
-        .unwrap();
+        let engine = Engine::new_from_config(&config, GlobalBlockCache::new(100, 4096)).unwrap();
         (engine, dir)
     }
 
@@ -422,10 +416,7 @@ mod tests {
         txn.commit().unwrap();
 
         assert_eq!(engine.get_cf("cf", b"dk1").unwrap(), None);
-        assert_eq!(
-            engine.get_cf("cf", b"dk2").unwrap(),
-            Some(b"dv2".to_vec())
-        );
+        assert_eq!(engine.get_cf("cf", b"dk2").unwrap(), Some(b"dv2".to_vec()));
     }
 
     #[test]
@@ -448,11 +439,7 @@ mod tests {
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
 
-        let engine = Engine::new_from_config(
-            &config,
-            GlobalBlockCache::new(100, 4096),
-        )
-        .unwrap();
+        let engine = Engine::new_from_config(&config, GlobalBlockCache::new(100, 4096)).unwrap();
 
         let mut txn = engine.begin_transaction();
         txn.put(b"txn_k1", b"txn_v1").unwrap();
@@ -463,17 +450,10 @@ mod tests {
         drop(engine);
 
         // Reopen
-        let engine2 = Engine::new_from_config(
-            &config,
-            GlobalBlockCache::new(100, 4096),
-        )
-        .unwrap();
+        let engine2 = Engine::new_from_config(&config, GlobalBlockCache::new(100, 4096)).unwrap();
 
         // Data must survive via WAL recovery
-        assert_eq!(
-            engine2.get(b"txn_k1").unwrap(),
-            Some(b"txn_v1".to_vec())
-        );
+        assert_eq!(engine2.get(b"txn_k1").unwrap(), Some(b"txn_v1".to_vec()));
         assert_eq!(
             engine2.get_cf("txn_cf", b"txn_k2").unwrap(),
             Some(b"txn_v2".to_vec())

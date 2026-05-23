@@ -95,10 +95,7 @@ mod tests {
         let mut engine = CrdtEngine::new();
         engine.merge(b"key1".to_vec(), b"value1".to_vec(), 100);
         assert_eq!(engine.len(), 1);
-        assert_eq!(
-            engine.get_state(b"key1"),
-            Some((b"value1".to_vec(), 100))
-        );
+        assert_eq!(engine.get_state(b"key1"), Some((b"value1".to_vec(), 100)));
     }
 
     #[test]
@@ -106,10 +103,7 @@ mod tests {
         let mut engine = CrdtEngine::new();
         engine.merge(b"key1".to_vec(), b"value1".to_vec(), 100);
         engine.merge(b"key1".to_vec(), b"value2".to_vec(), 200);
-        assert_eq!(
-            engine.get_state(b"key1"),
-            Some((b"value2".to_vec(), 200))
-        );
+        assert_eq!(engine.get_state(b"key1"), Some((b"value2".to_vec(), 200)));
     }
 
     #[test]
@@ -118,10 +112,7 @@ mod tests {
         engine.merge(b"key1".to_vec(), b"newer".to_vec(), 200);
         engine.merge(b"key1".to_vec(), b"older".to_vec(), 100);
         // The older timestamp should be ignored.
-        assert_eq!(
-            engine.get_state(b"key1"),
-            Some((b"newer".to_vec(), 200))
-        );
+        assert_eq!(engine.get_state(b"key1"), Some((b"newer".to_vec(), 200)));
     }
 
     #[test]

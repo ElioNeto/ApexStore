@@ -138,7 +138,8 @@ impl QueryBudget {
 
     /// Return the remaining byte-scan budget.
     pub fn remaining_bytes_scanned(&self) -> u64 {
-        self.max_bytes_scanned.saturating_sub(self.bytes_scanned_used)
+        self.max_bytes_scanned
+            .saturating_sub(self.bytes_scanned_used)
     }
 
     /// Return `true` if the budget is fully exhausted (no key reads left).

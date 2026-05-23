@@ -165,8 +165,7 @@ impl PrefixCompressor {
 
             // Read value
             let val_offset = offset + 2 + key_len;
-            let val_len =
-                u16::from_le_bytes([data[val_offset], data[val_offset + 1]]) as usize;
+            let val_len = u16::from_le_bytes([data[val_offset], data[val_offset + 1]]) as usize;
             let value = &data[val_offset + 2..val_offset + 2 + val_len];
 
             if prev_key.is_empty() {
@@ -201,10 +200,7 @@ impl PrefixCompressor {
     /// Input format per entry:
     /// - Entry 0: `[key_len(u16)][full_key][val_len(u16)][value]`
     /// - Entry i (i>0): `[shared_prefix_len(u8)][suffix_len(u16)][suffix][val_len(u16)][value]`
-    pub fn decompress_block_data(
-        data: &[u8],
-        offsets: &[u32],
-    ) -> Result<(Vec<u8>, Vec<u32>)> {
+    pub fn decompress_block_data(data: &[u8], offsets: &[u32]) -> Result<(Vec<u8>, Vec<u32>)> {
         if offsets.is_empty() {
             return Ok((Vec::new(), Vec::new()));
         }
@@ -258,8 +254,7 @@ impl PrefixCompressor {
                         "Prefix-compressed block: truncated entry (suffix_len)".to_string(),
                     ));
                 }
-                let suffix_len =
-                    u16::from_le_bytes([data[offset + 1], data[offset + 2]]) as usize;
+                let suffix_len = u16::from_le_bytes([data[offset + 1], data[offset + 2]]) as usize;
                 let suffix_start = offset + 1 + 2;
                 if suffix_start + suffix_len + 2 > data.len() {
                     return Err(crate::infra::error::LsmError::CorruptedData(
@@ -276,8 +271,7 @@ impl PrefixCompressor {
                     .collect();
 
                 let val_offset = suffix_start + suffix_len;
-                let val_len =
-                    u16::from_le_bytes([data[val_offset], data[val_offset + 1]]) as usize;
+                let val_len = u16::from_le_bytes([data[val_offset], data[val_offset + 1]]) as usize;
                 let value = &data[val_offset + 2..val_offset + 2 + val_len];
 
                 // Write full key + value (standard format)
@@ -296,10 +290,7 @@ impl PrefixCompressor {
 
     /// Compute the length of the common prefix between two byte slices.
     fn shared_prefix_len(a: &[u8], b: &[u8]) -> usize {
-        a.iter()
-            .zip(b.iter())
-            .take_while(|(x, y)| x == y)
-            .count()
+        a.iter().zip(b.iter()).take_while(|(x, y)| x == y).count()
     }
 }
 
@@ -340,11 +331,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_no_shared_prefix() {
-        let keys = vec![
-            b"aaaa".to_vec(),
-            b"bbbb".to_vec(),
-            b"cccc".to_vec(),
-        ];
+        let keys = vec![b"aaaa".to_vec(), b"bbbb".to_vec(), b"cccc".to_vec()];
         let compressed = PrefixCompressor::encode_keys(&keys);
         let decoded = PrefixCompressor::decode_keys(&compressed, &keys[0]);
         assert_eq!(keys, decoded);
@@ -403,8 +390,7 @@ mod tests {
         data.extend_from_slice(&(2u16).to_le_bytes()); // val_len
         data.extend_from_slice(b"v3");
 
-        let (compressed_data, new_offsets) =
-            PrefixCompressor::compress_block_data(&data, &offsets);
+        let (compressed_data, new_offsets) = PrefixCompressor::compress_block_data(&data, &offsets);
 
         // First entry should be full key "aaa"
         let key0_len = u16::from_le_bytes([compressed_data[0], compressed_data[1]]) as usize;
@@ -412,10 +398,9 @@ mod tests {
         assert_eq!(&compressed_data[2..5], b"aaa");
         // Value: v1
         let v0_offset = 2 + 3;
-        let v0_len = u16::from_le_bytes([
-            compressed_data[v0_offset],
-            compressed_data[v0_offset + 1],
-        ]) as usize;
+        let v0_len =
+            u16::from_le_bytes([compressed_data[v0_offset], compressed_data[v0_offset + 1]])
+                as usize;
         assert_eq!(v0_len, 2);
         assert_eq!(&compressed_data[v0_offset + 2..v0_offset + 2 + 2], b"v1");
 
@@ -423,10 +408,9 @@ mod tests {
         let e1_start = new_offsets[1] as usize;
         let shared1 = compressed_data[e1_start];
         assert_eq!(shared1, 2); // shared "aa"
-        let suffix_len1 = u16::from_le_bytes([
-            compressed_data[e1_start + 1],
-            compressed_data[e1_start + 2],
-        ]) as usize;
+        let suffix_len1 =
+            u16::from_le_bytes([compressed_data[e1_start + 1], compressed_data[e1_start + 2]])
+                as usize;
         assert_eq!(suffix_len1, 1);
         assert_eq!(compressed_data[e1_start + 3], b'b');
 
@@ -434,10 +418,9 @@ mod tests {
         let e2_start = new_offsets[2] as usize;
         let shared2 = compressed_data[e2_start];
         assert_eq!(shared2, 2); // shared "aa"
-        let suffix_len2 = u16::from_le_bytes([
-            compressed_data[e2_start + 1],
-            compressed_data[e2_start + 2],
-        ]) as usize;
+        let suffix_len2 =
+            u16::from_le_bytes([compressed_data[e2_start + 1], compressed_data[e2_start + 2]])
+                as usize;
         assert_eq!(suffix_len2, 1);
         assert_eq!(compressed_data[e2_start + 3], b'c');
     }
@@ -467,8 +450,7 @@ mod tests {
             PrefixCompressor::compress_block_data(&data, &offsets);
 
         let (decompressed_data, decompressed_offsets) =
-            PrefixCompressor::decompress_block_data(&compressed_data, &compressed_offsets)
-                .unwrap();
+            PrefixCompressor::decompress_block_data(&compressed_data, &compressed_offsets).unwrap();
 
         assert_eq!(data, decompressed_data);
         assert_eq!(offsets, decompressed_offsets);
@@ -486,8 +468,7 @@ mod tests {
         let (compressed_data, compressed_offsets) =
             PrefixCompressor::compress_block_data(&data, &offsets);
         let (decompressed_data, decompressed_offsets) =
-            PrefixCompressor::decompress_block_data(&compressed_data, &compressed_offsets)
-                .unwrap();
+            PrefixCompressor::decompress_block_data(&compressed_data, &compressed_offsets).unwrap();
 
         assert_eq!(data, decompressed_data);
         assert_eq!(offsets, decompressed_offsets);

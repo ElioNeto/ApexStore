@@ -362,9 +362,7 @@ mod tests {
         let chaos = ChaosEngine::new();
         chaos.set_enabled(true);
 
-        chaos.inject(FailureType::CorruptSstable {
-            probability: 0.1,
-        });
+        chaos.inject(FailureType::CorruptSstable { probability: 0.1 });
         assert!((chaos.corrupt_probability() - 0.1).abs() < f64::EPSILON);
     }
 }

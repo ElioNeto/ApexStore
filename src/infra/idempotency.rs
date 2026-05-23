@@ -109,12 +109,7 @@ impl IdempotencyMiddleware {
     }
 
     /// Store a response with explicit status code.
-    pub fn store_idempotency_with_status(
-        &self,
-        key: &str,
-        body: Vec<u8>,
-        status_code: u16,
-    ) {
+    pub fn store_idempotency_with_status(&self, key: &str, body: Vec<u8>, status_code: u16) {
         let now_millis = current_time_millis();
         let expires_at = now_millis + self.default_ttl.as_millis() as u64;
 

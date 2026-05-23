@@ -53,27 +53,17 @@ pub struct SyncResult {
 /// Implementations could be HTTP clients, file readers, or in-memory stores.
 pub trait RemoteBackend: Send + Sync {
     /// Fetch all key-value pairs with timestamps from the remote.
-    fn fetch_all(
-        &self,
-    ) -> BoxResult<DataMap>;
+    fn fetch_all(&self) -> BoxResult<DataMap>;
     /// Push key-value pairs to the remote.
-    fn push(
-        &self,
-        entries: &DataEntries,
-    ) -> BoxResult<()>;
+    fn push(&self, entries: &DataEntries) -> BoxResult<()>;
 }
 
 /// Engine trait for interacting with the local KV store.
 pub trait LocalEngine: Send + Sync {
     /// Return all key-value pairs with timestamps.
-    fn all_entries(
-        &self,
-    ) -> BoxResult<DataEntries>;
+    fn all_entries(&self) -> BoxResult<DataEntries>;
     /// Apply a set of key-value pairs (upsert).
-    fn apply_batch(
-        &self,
-        entries: &DataEntries,
-    ) -> BoxResult<()>;
+    fn apply_batch(&self, entries: &DataEntries) -> BoxResult<()>;
 }
 
 /// Orchestrates diff computation and bi-directional sync between a local
@@ -107,7 +97,9 @@ impl DataSync {
         // Check keys in local but maybe not in remote.
         for (key, (local_val, local_ts)) in &local_map {
             match remote_map.get(key) {
-                Some((remote_val, remote_ts)) if local_val == remote_val && local_ts == remote_ts => {
+                Some((remote_val, remote_ts))
+                    if local_val == remote_val && local_ts == remote_ts =>
+                {
                     // Identical — skip.
                 }
                 Some((remote_val, remote_ts)) => {
@@ -152,10 +144,7 @@ impl DataSync {
     /// * `SyncDirection::Pull` — remote overwrites local.
     /// * `SyncDirection::Push` — local overwrites remote.
     /// * `SyncDirection::TwoWay` — per-key timestamp comparison wins.
-    pub fn sync(
-        &self,
-        direction: SyncDirection,
-    ) -> BoxResult<SyncResult> {
+    pub fn sync(&self, direction: SyncDirection) -> BoxResult<SyncResult> {
         let diffs = self.diff()?;
         let resolved = self.resolve_conflicts_impl(&diffs, direction)?;
 
@@ -249,16 +238,11 @@ mod tests {
     }
 
     impl LocalEngine for MemLocal {
-        fn all_entries(
-            &self,
-        ) -> BoxResult<DataEntries> {
+        fn all_entries(&self) -> BoxResult<DataEntries> {
             Ok(self.data.lock().unwrap().clone())
         }
 
-        fn apply_batch(
-            &self,
-            entries: &DataEntries,
-        ) -> BoxResult<()> {
+        fn apply_batch(&self, entries: &DataEntries) -> BoxResult<()> {
             let mut data = self.data.lock().unwrap();
             for (k, v, ts) in entries {
                 data.push((k.clone(), v.clone(), *ts));
@@ -281,16 +265,11 @@ mod tests {
     }
 
     impl RemoteBackend for MemRemote {
-        fn fetch_all(
-            &self,
-        ) -> BoxResult<DataMap> {
+        fn fetch_all(&self) -> BoxResult<DataMap> {
             Ok(self.data.lock().unwrap().clone())
         }
 
-        fn push(
-            &self,
-            entries: &DataEntries,
-        ) -> BoxResult<()> {
+        fn push(&self, entries: &DataEntries) -> BoxResult<()> {
             let mut data = self.data.lock().unwrap();
             for (k, v, ts) in entries {
                 data.insert(k.clone(), (v.clone(), *ts));
@@ -307,9 +286,7 @@ mod tests {
         ))
     }
 
-    fn make_remote(
-        a: &[(&[u8], &[u8], u64)],
-    ) -> Box<dyn RemoteBackend> {
+    fn make_remote(a: &[(&[u8], &[u8], u64)]) -> Box<dyn RemoteBackend> {
         let mut map = HashMap::new();
         for (k, v, ts) in a {
             map.insert(k.to_vec(), (v.to_vec(), *ts));
@@ -367,7 +344,9 @@ mod tests {
         let result = sync.sync(SyncDirection::Pull).unwrap();
         assert_eq!(result.conflicts_resolved, 1);
         // Under pull, remote wins.
-        let entries = sync.resolve_conflicts(sync.diff().unwrap(), SyncDirection::Pull).unwrap();
+        let entries = sync
+            .resolve_conflicts(sync.diff().unwrap(), SyncDirection::Pull)
+            .unwrap();
         assert_eq!(entries[0].1, b"remote");
     }
 
@@ -376,7 +355,9 @@ mod tests {
         let local = make_local(&[(b"k1", b"local", 1)]);
         let remote = make_remote(&[(b"k1", b"remote", 2)]);
         let sync = DataSync::new(local, remote);
-        let entries = sync.resolve_conflicts(sync.diff().unwrap(), SyncDirection::Push).unwrap();
+        let entries = sync
+            .resolve_conflicts(sync.diff().unwrap(), SyncDirection::Push)
+            .unwrap();
         assert_eq!(entries[0].1, b"local");
     }
 
@@ -385,7 +366,9 @@ mod tests {
         let local = make_local(&[(b"k1", b"local", 1)]);
         let remote = make_remote(&[(b"k1", b"remote", 2)]);
         let sync = DataSync::new(local, remote);
-        let entries = sync.resolve_conflicts(sync.diff().unwrap(), SyncDirection::TwoWay).unwrap();
+        let entries = sync
+            .resolve_conflicts(sync.diff().unwrap(), SyncDirection::TwoWay)
+            .unwrap();
         assert_eq!(entries[0].1, b"remote");
     }
 
@@ -394,7 +377,9 @@ mod tests {
         let local = make_local(&[(b"k1", b"local", 3)]);
         let remote = make_remote(&[(b"k1", b"remote", 2)]);
         let sync = DataSync::new(local, remote);
-        let entries = sync.resolve_conflicts(sync.diff().unwrap(), SyncDirection::TwoWay).unwrap();
+        let entries = sync
+            .resolve_conflicts(sync.diff().unwrap(), SyncDirection::TwoWay)
+            .unwrap();
         assert_eq!(entries[0].1, b"local");
     }
 }

@@ -77,11 +77,7 @@ impl TimeTravelEngine {
     ///
     /// Returns data from the snapshot closest to `end_ts` but not after it.
     /// If no snapshot falls within the range, returns `None`.
-    pub fn query_range(
-        &self,
-        start_ts: u128,
-        end_ts: u128,
-    ) -> Option<HashMap<Vec<u8>, Vec<u8>>> {
+    pub fn query_range(&self, start_ts: u128, end_ts: u128) -> Option<HashMap<Vec<u8>, Vec<u8>>> {
         let snapshot = self.snapshot_at_or_before(end_ts)?;
         if snapshot.timestamp < start_ts {
             return None;
@@ -142,7 +138,10 @@ mod tests {
     use super::*;
 
     fn make_data(pairs: &[(&[u8], &[u8])]) -> HashMap<Vec<u8>, Vec<u8>> {
-        pairs.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_vec(), v.to_vec()))
+            .collect()
     }
 
     #[test]

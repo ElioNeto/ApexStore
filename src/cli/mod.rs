@@ -408,10 +408,7 @@ fn cmd_import(
 
     let elapsed = start.elapsed();
     eprintln!(); // newline after progress
-    println!(
-        "Import completed in {:.2}s",
-        elapsed.as_secs_f64()
-    );
+    println!("Import completed in {:.2}s", elapsed.as_secs_f64());
     Ok(())
 }
 
@@ -463,10 +460,7 @@ fn cmd_export(
 
     let elapsed = start.elapsed();
     eprintln!(); // newline after progress
-    println!(
-        "Export completed in {:.2}s",
-        elapsed.as_secs_f64()
-    );
+    println!("Export completed in {:.2}s", elapsed.as_secs_f64());
     Ok(())
 }
 
@@ -474,8 +468,7 @@ fn cmd_export(
 
 /// Load all tokens from the engine (persisted under `__token:*` keys).
 fn load_tokens_from_engine(engine: &CliEngine) -> crate::infra::error::Result<Vec<ApiToken>> {
-    let (results, _cursor) =
-        engine.search_prefix(TOKEN_PREFIX, None, MAX_SCAN_LIMIT)?;
+    let (results, _cursor) = engine.search_prefix(TOKEN_PREFIX, None, MAX_SCAN_LIMIT)?;
     let mut tokens = Vec::new();
     for (_key, value) in &results {
         if let Ok(token) = serde_json::from_slice::<ApiToken>(value) {
@@ -540,7 +533,10 @@ fn cmd_token(engine: &CliEngine, sub: TokenCommand) -> crate::infra::error::Resu
                 println!("No tokens found.");
                 return Ok(());
             }
-            println!("{:<38} {:<20} {:<10} {:<20}", "ID", "Name", "Perms", "Created");
+            println!(
+                "{:<38} {:<20} {:<10} {:<20}",
+                "ID", "Name", "Perms", "Created"
+            );
             println!("{}", "-".repeat(90));
             for token in &tokens {
                 let perms_str: Vec<String> = token

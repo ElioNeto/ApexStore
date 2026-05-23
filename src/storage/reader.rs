@@ -469,9 +469,8 @@ impl SstableReader {
             if offset + block_meta.size as usize <= mmap.len() {
                 let block_end = offset + on_disk_size;
                 let data = mmap[offset..block_end].to_vec();
-                let crc32_bytes: [u8; 4] = mmap[block_end..block_end + 4]
-                    .try_into()
-                    .map_err(|_| {
+                let crc32_bytes: [u8; 4] =
+                    mmap[block_end..block_end + 4].try_into().map_err(|_| {
                         LsmError::CorruptedData(format!(
                             "Block CRC32 at offset {} extends past file",
                             block_meta.offset

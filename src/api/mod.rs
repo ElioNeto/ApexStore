@@ -179,9 +179,7 @@ async fn get_stats(engine: web::Data<LsmEngine>) -> impl Responder {
 
 /// Handler for `GET /admin/rate_limits` — view current rate limit state.
 #[get("/admin/rate_limits")]
-async fn admin_rate_limits(
-    rate_limiter: web::Data<RateLimiterState>,
-) -> impl Responder {
+async fn admin_rate_limits(rate_limiter: web::Data<RateLimiterState>) -> impl Responder {
     let summary = rate_limiter.get_state();
     HttpResponse::Ok()
         .content_type("application/json")
@@ -236,10 +234,7 @@ async fn admin_compact(engine: web::Data<LsmEngine>) -> impl Responder {
 // ── GraphQL handlers ────────────────────────────────────────────────────────
 
 /// GraphQL endpoint — handles all queries and mutations.
-async fn graphql_handler(
-    schema: web::Data<AppSchema>,
-    req: GraphQLRequest,
-) -> GraphQLResponse {
+async fn graphql_handler(schema: web::Data<AppSchema>, req: GraphQLRequest) -> GraphQLResponse {
     let res = schema.execute(req.into_inner()).await;
     GraphQLResponse::from(res)
 }
@@ -247,8 +242,7 @@ async fn graphql_handler(
 /// GraphQL playground (interactive IDE).
 async fn graphql_playground() -> HttpResponse {
     let html = playground_source(
-        GraphQLPlaygroundConfig::new("/graphql")
-            .title("ApexStore GraphQL Playground"),
+        GraphQLPlaygroundConfig::new("/graphql").title("ApexStore GraphQL Playground"),
     );
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -268,10 +262,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .service(admin_flush)
         .service(admin_compact)
         .service(admin_rate_limits)
-        .service(
-            web::scope("/admin")
-                .configure(admin::configure),
-        )
+        .service(web::scope("/admin").configure(admin::configure))
         // Health endpoints (no auth required)
         .service(health::liveness)
         .service(health::readiness)

@@ -6,8 +6,8 @@ use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::core::table::Table;
 use crate::infra::cdc::{CdcConfig, CdcEvent, CdcEventType, CdcPublisher};
 use crate::infra::error::Result;
-use crate::infra::replication::{ReplicationClient, ReplicationConfig, ReplicationRole};
 use crate::infra::metrics::EngineMetrics;
+use crate::infra::replication::{ReplicationClient, ReplicationConfig, ReplicationRole};
 use crate::storage::builder::SstableBuilder;
 use crate::storage::cache::{Cache, GlobalBlockCache};
 use crate::storage::encryption::EncryptionConfig;
@@ -219,7 +219,9 @@ impl<C: Cache> EngineCore<C> {
         })
     }
 
-    pub(crate) fn range_tombstones(&self) -> &HashMap<String, Vec<crate::core::log_record::RangeTombstone>> {
+    pub(crate) fn range_tombstones(
+        &self,
+    ) -> &HashMap<String, Vec<crate::core::log_record::RangeTombstone>> {
         &self.range_tombstones
     }
 
@@ -410,18 +412,15 @@ fn compact_cf_core<C: Cache>(
     }
 
     // Collect active range tombstones for this CF to pass to compaction
-    let rt = core
-        .range_tombstones()
-        .get(cf)
-        .cloned()
-        .unwrap_or_default();
+    let rt = core.range_tombstones().get(cf).cloned().unwrap_or_default();
 
     let mut all_metrics = CompactionMetrics::default();
     for indices in &groups {
-        let (new_tables, metrics) =
-            core.compaction_mut()
-                .compact(indices, &tables, options, &rt)?;
-        let removed_paths = core.version_set_mut()
+        let (new_tables, metrics) = core
+            .compaction_mut()
+            .compact(indices, &tables, options, &rt)?;
+        let removed_paths = core
+            .version_set_mut()
             .atomic_replace(cf, indices, new_tables);
         // Delete orphaned SSTable files from disk
         for path in &removed_paths {
@@ -429,7 +428,8 @@ fn compact_cf_core<C: Cache>(
                 if let Err(e) = std::fs::remove_file(path) {
                     tracing::warn!(
                         "compact_cf_core: failed to remove orphaned SSTable {:?}: {:?}",
-                        path, e
+                        path,
+                        e
                     );
                 }
             }
@@ -557,7 +557,8 @@ impl<C: Cache> Engine<C> {
                     .and_then(|s| s.strip_suffix(".log"))
                 {
                     if cf != "default" && !core.wals.contains_key(cf) {
-                        match WriteAheadLog::new_with_encryption(dir_path, cf, &options.encryption) {
+                        match WriteAheadLog::new_with_encryption(dir_path, cf, &options.encryption)
+                        {
                             Ok(wal) => {
                                 let records = wal.recover()?;
                                 core.wals.insert(cf.to_string(), wal);
@@ -1371,13 +1372,60 @@ impl<C: Cache> Engine<C> {
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_nanos();
-                let raw_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> =
-                    mem.data
-                        .into_iter()
-                        .filter(|(_, r)| !r.is_expired_at(now))
-                        .map(|(k, r)| (k, r.value))
-                        .collect();
-                let table = Table::build(raw_data, &self.options);
+
+                // ── Persist SSTable to disk for crash recovery ──────────────
+                // The SSTable file survives engine restarts, so data is not
+                // lost even though the WAL is cleared after this flush.
+                let sst_dir = &self._sst_dir;
+                std::fs::create_dir_all(sst_dir)?;
+                let timestamp = now;
+                let output_path = sst_dir.join(format!("flush_{}.sst", timestamp));
+
+                let storage_config = crate::infra::config::StorageConfig {
+                    block_size: self.options.block_size,
+                    block_cache_size_mb: self.options.block_cache_size_mb,
+                    sparse_index_interval: 16,
+                    bloom_false_positive_rate: 0.01,
+                    encryption_enabled: self.options.encryption.enabled,
+                    encryption_key_path: None,
+                    prefix_compression_enabled: false,
+                };
+
+                // Write SSTable using SstableBuilder (preserves LogRecord
+                // metadata including is_deleted for correct tombstone vs
+                // empty-value distinction when read back via SstableReader).
+                {
+                    let mut builder = SstableBuilder::new_with_encryption(
+                        output_path.clone(),
+                        storage_config,
+                        timestamp,
+                        &self.options.encryption,
+                    )?;
+                    for (key, record) in mem.data.iter() {
+                        if record.is_expired_at(now) {
+                            continue;
+                        }
+                        builder.add(key, record)?;
+                    }
+                    builder.finish()?;
+                }
+
+                // ── Build in-memory Table (for fast reads) ───────────────────
+                // Keep the raw BTreeMap for the in-memory fast path, but also
+                // set the path so that VersionSet::get() can fall through to
+                // the SSTable reader for correct tombstone detection.
+                let raw_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> = mem
+                    .data
+                    .into_iter()
+                    .filter(|(_, r)| !r.is_expired_at(now))
+                    .map(|(k, r)| (k, r.value))
+                    .collect();
+
+                let mut table =
+                    Table::from_sstable_path(&output_path, Some(&self.options.encryption))?;
+                table.data = raw_data;
+                table.level = 0; // Flushed tables are level 0
+
                 core.version_set_mut().add_table(cf, table);
                 let bytes = core.memtable_bytes_mut().get_mut(cf).ok_or_else(|| {
                     crate::LsmError::InvalidArgument(format!(
@@ -1451,12 +1499,18 @@ impl<C: Cache> Engine<C> {
     pub fn compact(&self) -> Result<Vec<(String, CompactionMetrics)>> {
         let start = std::time::Instant::now();
         let mut results = Vec::new();
-        let core = self.core.lock();
+        // Hold the lock continuously to prevent background compaction threads
+        // from applying stale plans (with obsolete table indices) between
+        // individual CF compactions.  All CFs are compacted under a single
+        // lock acquisition to avoid the race where maybe_compact() builds a
+        // plan with table indices that become invalid after compact_cf_core()
+        // replaces tables.  The three-phase background path in maybe_compact()
+        // is inherently racy because it builds a plan snapshot, drops the lock
+        // for I/O, then re-acquires it to apply potentially-stale indices.
+        let mut core = self.core.lock();
         let column_families = core.version_set().column_families();
-        drop(core); // Release lock before calling compact_cf which will re-acquire
-                    // Actually, we need the lock for compact_cf, so just call it per CF
         for cf in column_families {
-            if let Some(metrics) = self.compact_cf(&cf)? {
+            if let Some(metrics) = compact_cf_core(&mut core, &self.options, &cf)? {
                 results.push((cf, metrics));
             }
         }
@@ -1493,6 +1547,9 @@ impl<C: Cache> Engine<C> {
             compaction: Compaction,
             options: EngineOptions,
             range_tombstones: Vec<RangeTombstone>,
+            /// VersionSet generation when this plan was built.
+            /// Used to detect stale plans after lock re-acquisition.
+            generation: u64,
         }
 
         let plans: Vec<CompactionPlan> = {
@@ -1511,6 +1568,7 @@ impl<C: Cache> Engine<C> {
                     if groups.is_empty() {
                         return None;
                     }
+                    let generation = core.version_set().compaction_generation();
                     Some(CompactionPlan {
                         cf: cf.clone(),
                         tables,
@@ -1522,6 +1580,7 @@ impl<C: Cache> Engine<C> {
                             .get(cf)
                             .cloned()
                             .unwrap_or_default(),
+                        generation,
                     })
                 })
                 .collect()
@@ -1562,17 +1621,14 @@ impl<C: Cache> Engine<C> {
                     // ── Phase 2: Execute compaction I/O without holding the lock ──
                     let mut results: Vec<(String, Vec<usize>, Vec<Table>)> = Vec::new();
                     for group_indices in &plan.groups {
-                        match plan
-                            .compaction
-                            .compact(
-                                group_indices,
-                                &plan.tables,
-                                &plan.options,
-                                &plan.range_tombstones,
-                            ) {
+                        match plan.compaction.compact(
+                            group_indices,
+                            &plan.tables,
+                            &plan.options,
+                            &plan.range_tombstones,
+                        ) {
                             Ok((new_tables, _metrics)) => {
-                                results
-                                    .push((plan.cf.clone(), group_indices.clone(), new_tables));
+                                results.push((plan.cf.clone(), group_indices.clone(), new_tables));
                             }
                             Err(e) => {
                                 tracing::error!(
@@ -1586,20 +1642,36 @@ impl<C: Cache> Engine<C> {
 
                     // ── Phase 3: Re-acquire lock and apply results ──
                     let mut core = core.lock();
-                    for (cf, group_indices, new_tables) in results {
-                        let removed_paths = core
-                            .version_set_mut()
-                            .atomic_replace(&cf, &group_indices, new_tables);
-                        // Delete orphaned SSTable files from disk
-                        for path in &removed_paths {
-                            if path.exists() {
-                                if let Err(e) = std::fs::remove_file(path) {
-                                    tracing::warn!(
-                                        "background compaction: failed to remove orphaned SSTable \
-                                         {:?}: {:?}",
-                                        path,
-                                        e
-                                    );
+                    // Stale-plan detection: if the VersionSet's generation
+                    // has advanced since we built this plan, the captured
+                    // table indices are stale (another compaction already
+                    // modified the table list).  Discard this plan's results
+                    // to avoid removing tables that no longer match the
+                    // expected indices.
+                    if plan.generation != core.version_set().compaction_generation() {
+                        tracing::debug!(
+                            "Discarding stale compaction result for CF {} \
+                             (generation {} != current {})",
+                            plan.cf,
+                            plan.generation,
+                            core.version_set().compaction_generation(),
+                        );
+                    } else {
+                        for (cf, group_indices, new_tables) in results {
+                            let removed_paths =
+                                core.version_set_mut()
+                                    .atomic_replace(&cf, &group_indices, new_tables);
+                            // Delete orphaned SSTable files from disk
+                            for path in &removed_paths {
+                                if path.exists() {
+                                    if let Err(e) = std::fs::remove_file(path) {
+                                        tracing::warn!(
+                                            "background compaction: failed to remove orphaned \
+                                             SSTable {:?}: {:?}",
+                                            path,
+                                            e
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -2170,8 +2242,9 @@ impl<C: Cache> Engine<C> {
         }
 
         // Write the manifest
-        let manifest_json = serde_json::to_string(&manifest)
-            .map_err(|e| crate::LsmError::InvalidArgument(format!("Failed to serialize manifest: {}", e)))?;
+        let manifest_json = serde_json::to_string(&manifest).map_err(|e| {
+            crate::LsmError::InvalidArgument(format!("Failed to serialize manifest: {}", e))
+        })?;
         std::fs::write(backup_dir.join("snapshot.manifest"), &manifest_json)?;
 
         // Copy saved WALs into the backup directory.
@@ -2204,8 +2277,9 @@ impl<C: Cache> Engine<C> {
             return Ok(None);
         }
         let json_str = std::fs::read_to_string(&manifest_path)?;
-        let manifest: SnapshotManifest = serde_json::from_str(&json_str)
-            .map_err(|e| crate::LsmError::InvalidArgument(format!("Failed to parse snapshot manifest: {}", e)))?;
+        let manifest: SnapshotManifest = serde_json::from_str(&json_str).map_err(|e| {
+            crate::LsmError::InvalidArgument(format!("Failed to parse snapshot manifest: {}", e))
+        })?;
         Ok(Some(manifest))
     }
 
@@ -2273,14 +2347,11 @@ impl<C: Cache> Engine<C> {
 
     /// Restore engine data from a previously created snapshot.
     pub fn restore_snapshot(&self, snapshot_dir: &Path) -> Result<()> {
-        let data_dir = self
-            ._sst_dir
-            .parent()
-            .ok_or_else(|| {
-                crate::infra::error::LsmError::InvalidArgument(
-                    "sst_dir must have a parent (engine data dir)".to_string(),
-                )
-            })?;
+        let data_dir = self._sst_dir.parent().ok_or_else(|| {
+            crate::infra::error::LsmError::InvalidArgument(
+                "sst_dir must have a parent (engine data dir)".to_string(),
+            )
+        })?;
         let sst_dir = &self._sst_dir;
 
         std::fs::create_dir_all(data_dir)?;
@@ -2296,7 +2367,9 @@ impl<C: Cache> Engine<C> {
                 continue;
             }
             if path.extension().is_some_and(|ext| ext == "sst") {
-                let Some(fname) = path.file_name() else { continue; };
+                let Some(fname) = path.file_name() else {
+                    continue;
+                };
                 let fname_str = fname.to_string_lossy().to_string();
                 let dest = sst_dir.join(&fname_str);
                 std::fs::copy(&path, &dest)?;
@@ -2319,10 +2392,12 @@ impl<C: Cache> Engine<C> {
         // Write the disk manifest for new_generic() to discover on startup
         if let Some(ref m) = manifest {
             let disk_manifest_path = data_dir.join("disk.sst.manifest");
-            let json = serde_json::to_string(m)
-                .map_err(|e| crate::LsmError::InvalidArgument(
-                    format!("Failed to serialize disk manifest: {}", e)
-                ))?;
+            let json = serde_json::to_string(m).map_err(|e| {
+                crate::LsmError::InvalidArgument(format!(
+                    "Failed to serialize disk manifest: {}",
+                    e
+                ))
+            })?;
             std::fs::write(&disk_manifest_path, &json)?;
         }
 
@@ -2342,7 +2417,9 @@ impl<C: Cache> Engine<C> {
                             Err(e) => {
                                 tracing::warn!(
                                     "restore_snapshot: failed to load SSTable {} for CF {}: {:?}",
-                                    fname, cf, e
+                                    fname,
+                                    cf,
+                                    e
                                 );
                             }
                         }
@@ -2369,14 +2446,12 @@ impl<C: Cache> Engine<C> {
         let manifest_path = data_dir.join("disk.sst.manifest");
         if manifest_path.exists() {
             // Use the manifest written by restore_snapshot()
-            let json_str = std::fs::read_to_string(&manifest_path)
-                .map_err(|e| crate::LsmError::InvalidArgument(
-                    format!("Failed to read disk manifest: {}", e)
-                ))?;
-            let manifest: SnapshotManifest = serde_json::from_str(&json_str)
-                .map_err(|e| crate::LsmError::InvalidArgument(
-                    format!("Failed to parse disk manifest: {}", e)
-                ))?;
+            let json_str = std::fs::read_to_string(&manifest_path).map_err(|e| {
+                crate::LsmError::InvalidArgument(format!("Failed to read disk manifest: {}", e))
+            })?;
+            let manifest: SnapshotManifest = serde_json::from_str(&json_str).map_err(|e| {
+                crate::LsmError::InvalidArgument(format!("Failed to parse disk manifest: {}", e))
+            })?;
             for (cf, filenames) in &manifest.column_families {
                 for fname in filenames {
                     let sst_path = sst_dir.join(fname);
@@ -2388,7 +2463,9 @@ impl<C: Cache> Engine<C> {
                             Err(e) => {
                                 tracing::warn!(
                                     "discover_sstables: failed to load {} for CF {}: {:?}",
-                                    fname, cf, e
+                                    fname,
+                                    cf,
+                                    e
                                 );
                             }
                         }
@@ -2414,7 +2491,8 @@ impl<C: Cache> Engine<C> {
                                 Err(e) => {
                                     tracing::warn!(
                                         "discover_sstables: failed to load {}: {:?}",
-                                        fname_str, e
+                                        fname_str,
+                                        e
                                     );
                                 }
                             }
@@ -2460,13 +2538,11 @@ impl<C: Cache> Engine<C> {
                     if let Err(e) = std::fs::remove_file(&path) {
                         tracing::warn!(
                             "reconcile_tables: failed to remove orphaned SSTable {:?}: {:?}",
-                            path, e
+                            path,
+                            e
                         );
                     } else {
-                        tracing::info!(
-                            "reconcile_tables: removed orphaned SSTable {:?}",
-                            path
-                        );
+                        tracing::info!("reconcile_tables: removed orphaned SSTable {:?}", path);
                         removed += 1;
                     }
                 }
@@ -2628,8 +2704,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (new_tables, _metrics) = strategy
-.execute(tables, &options, &storage_config, &output_dir, &[])
-                                   .unwrap();
+            .execute(tables, &options, &storage_config, &output_dir, &[])
+            .unwrap();
 
         assert!(
             !new_tables.is_empty(),
@@ -2669,8 +2745,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (new_tables, _) = strategy
-.execute(tables, &options, &storage_config, &output_dir, &[])
-                                   .unwrap();
+            .execute(tables, &options, &storage_config, &output_dir, &[])
+            .unwrap();
 
         assert!(
             !new_tables.is_empty(),
@@ -2709,8 +2785,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (new_tables, _) = strategy
-.execute(vec![table], &options, &storage_config, &output_dir, &[])
-                                   .unwrap();
+            .execute(vec![table], &options, &storage_config, &output_dir, &[])
+            .unwrap();
 
         // The new table should not contain tombstones
         if let Some(new_table) = new_tables.first() {
@@ -2749,8 +2825,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (_, metrics) = strategy
-.execute(tables, &options, &storage_config, &output_dir, &[])
-                                   .unwrap();
+            .execute(tables, &options, &storage_config, &output_dir, &[])
+            .unwrap();
 
         assert!(metrics.bytes_read > 0, "Should track bytes read");
         assert!(metrics.files_merged > 0, "Should track files merged");
@@ -2862,8 +2938,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (_new_tables, metrics) = strategy
-.execute(tables, &options, &storage_config, &output_dir, &[])
-                                   .unwrap();
+            .execute(tables, &options, &storage_config, &output_dir, &[])
+            .unwrap();
 
         // Write amplification = bytes_written / bytes_read
         // For SizeTiered, should be < 3x
@@ -2905,8 +2981,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (new_tables, metrics) = strategy
-.execute(tables, &options, &storage_config, &output_dir, &[])
-                                   .unwrap();
+            .execute(tables, &options, &storage_config, &output_dir, &[])
+            .unwrap();
 
         assert!(
             !new_tables.is_empty(),
@@ -2949,8 +3025,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (_new_tables, metrics) = strategy
-.execute(tables, &options, &storage_config, &output_dir, &[])
-                                   .unwrap();
+            .execute(tables, &options, &storage_config, &output_dir, &[])
+            .unwrap();
 
         // Write amplification = bytes_written / bytes_read
         // For SizeTiered, should be < 3x
@@ -3857,7 +3933,11 @@ mod tests {
 
         // Set a key with a 1ms TTL
         engine
-            .set_with_ttl(b"ephemeral".to_vec(), b"value".to_vec(), Duration::from_millis(1))
+            .set_with_ttl(
+                b"ephemeral".to_vec(),
+                b"value".to_vec(),
+                Duration::from_millis(1),
+            )
             .unwrap();
 
         // Immediately after write, key should be present
@@ -3893,13 +3973,12 @@ mod tests {
         .unwrap();
 
         // Set a key without TTL
-        engine.set(b"persistent".to_vec(), b"value".to_vec()).unwrap();
+        engine
+            .set(b"persistent".to_vec(), b"value".to_vec())
+            .unwrap();
 
         // Key should be present
-        assert_eq!(
-            engine.get(b"persistent").unwrap(),
-            Some(b"value".to_vec()),
-        );
+        assert_eq!(engine.get(b"persistent").unwrap(), Some(b"value".to_vec()),);
 
         // Even after a short wait, key should still be present
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -3934,7 +4013,11 @@ mod tests {
 
         // Both keys should appear in scan before expiry
         let results = engine.scan_cf("default", None, None, Some(10)).unwrap();
-        assert_eq!(results.len(), 2, "Both keys should appear before TTL expiry");
+        assert_eq!(
+            results.len(),
+            2,
+            "Both keys should appear before TTL expiry"
+        );
 
         // Wait for TTL to expire
         std::thread::sleep(Duration::from_millis(5));
@@ -3962,7 +4045,12 @@ mod tests {
 
         // Insert a key with TTL in a non-default column family
         engine
-            .set_cf_with_ttl("sessions", b"session:1", b"active", Duration::from_millis(1))
+            .set_cf_with_ttl(
+                "sessions",
+                b"session:1",
+                b"active",
+                Duration::from_millis(1),
+            )
             .unwrap();
 
         // Immediately after write, key should be present
@@ -4004,13 +4092,12 @@ mod tests {
         .unwrap();
 
         // set() should inherit the default TTL
-        engine.set(b"auto_expire".to_vec(), b"value".to_vec()).unwrap();
+        engine
+            .set(b"auto_expire".to_vec(), b"value".to_vec())
+            .unwrap();
 
         // Immediately readable
-        assert_eq!(
-            engine.get(b"auto_expire").unwrap(),
-            Some(b"value".to_vec())
-        );
+        assert_eq!(engine.get(b"auto_expire").unwrap(), Some(b"value".to_vec()));
 
         // Wait for default TTL to expire
         std::thread::sleep(Duration::from_millis(5));
@@ -4028,8 +4115,12 @@ mod tests {
         use std::time::Duration;
 
         // Test the LogRecord constructor directly
-        let record = LogRecord::new_with_ttl(b"k".to_vec(), b"v".to_vec(), Duration::from_secs(3600));
-        assert!(!record.is_expired(), "Fresh TTL record should not be expired");
+        let record =
+            LogRecord::new_with_ttl(b"k".to_vec(), b"v".to_vec(), Duration::from_secs(3600));
+        assert!(
+            !record.is_expired(),
+            "Fresh TTL record should not be expired"
+        );
 
         // A record with 0 TTL should be expired immediately
         let now = std::time::SystemTime::now()
@@ -4040,7 +4131,10 @@ mod tests {
             expires_at: Some(now.saturating_sub(1)), // 1 nanosecond ago
             ..LogRecord::new(b"k".to_vec(), b"v".to_vec())
         };
-        assert!(expired_record.is_expired(), "Past expires_at should be expired");
+        assert!(
+            expired_record.is_expired(),
+            "Past expires_at should be expired"
+        );
 
         // Non-TTL record should never be expired
         let no_ttl = LogRecord::new(b"k".to_vec(), b"v".to_vec());
@@ -4066,11 +4160,21 @@ mod tests {
 
         // Write keys "a", "b", "c", "d", "e" and flush to SSTable
         // so that range tombstones can mask them
-        engine.put_cf("default", b"a".to_vec(), b"value_a".to_vec()).unwrap();
-        engine.put_cf("default", b"b".to_vec(), b"value_b".to_vec()).unwrap();
-        engine.put_cf("default", b"c".to_vec(), b"value_c".to_vec()).unwrap();
-        engine.put_cf("default", b"d".to_vec(), b"value_d".to_vec()).unwrap();
-        engine.put_cf("default", b"e".to_vec(), b"value_e".to_vec()).unwrap();
+        engine
+            .put_cf("default", b"a".to_vec(), b"value_a".to_vec())
+            .unwrap();
+        engine
+            .put_cf("default", b"b".to_vec(), b"value_b".to_vec())
+            .unwrap();
+        engine
+            .put_cf("default", b"c".to_vec(), b"value_c".to_vec())
+            .unwrap();
+        engine
+            .put_cf("default", b"d".to_vec(), b"value_d".to_vec())
+            .unwrap();
+        engine
+            .put_cf("default", b"e".to_vec(), b"value_e".to_vec())
+            .unwrap();
         engine.flush_memtable().unwrap();
 
         // Verify all keys are present
@@ -4142,7 +4246,9 @@ mod tests {
         .unwrap();
 
         // Write key "x" with value "original" and flush to SSTable
-        engine.put_cf("default", b"x".to_vec(), b"original".to_vec()).unwrap();
+        engine
+            .put_cf("default", b"x".to_vec(), b"original".to_vec())
+            .unwrap();
         engine.flush_memtable().unwrap();
         assert_eq!(engine.get(b"x").unwrap(), Some(b"original".to_vec()));
 
@@ -4154,7 +4260,9 @@ mod tests {
 
         // Write "x" again with a new value — point write in memtable
         // should take precedence over the range tombstone
-        engine.put_cf("default", b"x".to_vec(), b"new_value".to_vec()).unwrap();
+        engine
+            .put_cf("default", b"x".to_vec(), b"new_value".to_vec())
+            .unwrap();
 
         // "x" should have the new value (memtable point write wins)
         assert_eq!(engine.get(b"x").unwrap(), Some(b"new_value".to_vec()));
@@ -4227,7 +4335,9 @@ mod tests {
         assert_eq!(engine.get_cf("cf1", b"c").unwrap(), Some(b"3".to_vec()));
 
         // Write a separate key to default CF to verify independence
-        engine.put_cf("default", b"default_key".to_vec(), b"val".to_vec()).unwrap();
+        engine
+            .put_cf("default", b"default_key".to_vec(), b"val".to_vec())
+            .unwrap();
         assert_eq!(engine.get(b"default_key").unwrap(), Some(b"val".to_vec()));
     }
 }

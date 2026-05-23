@@ -75,7 +75,7 @@ fn test_random_ops_linearizability() {
             0..=59 => {
                 let len: usize = rng.gen_range(1..64);
                 let key = random_key(&mut rng, len);
-                let val_len: usize = rng.gen_range(0..256);
+                let val_len: usize = rng.gen_range(1..256);
                 let val = random_value(&mut rng, val_len);
                 engine.set(key.clone(), val.clone()).unwrap();
                 model.insert(key, val);

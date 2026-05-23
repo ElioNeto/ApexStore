@@ -44,7 +44,8 @@ pub struct BlobStore {
 /// Trait abstracting the KV operations needed by [`BlobStore`].
 pub trait BlobEngine {
     /// Set a key to a value.
-    fn set(&self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    fn set(&self, key: &[u8], value: &[u8])
+        -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     /// Get a value by key.
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>>;
     /// Delete a key.
@@ -70,10 +71,7 @@ impl BlobStore {
     }
 
     /// Create a new `BlobStore` with a custom configuration.
-    pub fn with_config(
-        engine: Arc<dyn BlobEngine + Send + Sync>,
-        config: BlobStoreConfig,
-    ) -> Self {
+    pub fn with_config(engine: Arc<dyn BlobEngine + Send + Sync>, config: BlobStoreConfig) -> Self {
         Self { engine, config }
     }
 
@@ -81,7 +79,11 @@ impl BlobStore {
     ///
     /// The data is split into chunks of at most `max_chunk_size` bytes.
     /// Returns the number of chunks written.
-    pub fn store(&self, name: &str, data: &[u8]) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn store(
+        &self,
+        name: &str,
+        data: &[u8],
+    ) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
         let chunk_size = self.config.max_chunk_size;
         let total_size = data.len() as u64;
         let chunk_count = if data.is_empty() {
@@ -113,7 +115,10 @@ impl BlobStore {
     /// Retrieve a blob by name.
     ///
     /// Returns `None` if the blob does not exist.
-    pub fn retrieve(&self, name: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn retrieve(
+        &self,
+        name: &str,
+    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
         let meta_key = format!("{}{}", BLOB_META_PREFIX, name);
         let meta_bytes = match self.engine.get(meta_key.as_bytes())? {
             Some(b) => b,
@@ -125,10 +130,7 @@ impl BlobStore {
 
         for i in 0..meta.chunk_count {
             let chunk_key = format!("{}{}:{}", BLOB_CHUNK_PREFIX, name, i);
-            let chunk = self
-                .engine
-                .get(chunk_key.as_bytes())?
-                .unwrap_or_default();
+            let chunk = self.engine.get(chunk_key.as_bytes())?.unwrap_or_default();
             result.extend_from_slice(&chunk);
         }
 
@@ -174,13 +176,20 @@ mod tests {
     }
 
     impl BlobEngine for MemEngine {
-        fn set(&self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        fn set(
+            &self,
+            key: &[u8],
+            value: &[u8],
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mut map = self.data.lock().unwrap();
             map.insert(key.to_vec(), value.to_vec());
             Ok(())
         }
 
-        fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+        fn get(
+            &self,
+            key: &[u8],
+        ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
             let map = self.data.lock().unwrap();
             Ok(map.get(key).cloned())
         }

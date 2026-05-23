@@ -199,9 +199,9 @@ where
                     // Extract endpoint path for per-endpoint rate limiting
                     let endpoint = req.path().to_string();
                     if state.is_rate_limited(peer, Some(&endpoint)) {
-                        return Box::pin(ready(Err(
-                            actix_web::error::ErrorTooManyRequests("rate limit exceeded"),
-                        )));
+                        return Box::pin(ready(Err(actix_web::error::ErrorTooManyRequests(
+                            "rate limit exceeded",
+                        ))));
                     }
                 }
             }

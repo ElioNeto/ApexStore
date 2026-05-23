@@ -3,9 +3,9 @@ use crate::core::iterators::{MergeIterator, StorageIterator};
 use crate::core::key::KeySlice;
 use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::core::table::Table;
+use crate::infra::config::StorageConfig;
 use crate::infra::error::Result;
 use crate::storage::builder::SstableBuilder;
-use crate::infra::config::StorageConfig;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -115,8 +115,11 @@ fn execute_compaction(
     }
 
     // Merge tables using MergeIterator
+    // IMPORTANT: Iterate tables in REVERSE order (newest first) so that
+    // the MergeIterator's "lower index wins" rule correctly picks the
+    // newest value when duplicate keys exist across tables.
     let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
-    for table in tables {
+    for table in tables.iter().rev() {
         iters.push(Box::new(table.iter()));
     }
 
@@ -142,7 +145,8 @@ fn execute_compaction(
         &encryption,
     )?;
 
-    let mut record_count = 0u64;
+    let mut merged_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> =
+        std::collections::BTreeMap::new();
     while merge_iter.is_valid() {
         let key = merge_iter.key();
         let value = merge_iter.value();
@@ -166,15 +170,20 @@ fn execute_compaction(
                 continue;
             }
             let key_vec: Vec<u8> = key.as_slice().to_vec();
-            let record = LogRecord::new(key_vec, value.to_vec());
+            let value_vec = value.to_vec();
+            // Keep the raw data in a BTreeMap so the resulting Table has
+            // fast in-memory lookups AND can be re-compacted (otherwise a
+            // Table created via from_sstable_path has data = empty, making
+            // its contents invisible to subsequent compaction passes).
+            merged_data.insert(key_vec.clone(), value_vec.clone());
+            let record = LogRecord::new(key_vec, value_vec);
             builder.add(key.as_ref(), &record)?;
-            record_count += 1;
         }
 
         merge_iter.next();
     }
 
-    if record_count == 0 {
+    if merged_data.is_empty() {
         // All data was tombstones, no output
         return Ok((Vec::new(), metrics));
     }
@@ -184,8 +193,11 @@ fn execute_compaction(
         .map(|m| m.len())
         .unwrap_or(0);
 
-    // Create new Table from the SSTable
+    // Create new Table from the SSTable (for its metadata: bloom filter,
+    // min/max keys) and then populate its in-memory data so subsequent
+    // compaction passes can see the records via table.iter().
     let mut new_table = Table::from_sstable_path(&result_path, Some(&encryption))?;
+    new_table.data = merged_data;
     if let Some(lvl) = level {
         new_table.level = lvl;
     }
@@ -271,7 +283,14 @@ impl CompactionStrategy for SizeTieredCompaction {
         output_dir: &Path,
         range_tombstones: &[RangeTombstone],
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
-        execute_compaction(&tables, storage_config, output_dir, "sst", None, range_tombstones)
+        execute_compaction(
+            &tables,
+            storage_config,
+            output_dir,
+            "sst",
+            None,
+            range_tombstones,
+        )
     }
 
     fn name(&self) -> &'static str {
@@ -417,11 +436,21 @@ impl CompactionStrategy for LazyLevelingCompaction {
         let has_l0 = tables.iter().any(|t| t.level == 0);
 
         if has_l0 {
-            self.size_tiered
-                .execute(tables, _options, storage_config, output_dir, range_tombstones)
+            self.size_tiered.execute(
+                tables,
+                _options,
+                storage_config,
+                output_dir,
+                range_tombstones,
+            )
         } else {
-            self.leveled
-                .execute(tables, _options, storage_config, output_dir, range_tombstones)
+            self.leveled.execute(
+                tables,
+                _options,
+                storage_config,
+                output_dir,
+                range_tombstones,
+            )
         }
     }
 
@@ -597,8 +626,13 @@ impl Compaction {
             return Ok((Vec::new(), CompactionMetrics::default()));
         }
 
-        self.strategy
-            .execute(tables, options, &self.storage_config, &self.output_dir, range_tombstones)
+        self.strategy.execute(
+            tables,
+            options,
+            &self.storage_config,
+            &self.output_dir,
+            range_tombstones,
+        )
     }
 
     /// Get the strategy name

@@ -661,6 +661,25 @@
         "cargo check passes"
       ],
       "fetched_body": true
+    },
+    {
+      "number": 194,
+      "priority": "medium",
+      "title": "[FEATURE] Key prefix compression — block-level prefix encoding to reduce SSTable size",
+      "status": "completed",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "PrefixCompressor struct with encode_keys/decode_keys/compress_block_data/decompress_block_data",
+        "prefix_compression field in StorageConfig (both storage and infra config)",
+        "Block flags byte in encode/decode with PREFIX_COMPRESSION_FLAG support",
+        "SstableBuilder compresses keys per block when prefix compression enabled",
+        "Block::decode auto-decompresses prefix-compressed blocks transparently",
+        "PREFIX_COMPRESSION_ENABLED env var in server.rs and .env.example",
+        "SSTable V2 format extended with flags byte (backward compatible)",
+        "cargo test, cargo check, cargo clippy pass"
+      ],
+      "fetched_body": true
     }
   ],
   "todos": [
@@ -944,6 +963,62 @@
       "files": ["src/infra/webhook_triggers.rs", "src/infra/mod.rs", "src/lib.rs"],
       "depends_on": [],
       "notes": "Created webhook_triggers.rs with prefix-based webhook registration, CDC-backed trigger, tests."
+    },
+    {
+      "id": "T194_1",
+      "description": "Issue #194: Create src/storage/prefix_compression.rs with PrefixCompressor, encode_keys, decode_keys, compress_block_data, decompress_block_data",
+      "status": "done",
+      "files": ["src/storage/prefix_compression.rs"],
+      "depends_on": [],
+      "notes": "Created prefix compression module with roundtrip tests (9 tests passing)"
+    },
+    {
+      "id": "T194_2",
+      "description": "Issue #194: Add prefix_compression field to StorageConfig (both storage and infra levels)",
+      "status": "done",
+      "files": ["src/storage/config.rs", "src/infra/config.rs"],
+      "depends_on": ["T194_1"],
+      "notes": "Added prefix_compression: bool to storage::config::StorageConfig and prefix_compression_enabled: bool to infra::config::StorageConfig with LsmConfigBuilder support"
+    },
+    {
+      "id": "T194_3",
+      "description": "Issue #194: Modify Block (encode/decode) to support flags byte and prefix compression",
+      "status": "done",
+      "files": ["src/storage/block.rs"],
+      "depends_on": ["T194_2"],
+      "notes": "Added flags field to Block, PREFIX_COMPRESSION_FLAG constant, compress_keys() method, updated encode()/decode() with flag byte"
+    },
+    {
+      "id": "T194_4",
+      "description": "Issue #194: Add prefix compression to SstableBuilder (flush_current_block) and register module",
+      "status": "done",
+      "files": ["src/storage/builder.rs", "src/storage/mod.rs"],
+      "depends_on": ["T194_3"],
+      "notes": "Added prefix_compression field to SstableBuilder, compresses keys in flush_current_block before encoding"
+    },
+    {
+      "id": "T194_5",
+      "description": "Issue #194: Update engine infra configs to include prefix_compression_enabled",
+      "status": "done",
+      "files": ["src/core/engine/mod.rs", "src/core/engine/compaction.rs"],
+      "depends_on": ["T194_4"],
+      "notes": "Added prefix_compression_enabled to all StorageConfig struct literals in engine/mod.rs and compaction.rs"
+    },
+    {
+      "id": "T194_6",
+      "description": "Issue #194: Add PREFIX_COMPRESSION_ENABLED env var, server startup, and .env.example",
+      "status": "done",
+      "files": ["src/bin/server.rs", ".env.example"],
+      "depends_on": ["T194_5"],
+      "notes": "Added env var parsing in server.rs, config display, and .env.example documentation"
+    },
+    {
+      "id": "T194_7",
+      "description": "Issue #194: Run cargo check, cargo clippy, cargo test to verify",
+      "status": "done",
+      "files": [],
+      "depends_on": ["T194_6"],
+      "notes": "cargo check: passes. cargo clippy: no new warnings (pre-existing issues in bulk_io.rs, blob_store.rs, etc). cargo test --lib: 340 passed, 8 pre-existing failures (unrelated)"
     }
   ]
 }

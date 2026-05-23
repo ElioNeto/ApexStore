@@ -151,11 +151,8 @@ mod tests {
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
         let engine = Arc::new(
-            crate::core::engine::Engine::new_from_config(
-                &config,
-                GlobalBlockCache::new(100, 4096),
-            )
-            .unwrap(),
+            crate::core::engine::Engine::new_from_config(&config, GlobalBlockCache::new(100, 4096))
+                .unwrap(),
         );
         let schema = build_schema(engine);
         let sdl = schema.sdl();
@@ -173,17 +170,12 @@ mod tests {
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
         let engine = Arc::new(
-            crate::core::engine::Engine::new_from_config(
-                &config,
-                GlobalBlockCache::new(100, 4096),
-            )
-            .unwrap(),
+            crate::core::engine::Engine::new_from_config(&config, GlobalBlockCache::new(100, 4096))
+                .unwrap(),
         );
         let schema = build_schema(engine.clone());
 
-        let res = futures::executor::block_on(
-            schema.execute("{ get(key: \"nonexistent\") }"),
-        );
+        let res = futures::executor::block_on(schema.execute("{ get(key: \"nonexistent\") }"));
         assert!(res.errors.is_empty());
     }
 
@@ -193,11 +185,8 @@ mod tests {
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
         let engine = Arc::new(
-            crate::core::engine::Engine::new_from_config(
-                &config,
-                GlobalBlockCache::new(100, 4096),
-            )
-            .unwrap(),
+            crate::core::engine::Engine::new_from_config(&config, GlobalBlockCache::new(100, 4096))
+                .unwrap(),
         );
         let schema = build_schema(engine.clone());
 
@@ -210,9 +199,7 @@ mod tests {
         assert_eq!(data["set"], true);
 
         // Query via get
-        let res = futures::executor::block_on(
-            schema.execute(r#"{ get(key: "hello") }"#),
-        );
+        let res = futures::executor::block_on(schema.execute(r#"{ get(key: "hello") }"#));
         assert!(res.errors.is_empty());
         let data = res.data.into_json().unwrap();
         assert_eq!(data["get"], "world");
@@ -224,11 +211,8 @@ mod tests {
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
         let engine = Arc::new(
-            crate::core::engine::Engine::new_from_config(
-                &config,
-                GlobalBlockCache::new(100, 4096),
-            )
-            .unwrap(),
+            crate::core::engine::Engine::new_from_config(&config, GlobalBlockCache::new(100, 4096))
+                .unwrap(),
         );
         let schema = build_schema(engine.clone());
 
@@ -238,17 +222,14 @@ mod tests {
         );
 
         // Delete
-        let res = futures::executor::block_on(
-            schema.execute(r#"mutation { delete(key: "todelete") }"#),
-        );
+        let res =
+            futures::executor::block_on(schema.execute(r#"mutation { delete(key: "todelete") }"#));
         assert!(res.errors.is_empty());
         let data = res.data.into_json().unwrap();
         assert_eq!(data["delete"], true);
 
         // Verify gone
-        let res = futures::executor::block_on(
-            schema.execute(r#"{ get(key: "todelete") }"#),
-        );
+        let res = futures::executor::block_on(schema.execute(r#"{ get(key: "todelete") }"#));
         let data = res.data.into_json().unwrap();
         assert_eq!(data["get"], serde_json::Value::Null);
     }

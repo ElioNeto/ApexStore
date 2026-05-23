@@ -162,9 +162,7 @@ mod tests {
     #[test]
     fn test_register_and_validate_valid() {
         let mut validator = SchemaValidator::new();
-        validator
-            .register_schema("users/", schema())
-            .unwrap();
+        validator.register_schema("users/", schema()).unwrap();
 
         let value = serde_json::json!({"name": "Alice", "age": 30});
         let result = validator.validate(b"users/123", value.to_string().as_bytes());
@@ -174,9 +172,7 @@ mod tests {
     #[test]
     fn test_validate_invalid() {
         let mut validator = SchemaValidator::new();
-        validator
-            .register_schema("users/", schema())
-            .unwrap();
+        validator.register_schema("users/", schema()).unwrap();
 
         // Missing required "name"
         let value = serde_json::json!({"age": 30});
@@ -189,9 +185,7 @@ mod tests {
     #[test]
     fn test_no_matching_schema() {
         let mut validator = SchemaValidator::new();
-        validator
-            .register_schema("users/", schema())
-            .unwrap();
+        validator.register_schema("users/", schema()).unwrap();
 
         let value = serde_json::json!({"anything": "goes"});
         let result = validator.validate(b"other/key", value.to_string().as_bytes());
@@ -240,13 +234,16 @@ mod tests {
             .register_schema("users/", serde_json::json!({"type": "object"}))
             .unwrap();
         validator
-            .register_schema("users/admin/", serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "role": { "const": "admin" }
-                },
-                "required": ["role"]
-            }))
+            .register_schema(
+                "users/admin/",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "role": { "const": "admin" }
+                    },
+                    "required": ["role"]
+                }),
+            )
             .unwrap();
 
         // Should match the longer prefix

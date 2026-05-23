@@ -66,8 +66,8 @@ impl DiskMonitor {
     pub fn default(dir_path: impl Into<String>) -> Self {
         Self::new(
             dir_path,
-            1_073_741_824,   // 1 GiB warn
-            268_435_456,     // 256 MiB critical
+            1_073_741_824, // 1 GiB warn
+            268_435_456,   // 256 MiB critical
             Duration::from_secs(30),
         )
     }
@@ -176,8 +176,8 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let mut monitor = DiskMonitor::new(
             &dir_path,
-            1,          // 1 byte warn (unlikely to trigger)
-            u64::MAX,   // critical threshold (always fires)
+            1,        // 1 byte warn (unlikely to trigger)
+            u64::MAX, // critical threshold (always fires)
             Duration::from_secs(1),
         );
         monitor.on_critical(move || {

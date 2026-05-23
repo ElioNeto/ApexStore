@@ -112,10 +112,9 @@ impl ReplicationClient {
             let mut batch: Vec<LogRecord> = Vec::new();
             let mut sequence: u64 = 0;
             let mut flush_timer = tokio::time::interval(sync_interval);
-            let client =
-                reqwest::Client::builder()
-                    .timeout(Duration::from_secs(30))
-                    .build();
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build();
 
             let http_client = match client {
                 Ok(c) => c,

@@ -97,8 +97,8 @@ fn scrub_sst_directory(dir: &str) -> Result<Vec<ScrubResult>, String> {
     let path = Path::new(dir);
     let mut results = Vec::new();
 
-    let entries = std::fs::read_dir(path)
-        .map_err(|e| format!("cannot read directory '{}': {}", dir, e))?;
+    let entries =
+        std::fs::read_dir(path).map_err(|e| format!("cannot read directory '{}': {}", dir, e))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| format!("readdir error: {}", e))?;
@@ -108,9 +108,7 @@ fn scrub_sst_directory(dir: &str) -> Result<Vec<ScrubResult>, String> {
             continue;
         }
 
-        let file_size = std::fs::metadata(&file_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
 
         // Perform integrity check: open and read the file completely.
         // This exercises the I/O path and catches bit rot at the storage layer.

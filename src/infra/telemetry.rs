@@ -54,8 +54,7 @@ pub fn init_tracing() {
 
         let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
-        let filter = EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("info"));
+        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
         tracing_subscriber::registry()
             .with(filter)
@@ -65,8 +64,7 @@ pub fn init_tracing() {
         // Fallback: standard console logging
         tracing_subscriber::fmt()
             .with_env_filter(
-                EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| EnvFilter::new("info")),
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
             )
             .with_target(false)
             .with_level(true)
@@ -165,24 +163,68 @@ impl OtelInstruments {
         Some(Arc::new(Self {
             sets: init(meter, "apexstore.sets", "Total number of set operations"),
             gets: init(meter, "apexstore.gets", "Total number of get operations"),
-            deletes: init(meter, "apexstore.deletes", "Total number of delete operations"),
+            deletes: init(
+                meter,
+                "apexstore.deletes",
+                "Total number of delete operations",
+            ),
             scans: init(meter, "apexstore.scans", "Total number of scan operations"),
-            batch_sets: init(meter, "apexstore.batch_sets", "Items in batch set operations"),
-            batch_deletes: init(meter, "apexstore.batch_deletes", "Items in batch delete operations"),
-            flushes: init(meter, "apexstore.flushes", "Total number of memtable flushes"),
-            compactions: init(meter, "apexstore.compactions", "Total number of compactions"),
-            set_latency: init(meter, "apexstore.set_latency_us", "Cumulative microseconds in set"),
-            get_latency: init(meter, "apexstore.get_latency_us", "Cumulative microseconds in get"),
-            delete_latency: init(meter, "apexstore.delete_latency_us", "Cumulative microseconds in delete"),
-            scan_latency: init(meter, "apexstore.scan_latency_us", "Cumulative microseconds in scan"),
-            flush_latency: init(meter, "apexstore.flush_latency_us", "Cumulative microseconds in flush"),
+            batch_sets: init(
+                meter,
+                "apexstore.batch_sets",
+                "Items in batch set operations",
+            ),
+            batch_deletes: init(
+                meter,
+                "apexstore.batch_deletes",
+                "Items in batch delete operations",
+            ),
+            flushes: init(
+                meter,
+                "apexstore.flushes",
+                "Total number of memtable flushes",
+            ),
+            compactions: init(
+                meter,
+                "apexstore.compactions",
+                "Total number of compactions",
+            ),
+            set_latency: init(
+                meter,
+                "apexstore.set_latency_us",
+                "Cumulative microseconds in set",
+            ),
+            get_latency: init(
+                meter,
+                "apexstore.get_latency_us",
+                "Cumulative microseconds in get",
+            ),
+            delete_latency: init(
+                meter,
+                "apexstore.delete_latency_us",
+                "Cumulative microseconds in delete",
+            ),
+            scan_latency: init(
+                meter,
+                "apexstore.scan_latency_us",
+                "Cumulative microseconds in scan",
+            ),
+            flush_latency: init(
+                meter,
+                "apexstore.flush_latency_us",
+                "Cumulative microseconds in flush",
+            ),
             compaction_latency: init(
                 meter,
                 "apexstore.compaction_latency_us",
                 "Cumulative microseconds in compaction",
             ),
             cache_hits: init(meter, "apexstore.cache_hits", "Total number of cache hits"),
-            cache_misses: init(meter, "apexstore.cache_misses", "Total number of cache misses"),
+            cache_misses: init(
+                meter,
+                "apexstore.cache_misses",
+                "Total number of cache misses",
+            ),
             bloom_negatives: init(
                 meter,
                 "apexstore.bloom_filter_negatives",

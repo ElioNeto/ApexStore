@@ -221,8 +221,16 @@ pub async fn admin_dashboard(engine: web::Data<LsmEngine>) -> impl Responder {
         mem_kb = stats.mem_kb,
         total_records = stats.total_records,
         max_levels = stats.max_levels_reached,
-        compact_status_class = if compaction_running { "running" } else { "idle" },
-        compact_status = if compaction_running { "Running" } else { "Idle" },
+        compact_status_class = if compaction_running {
+            "running"
+        } else {
+            "idle"
+        },
+        compact_status = if compaction_running {
+            "Running"
+        } else {
+            "Idle"
+        },
         compactions_completed = metrics_snapshot.compactions,
         files_merged = stats.last_compaction_files_merged,
         bytes_read = stats.last_compaction_bytes_read,
@@ -236,7 +244,8 @@ pub async fn admin_dashboard(engine: web::Data<LsmEngine>) -> impl Responder {
         cache_misses = metrics_snapshot.cache_misses,
         bloom_negatives = metrics_snapshot.bloom_filter_negatives,
         errors = metrics_snapshot.errors,
-        cf_list = column_families.iter()
+        cf_list = column_families
+            .iter()
             .map(|cf| format!("<li>{}</li>", cf))
             .collect::<Vec<_>>()
             .join("\n"),

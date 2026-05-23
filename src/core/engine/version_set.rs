@@ -32,6 +32,11 @@ pub struct VersionSet<C: Cache> {
     block_cache: Option<Arc<GlobalBlockCache>>,
     /// Encryption configuration for reading encrypted SSTables.
     encryption: EncryptionConfig,
+    /// Monotonically increasing counter incremented every time tables are
+    /// added or removed.  Background compaction plans capture this value
+    /// at build time and reject their results at apply time if the counter
+    /// has advanced (indicating the plan's indices are stale).
+    compaction_generation: u64,
 }
 
 impl<C: Cache> VersionSet<C> {
@@ -60,6 +65,7 @@ impl<C: Cache> VersionSet<C> {
             storage_config,
             block_cache,
             encryption,
+            compaction_generation: 0,
         }
     }
 
@@ -112,14 +118,18 @@ impl<C: Cache> VersionSet<C> {
 
                 // Check in-memory data first
                 if let Some(val) = table.data.get(key) {
-                    // Tombstones are stored as empty values — treat as "key not found"
-                    // so deleted keys return None instead of Some(vec![]).
                     if val.is_empty() {
-                        return None;
+                        // No on-disk SSTable to fall back to:
+                        // empty value means tombstone.
+                        table.path.as_ref()?;
+                        // Has a path: fall through to the SSTable reader
+                        // which correctly distinguishes tombstones from
+                        // legitimate empty values via the is_deleted flag.
+                    } else {
+                        // Non-empty value: populate cache and return
+                        self.put_cached(key.to_vec(), val.clone());
+                        return Some(val.clone());
                     }
-                    // 2. Populate cache after successful read
-                    self.put_cached(key.to_vec(), val.clone());
-                    return Some(val.clone());
                 }
 
                 // 3. If not in memory but has a disk path, try reading from SSTable
@@ -188,6 +198,7 @@ impl<C: Cache> VersionSet<C> {
         self.tables.entry(cf.to_string()).or_default().push(table);
         // New table means previously cached entries might have been superseded
         self.clear_cache();
+        self.compaction_generation += 1;
     }
 
     pub fn table_count(&self, cf: &str) -> usize {
@@ -257,6 +268,7 @@ impl<C: Cache> VersionSet<C> {
         let entry = self.tables.entry(cf.to_string()).or_default();
         entry.clear();
         entry.push(new_table);
+        self.compaction_generation += 1;
     }
 
     /// Get all tables for a column family (without draining)
@@ -327,6 +339,7 @@ impl<C: Cache> VersionSet<C> {
             // compacted result, so they are checked first by `get()`'s `.rev()`.
             let insert_at = insert_at.min(tables.len());
             let _ = tables.splice(insert_at..insert_at, new_tables);
+            self.compaction_generation += 1;
         }
         removed_paths
     }
@@ -363,5 +376,11 @@ impl<C: Cache> VersionSet<C> {
     /// Get list of all column families
     pub fn column_families(&self) -> Vec<String> {
         self.tables.keys().cloned().collect()
+    }
+
+    /// Current compaction generation.  Stale-plan detection:
+    /// capture this before building a plan, and compare when applying results.
+    pub fn compaction_generation(&self) -> u64 {
+        self.compaction_generation
     }
 }

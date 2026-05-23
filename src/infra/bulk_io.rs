@@ -33,8 +33,8 @@ use crate::core::engine::Engine;
 use crate::infra::error::{LsmError, Result};
 use crate::storage::cache::Cache;
 use serde::de::{self, SeqAccess, Visitor};
-use serde::Deserializer;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde_json::Value;
 use std::io::{Read, Write};
 
@@ -134,10 +134,7 @@ struct JsonKvPair {
 ///
 /// Uses serde's `SeqAccess` visitor so that elements are yielded one at a time
 /// without loading the entire file into memory.
-fn stream_json_array<R: Read, F: FnMut(Value) -> Result<bool>>(
-    reader: R,
-    f: F,
-) -> Result<()> {
+fn stream_json_array<R: Read, F: FnMut(Value) -> Result<bool>>(reader: R, f: F) -> Result<()> {
     struct CallbackVisitor<F>(F);
 
     impl<'de, F: FnMut(Value) -> Result<bool>> Visitor<'de> for CallbackVisitor<F> {
@@ -264,7 +261,8 @@ pub fn export_csv<C: Cache, W: Write>(
         Ok(true)
     })?;
 
-    wtr.flush().map_err(|e| LsmError::InvalidArgument(format!("CSV flush error: {}", e)))?;
+    wtr.flush()
+        .map_err(|e| LsmError::InvalidArgument(format!("CSV flush error: {}", e)))?;
 
     if let Some(ref cb) = progress {
         cb(count, count);
@@ -356,38 +354,26 @@ pub fn import_csv<C: Cache, R: Read>(
     let key_idx = headers
         .iter()
         .position(|h| h.eq_ignore_ascii_case("key"))
-        .ok_or_else(|| {
-            LsmError::InvalidArgument(
-                "CSV must have a 'key' column".to_string(),
-            )
-        })?;
+        .ok_or_else(|| LsmError::InvalidArgument("CSV must have a 'key' column".to_string()))?;
 
     let val_idx = headers
         .iter()
         .position(|h| h.eq_ignore_ascii_case("value"))
-        .ok_or_else(|| {
-            LsmError::InvalidArgument(
-                "CSV must have a 'value' column".to_string(),
-            )
-        })?;
+        .ok_or_else(|| LsmError::InvalidArgument("CSV must have a 'value' column".to_string()))?;
 
     for result in rdr.records() {
-        let record = result
-            .map_err(|e| LsmError::InvalidArgument(format!("CSV read error: {}", e)))?;
+        let record =
+            result.map_err(|e| LsmError::InvalidArgument(format!("CSV read error: {}", e)))?;
 
         let key = record
             .get(key_idx)
-            .ok_or_else(|| {
-                LsmError::InvalidArgument("Missing key field in CSV row".to_string())
-            })?
+            .ok_or_else(|| LsmError::InvalidArgument("Missing key field in CSV row".to_string()))?
             .as_bytes()
             .to_vec();
 
         let value = record
             .get(val_idx)
-            .ok_or_else(|| {
-                LsmError::InvalidArgument("Missing value field in CSV row".to_string())
-            })?
+            .ok_or_else(|| LsmError::InvalidArgument("Missing value field in CSV row".to_string()))?
             .as_bytes()
             .to_vec();
 
@@ -442,10 +428,7 @@ mod tests {
         config.core.dir_path = dir.path().to_path_buf();
         let cache = GlobalBlockCache::new(100, 4096);
         let engine = Engine::new_from_config(&config, cache).unwrap();
-        TestContext {
-            engine,
-            _dir: dir,
-        }
+        TestContext { engine, _dir: dir }
     }
 
     fn put(engine: &TestEngine, cf: &str, k: &str, v: &str) {
@@ -635,10 +618,7 @@ mod tests {
         // Generate pairs that exceed IMPORT_BATCH_SIZE
         let mut pairs = Vec::new();
         for i in 0..IMPORT_BATCH_SIZE * 3 {
-            pairs.push(format!(
-                "{{\"key\":\"k{}\",\"value\":\"v{}\"}}",
-                i, i
-            ));
+            pairs.push(format!("{{\"key\":\"k{}\",\"value\":\"v{}\"}}", i, i));
         }
         let json = format!("[{}]", pairs.join(","));
 
@@ -647,10 +627,7 @@ mod tests {
         for i in 0..IMPORT_BATCH_SIZE * 3 {
             let k = format!("k{}", i);
             let v = format!("v{}", i);
-            assert_eq!(
-                ctx.engine.get(k.as_bytes()).unwrap(),
-                Some(v.into_bytes())
-            );
+            assert_eq!(ctx.engine.get(k.as_bytes()).unwrap(), Some(v.into_bytes()));
         }
     }
 }

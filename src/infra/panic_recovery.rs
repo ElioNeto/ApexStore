@@ -13,7 +13,7 @@
 //! let recovery = PanicRecovery::new();
 //!
 //! // Spawn a protected thread
-//! let handle = recovery.spawn_protected(|| {
+//! let handle = recovery.spawn_protected(None, || {
 //!     // worker logic that might panic
 //! });
 //!

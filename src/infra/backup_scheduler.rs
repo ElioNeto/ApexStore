@@ -68,7 +68,11 @@ impl Default for BackupConfig {
 
 /// Type alias for snapshot and list functions wrapped in Arc.
 pub type SnapshotFn = Arc<dyn Fn(&Path) -> crate::infra::error::Result<()> + Send + Sync>;
-pub type ListFn = Arc<dyn Fn(&Path) -> crate::infra::error::Result<Vec<crate::core::engine::SnapshotInfo>> + Send + Sync>;
+pub type ListFn = Arc<
+    dyn Fn(&Path) -> crate::infra::error::Result<Vec<crate::core::engine::SnapshotInfo>>
+        + Send
+        + Sync,
+>;
 
 /// Manages periodic backups of the LSM engine.
 pub struct BackupScheduler {
@@ -90,11 +94,7 @@ impl BackupScheduler {
     /// * `snapshot_fn` — closure that calls `engine.create_snapshot(path)`
     /// * `list_fn` — closure that calls `engine.list_snapshots(path)`
     /// * `backup_dir` — directory where backups are stored
-    pub fn new(
-        snapshot_fn: SnapshotFn,
-        list_fn: ListFn,
-        backup_dir: PathBuf,
-    ) -> Self {
+    pub fn new(snapshot_fn: SnapshotFn, list_fn: ListFn, backup_dir: PathBuf) -> Self {
         Self {
             config: Mutex::new(BackupConfig {
                 backup_dir,

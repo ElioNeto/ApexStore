@@ -23,11 +23,11 @@ pub use crate::infra::replication::{
 pub use crate::infra::schema_validation::{SchemaValidator, ValidationError};
 
 // ── Differentiator features re-exports ────────────────────────────────────
+pub use crate::infra::data_tiering::{DataTieringConfig, Tier};
+pub use crate::infra::multi_model::{Document, GraphVertex, MultiModelEngine, TimeSeriesPoint};
+pub use crate::infra::pubsub::PubSub;
+pub use crate::infra::time_travel::TimeTravelEngine;
+pub use crate::infra::vector_index::VectorIndex;
 #[cfg(feature = "wasm")]
 pub use crate::infra::wasm_plugin::WasmPlugin;
-pub use crate::infra::vector_index::VectorIndex;
-pub use crate::infra::time_travel::TimeTravelEngine;
-pub use crate::infra::pubsub::PubSub;
-pub use crate::infra::data_tiering::{DataTieringConfig, Tier};
-pub use crate::infra::multi_model::{MultiModelEngine, Document, TimeSeriesPoint, GraphVertex};
 pub use crate::infra::webhook_triggers::WebhookRegistry;

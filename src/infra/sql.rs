@@ -165,10 +165,8 @@ impl<'a, C: Cache> SqlEngine<'a, C> {
                         let row = &values.rows[0];
 
                         // Determine position of key and value columns
-                        let col_names: Vec<String> = columns
-                            .iter()
-                            .map(|c| c.value.to_lowercase())
-                            .collect();
+                        let col_names: Vec<String> =
+                            columns.iter().map(|c| c.value.to_lowercase()).collect();
 
                         let key_idx = col_names.iter().position(|c| c == "key");
                         let value_idx = col_names.iter().position(|c| c == "value");
@@ -199,8 +197,11 @@ impl<'a, C: Cache> SqlEngine<'a, C> {
                         let key = key_str.trim_matches('\'');
                         let value = value_str.trim_matches('\'');
 
-                        self.engine
-                            .put_cf(&cf, key.as_bytes().to_vec(), value.as_bytes().to_vec())?;
+                        self.engine.put_cf(
+                            &cf,
+                            key.as_bytes().to_vec(),
+                            value.as_bytes().to_vec(),
+                        )?;
 
                         Ok(SqlResult::Affected(1))
                     }
@@ -210,9 +211,7 @@ impl<'a, C: Cache> SqlEngine<'a, C> {
                 }
             }
             SqlStatement::Delete {
-                from,
-                selection,
-                ..
+                from, selection, ..
             } => {
                 let cf = from_table_name(from).unwrap_or_else(|| "default".to_string());
 
@@ -256,9 +255,9 @@ fn table_name_from_from_clause(from: &[TableWithJoins]) -> Option<String> {
 /// Extract the table name from a `FromTable` enum.
 fn from_table_name(from: &FromTable) -> Option<String> {
     match from {
-        FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => {
-            tables.first().and_then(|twj| table_factor_name(&twj.relation))
-        }
+        FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => tables
+            .first()
+            .and_then(|twj| table_factor_name(&twj.relation)),
     }
 }
 
@@ -363,7 +362,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
-        Engine::<Arc<GlobalBlockCache>>::new_from_config(&config, GlobalBlockCache::new(100, 4096)).unwrap()
+        Engine::<Arc<GlobalBlockCache>>::new_from_config(&config, GlobalBlockCache::new(100, 4096))
+            .unwrap()
     }
 
     #[test]
@@ -422,9 +422,7 @@ mod tests {
         sql.execute("INSERT INTO default (key, value) VALUES ('k1', 'v1')")
             .unwrap();
 
-        let result = sql
-            .execute("DELETE FROM default WHERE key = 'k1'")
-            .unwrap();
+        let result = sql.execute("DELETE FROM default WHERE key = 'k1'").unwrap();
         match result {
             SqlResult::Affected(n) => assert_eq!(n, 1),
             _ => panic!("Expected Affected"),
@@ -448,7 +446,9 @@ mod tests {
         let sql = SqlEngine::new(&engine);
 
         // Some SQL dialects allow VALUES without column names
-        let result = sql.execute("INSERT INTO default VALUES ('k1', 'v1')").unwrap();
+        let result = sql
+            .execute("INSERT INTO default VALUES ('k1', 'v1')")
+            .unwrap();
         match result {
             SqlResult::Affected(n) => assert_eq!(n, 1),
             _ => panic!("Expected Affected"),

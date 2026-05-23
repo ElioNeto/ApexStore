@@ -509,9 +509,7 @@ impl LsmConfigBuilder {
                 strategy: self.strategy.unwrap_or(defaults.compaction.strategy),
             },
             replication: ReplicationConfig {
-                role: self
-                    .replication_role
-                    .unwrap_or(defaults.replication.role),
+                role: self.replication_role.unwrap_or(defaults.replication.role),
                 replica_endpoints: self
                     .replica_endpoints
                     .unwrap_or(defaults.replication.replica_endpoints),
@@ -521,8 +519,12 @@ impl LsmConfigBuilder {
             },
             wal: WalConfig {
                 max_wal_size: self.wal_max_size.unwrap_or(defaults.wal.max_wal_size),
-                archive_enabled: self.wal_archive_enabled.unwrap_or(defaults.wal.archive_enabled),
-                check_interval_secs: self.wal_check_interval_secs.unwrap_or(defaults.wal.check_interval_secs),
+                archive_enabled: self
+                    .wal_archive_enabled
+                    .unwrap_or(defaults.wal.archive_enabled),
+                check_interval_secs: self
+                    .wal_check_interval_secs
+                    .unwrap_or(defaults.wal.check_interval_secs),
             },
         };
 

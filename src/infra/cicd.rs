@@ -28,7 +28,8 @@ pub struct Fixture {
 /// A trait abstracting the KV operations needed to load and reset fixtures.
 pub trait FixtureEngine: Send + Sync {
     /// Set a key to a value.
-    fn set(&self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    fn set(&self, key: &[u8], value: &[u8])
+        -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     /// Delete a key.
     fn delete(&self, key: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     /// List all keys in the store.
@@ -61,7 +62,10 @@ impl TestFixture {
     /// Load a fixture by name, inserting all its entries into the engine.
     ///
     /// Returns `None` if no fixture with that name has been registered.
-    pub fn load_fixture(&self, name: &str) -> Result<Option<()>, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn load_fixture(
+        &self,
+        name: &str,
+    ) -> Result<Option<()>, Box<dyn std::error::Error + Send + Sync>> {
         match self.fixtures.get(name) {
             Some(fixture) => {
                 for entry in &fixture.entries {
@@ -141,8 +145,15 @@ mod tests {
     }
 
     impl FixtureEngine for MemEngine {
-        fn set(&self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            self.data.lock().unwrap().insert(key.to_vec(), value.to_vec());
+        fn set(
+            &self,
+            key: &[u8],
+            value: &[u8],
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.data
+                .lock()
+                .unwrap()
+                .insert(key.to_vec(), value.to_vec());
             Ok(())
         }
 
