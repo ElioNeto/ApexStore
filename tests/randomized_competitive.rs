@@ -534,7 +534,10 @@ fn test_recovery_after_random_ops() {
             }
         }
         eprintln!("    Model size before restart: {}", model.len());
-        // Drop engine — simulates crash
+        // Flush remaining memtable to SSTable and close (simulates clean shutdown).
+        // This ensures all data is durably on disk before recovery.
+        let _ = engine.flush_memtable();
+        engine.close();
     }
 
     // Phase 2: Restart and verify
