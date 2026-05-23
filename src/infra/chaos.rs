@@ -30,9 +30,11 @@
 //! ```
 
 use parking_lot::Mutex;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 /// Types of failures that can be injected.
@@ -95,6 +97,8 @@ pub struct ChaosEngine {
     pub(crate) corrupt_sstable_prob: Mutex<f64>,
     /// Kill WAL fsync flag (set by KillWalFsync experiment).
     pub(crate) kill_wal_fsync: AtomicBool,
+    /// Total bytes written during DiskFull simulation.
+    pub(crate) bytes_written: AtomicU64,
 }
 
 impl Default for ChaosEngine {
@@ -107,6 +111,7 @@ impl Default for ChaosEngine {
             compaction_panic_prob: Mutex::new(0.0),
             corrupt_sstable_prob: Mutex::new(0.0),
             kill_wal_fsync: AtomicBool::new(false),
+            bytes_written: AtomicU64::new(0),
         }
     }
 }
@@ -286,6 +291,77 @@ impl ChaosEngine {
     pub fn compaction_panic_probability(&self) -> f64 {
         *self.compaction_panic_prob.lock()
     }
+
+    /// Check whether writing `additional_bytes` would exceed the disk full limit.
+    ///
+    /// Returns `true` if a `DiskFull` experiment is active and the total
+    /// written bytes plus `additional_bytes` exceeds the limit.
+    pub fn check_disk_full(&self, additional_bytes: u64) -> bool {
+        if !self.enabled.load(Ordering::Relaxed) {
+            return false;
+        }
+        if let Some(limit) = *self.disk_full_limit.lock() {
+            let written = self.bytes_written.load(Ordering::Relaxed);
+            let would_exceed = written.saturating_add(additional_bytes) > limit;
+            if would_exceed {
+                return true;
+            }
+            // Track the bytes as written
+            self.bytes_written
+                .fetch_add(additional_bytes, Ordering::Relaxed);
+        }
+        false
+    }
+
+    /// Return the current disk I/O delay, if any.
+    ///
+    /// Returns `Some(delay)` when a `DiskLatency` experiment is active.
+    pub fn should_delay_io(&self) -> Option<Duration> {
+        if !self.enabled.load(Ordering::Relaxed) {
+            return None;
+        }
+        *self.disk_delay.lock()
+    }
+
+    /// Check whether the current write should be corrupted, based on the
+    /// `CorruptSstable` experiment probability.
+    pub fn should_corrupt_write(&self) -> bool {
+        if !self.enabled.load(Ordering::Relaxed) {
+            return false;
+        }
+        let prob = *self.corrupt_sstable_prob.lock();
+        if prob <= 0.0 {
+            return false;
+        }
+        let mut rng = rand::thread_rng();
+        rng.gen::<f64>() < prob
+    }
+}
+
+// ── Global singleton access ───────────────────────────────────────────────────
+
+/// Global `ChaosEngine` singleton, lazily initialised on first access.
+static CHAOS_ENGINE: OnceLock<ChaosEngine> = OnceLock::new();
+
+/// Initialise the global `ChaosEngine` singleton.
+///
+/// If the singleton has already been initialised, this is a no-op.
+pub fn init_global() {
+    CHAOS_ENGINE.get_or_init(|| {
+        let engine = ChaosEngine::new();
+        if cfg!(feature = "chaos") {
+            engine.set_enabled(true);
+        }
+        engine
+    });
+}
+
+/// Return a reference to the global `ChaosEngine` singleton.
+///
+/// # Panics
+/// Panics if [`init_global`] has not been called first.
+pub fn global() -> &'static ChaosEngine {
+    CHAOS_ENGINE.get().expect("ChaosEngine global not initialised — call init_global() first")
 }
 
 #[cfg(test)]
@@ -364,5 +440,75 @@ mod tests {
 
         chaos.inject(FailureType::CorruptSstable { probability: 0.1 });
         assert!((chaos.corrupt_probability() - 0.1).abs() < f64::EPSILON);
+    }
+
+    // ── Hook method tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_check_disk_full_not_enabled() {
+        let chaos = ChaosEngine::new();
+        // disabled by default in non-chaos builds
+        assert!(!chaos.check_disk_full(100));
+    }
+
+    #[test]
+    fn test_check_disk_full_within_limit() {
+        let chaos = ChaosEngine::new();
+        chaos.set_enabled(true);
+        chaos.simulate_disk_full(1024);
+
+        // Writing 500 bytes should be fine
+        assert!(!chaos.check_disk_full(500));
+    }
+
+    #[test]
+    fn test_check_disk_full_exceeds_limit() {
+        let chaos = ChaosEngine::new();
+        chaos.set_enabled(true);
+        chaos.simulate_disk_full(600);
+
+        // First write of 400 bytes — within limit
+        assert!(!chaos.check_disk_full(400));
+        // Second write of 300 bytes — exceeds the remaining 200
+        assert!(chaos.check_disk_full(300));
+    }
+
+    #[test]
+    fn test_should_delay_io_none() {
+        let chaos = ChaosEngine::new();
+        chaos.set_enabled(true);
+        assert!(chaos.should_delay_io().is_none());
+    }
+
+    #[test]
+    fn test_should_delay_io_some() {
+        let chaos = ChaosEngine::new();
+        chaos.set_enabled(true);
+        chaos.inject_disk_latency(Duration::from_secs(10), Duration::from_millis(50));
+        assert_eq!(chaos.should_delay_io(), Some(Duration::from_millis(50)));
+    }
+
+    #[test]
+    fn test_should_delay_io_disabled() {
+        let chaos = ChaosEngine::new();
+        // disabled — should return None regardless of injected state
+        assert!(chaos.should_delay_io().is_none());
+    }
+
+    #[test]
+    fn test_should_corrupt_write_zero_prob() {
+        let chaos = ChaosEngine::new();
+        chaos.set_enabled(true);
+        // Probability is 0.0 by default
+        assert!(!chaos.should_corrupt_write());
+    }
+
+    #[test]
+    fn test_global_init_and_access() {
+        // Reset for test isolation — OnceLock can't be reset, so we just
+        // verify that init_global() and global() don't panic.
+        init_global();
+        let g = global();
+        assert!(!g.is_enabled() || cfg!(feature = "chaos"));
     }
 }

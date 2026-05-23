@@ -9,7 +9,10 @@
 //! HNSW, IVF, or a similar ANN algorithm (e.g. via `pgvector`, `usearch`,
 //! or a custom implementation).
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
 /// A dense vector embedding stored in the index.
 type Embedding = Vec<f32>;
@@ -19,6 +22,7 @@ type Embedding = Vec<f32>;
 /// Stores (key, embedding) pairs and performs brute-force cosine similarity
 /// search.  This is correct but slow for large datasets; replace the
 /// internal index with an HNSW graph for production use.
+#[derive(Serialize, Deserialize)]
 pub struct VectorIndex {
     /// Key → embedding mapping.
     vectors: HashMap<String, Embedding>,
@@ -121,6 +125,26 @@ impl VectorIndex {
     pub fn clear(&mut self) {
         self.vectors.clear();
     }
+
+    /// Save the index to disk as a JSON file.
+    ///
+    /// Serialises the entire index (keys and embeddings) to the given path.
+    pub fn save(&self, path: &Path) -> Result<(), String> {
+        let json = serde_json::to_string(self)
+            .map_err(|e| format!("serialization error: {}", e))?;
+        fs::write(path, &json)
+            .map_err(|e| format!("write error: {}", e))
+    }
+
+    /// Load a previously saved index from a JSON file.
+    ///
+    /// The file must have been written by [`save`](Self::save).
+    pub fn load(path: &Path) -> Result<Self, String> {
+        let json = fs::read_to_string(path)
+            .map_err(|e| format!("read error: {}", e))?;
+        serde_json::from_str(&json)
+            .map_err(|e| format!("deserialization error: {}", e))
+    }
 }
 
 // ── Math helpers ──────────────────────────────────────────────────────────────
@@ -204,5 +228,27 @@ mod tests {
         idx.insert("a", vec![1.0, 0.0]).unwrap();
         let result = idx.search(&[0.0, 0.0], 1);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vectors.json");
+
+        // Create and populate an index
+        let mut idx = VectorIndex::new(3);
+        idx.insert("cat", vec![0.1, 0.2, 0.3]).unwrap();
+        idx.insert("dog", vec![0.4, 0.5, 0.6]).unwrap();
+        idx.save(&path).unwrap();
+
+        // Load a new index from disk
+        let loaded = VectorIndex::load(&path).unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded.dimension(), 3);
+
+        // Search still works on the loaded index
+        let results = loaded.search(&[0.35, 0.45, 0.55], 1).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "dog");
     }
 }

@@ -5,10 +5,11 @@
 //! - [`TestFixture`] — manages named test fixtures for CI/CD pipelines.
 //! - [`FixtureEntry`] — a single key-value entry within a fixture.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// A single key-value entry within a fixture.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FixtureEntry {
     /// The key.
     pub key: Vec<u8>,
@@ -17,7 +18,7 @@ pub struct FixtureEntry {
 }
 
 /// A named fixture containing a set of key-value pairs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fixture {
     /// The name of this fixture.
     pub name: String,

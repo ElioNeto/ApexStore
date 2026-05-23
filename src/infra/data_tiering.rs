@@ -191,6 +191,42 @@ impl DataTieringConfig {
         }
         counts
     }
+
+    /// Determine whether data in the given tier should be compacted.
+    ///
+    /// Returns `true` for Hot and Warm tiers (data that benefits from
+    /// compaction), and `false` for Cold (archival) data.
+    pub fn should_compact_to_tier(tier: Tier) -> bool {
+        matches!(tier, Tier::Hot | Tier::Warm)
+    }
+
+    /// Return all keys currently assigned to a specific tier.
+    ///
+    /// This is useful for compaction policies that need to act on all keys
+    /// in a given tier.
+    pub fn keys_for_tier(&self, tier: Tier) -> Vec<Vec<u8>> {
+        self.entries
+            .iter()
+            .filter(|(_, entry)| entry.tier == tier)
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
+    /// Look up the tier for a key without recording an access.
+    ///
+    /// Returns `None` if the key is not tracked.
+    pub fn get_tier_for_key(&self, key: &[u8]) -> Option<Tier> {
+        self.entries.get(key).map(|entry| entry.tier)
+    }
+}
+
+/// Hint for the compaction system about which tier and keys to compact.
+#[derive(Debug, Clone)]
+pub struct CompactionHint {
+    /// The storage tier to compact.
+    pub tier: Tier,
+    /// The keys that should be considered for compaction in this tier.
+    pub keys: Vec<Vec<u8>>,
 }
 
 /// Returns the current time in nanoseconds since the Unix epoch.
@@ -277,5 +313,63 @@ mod tests {
         assert_eq!(format!("{}", Tier::Hot), "hot");
         assert_eq!(format!("{}", Tier::Warm), "warm");
         assert_eq!(format!("{}", Tier::Cold), "cold");
+    }
+
+    // ── Integration method tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_should_compact_to_tier() {
+        assert!(DataTieringConfig::should_compact_to_tier(Tier::Hot));
+        assert!(DataTieringConfig::should_compact_to_tier(Tier::Warm));
+        assert!(!DataTieringConfig::should_compact_to_tier(Tier::Cold));
+    }
+
+    #[test]
+    fn test_keys_for_tier() {
+        let mut cfg = DataTieringConfig::new(5, 3600);
+        cfg.get_tier(b"hot_key");
+        cfg.get_tier(b"warm_key");
+        cfg.get_tier(b"other_warm");
+        cfg.promote(b"hot_key").unwrap();
+
+        let hot_keys = cfg.keys_for_tier(Tier::Hot);
+        assert_eq!(hot_keys.len(), 1);
+        assert_eq!(hot_keys[0], b"hot_key");
+
+        let warm_keys = cfg.keys_for_tier(Tier::Warm);
+        assert_eq!(warm_keys.len(), 2);
+    }
+
+    #[test]
+    fn test_keys_for_tier_empty() {
+        let cfg = DataTieringConfig::new(5, 3600);
+        let hot_keys = cfg.keys_for_tier(Tier::Hot);
+        assert!(hot_keys.is_empty());
+    }
+
+    #[test]
+    fn test_get_tier_for_key() {
+        let mut cfg = DataTieringConfig::new(5, 3600);
+        cfg.get_tier(b"my_key");
+        assert_eq!(cfg.get_tier_for_key(b"my_key"), Some(Tier::Warm));
+
+        cfg.promote(b"my_key").unwrap();
+        assert_eq!(cfg.get_tier_for_key(b"my_key"), Some(Tier::Hot));
+    }
+
+    #[test]
+    fn test_get_tier_for_key_untracked() {
+        let cfg = DataTieringConfig::new(5, 3600);
+        assert_eq!(cfg.get_tier_for_key(b"unknown"), None);
+    }
+
+    #[test]
+    fn test_compaction_hint_struct() {
+        let hint = CompactionHint {
+            tier: Tier::Hot,
+            keys: vec![b"k1".to_vec(), b"k2".to_vec()],
+        };
+        assert_eq!(hint.tier, Tier::Hot);
+        assert_eq!(hint.keys.len(), 2);
     }
 }

@@ -15,6 +15,7 @@ use crate::api::auth::token::{ApiToken, Permission};
 use crate::api::auth::TokenManager;
 use crate::core::engine::{Engine, MAX_SCAN_LIMIT};
 use crate::infra::cdc::CdcConfig;
+use crate::infra::cicd::{Fixture, FixtureEntry};
 use crate::infra::config::LsmConfig;
 use crate::infra::sql::{format_sql_result, SqlEngine};
 use crate::storage::cache::GlobalBlockCache;
@@ -47,6 +48,7 @@ struct Cli {
 
 /// Token prefix used for storing API tokens in the engine
 const TOKEN_PREFIX: &str = "__token:";
+const FIXTURE_PREFIX: &str = "__fixture:";
 
 #[derive(Parser, Debug)]
 enum Command {
@@ -142,6 +144,36 @@ enum Command {
     /// Manage API tokens
     #[command(subcommand)]
     Token(TokenCommand),
+    /// Manage test fixtures
+    #[command(subcommand)]
+    Fixture(FixtureCommand),
+}
+
+/// Fixture management subcommands
+#[derive(Subcommand, Debug)]
+enum FixtureCommand {
+    /// List registered fixtures
+    List,
+    /// Load fixture entries into the engine by name
+    Load {
+        /// Name of the fixture to load
+        name: String,
+    },
+    /// Generate test data and register it as a fixture
+    Generate {
+        /// Name for the new fixture
+        name: String,
+        /// Number of entries to generate
+        count: u64,
+    },
+    /// Register a fixture with explicit key=value pairs
+    Register {
+        /// Name for the new fixture
+        name: String,
+        /// Comma-separated key=value pairs (e.g. "k1=v1,k2=v2")
+        #[arg(short, long, value_delimiter = ',')]
+        keys: Vec<String>,
+    },
 }
 
 /// Token management subcommands
@@ -207,6 +239,7 @@ pub fn main() -> crate::infra::error::Result<()> {
         Command::Import { format, file, cf } => cmd_import(&engine, &format, &file, &cf),
         Command::Export { format, file, cf } => cmd_export(&engine, &format, &file, &cf),
         Command::Token(sub) => cmd_token(&engine, sub),
+        Command::Fixture(sub) => cmd_fixture(&engine, sub),
     }
 }
 
@@ -569,6 +602,119 @@ fn cmd_token(engine: &CliEngine, sub: TokenCommand) -> crate::infra::error::Resu
             }
             save_tokens_to_engine(engine, &tokens)?;
             println!("Token revoked: {}", id);
+            Ok(())
+        }
+    }
+}
+
+// ── Fixture prefix ──────────────────────────────────────────────────────────
+
+/// Store a fixture definition in the engine under `__fixture:{name}`.
+fn save_fixture_to_engine(
+    engine: &CliEngine,
+    fixture: &Fixture,
+) -> crate::infra::error::Result<()> {
+    let key = format!("{}{}", FIXTURE_PREFIX, fixture.name);
+    let value = serde_json::to_vec(fixture)?;
+    engine.put_cf("default", key.as_bytes().to_vec(), value)?;
+    Ok(())
+}
+
+/// Load all fixture definitions from the engine.
+fn load_fixtures_from_engine(engine: &CliEngine) -> crate::infra::error::Result<Vec<Fixture>> {
+    let (results, _cursor) = engine.search_prefix(FIXTURE_PREFIX, None, MAX_SCAN_LIMIT)?;
+    let mut fixtures = Vec::new();
+    for (_key, value) in &results {
+        if let Ok(fixture) = serde_json::from_slice::<Fixture>(value) {
+            fixtures.push(fixture);
+        }
+    }
+    Ok(fixtures)
+}
+
+// ── Fixture command implementations ─────────────────────────────────────────
+
+fn cmd_fixture(engine: &CliEngine, sub: FixtureCommand) -> crate::infra::error::Result<()> {
+    match sub {
+        FixtureCommand::List => {
+            let fixtures = load_fixtures_from_engine(engine)?;
+            if fixtures.is_empty() {
+                println!("No fixtures registered.");
+                return Ok(());
+            }
+            println!("{:<30} {:<10}", "Name", "Entries");
+            println!("{}", "-".repeat(42));
+            for fixture in &fixtures {
+                println!("{:<30} {:<10}", fixture.name, fixture.entries.len());
+            }
+            Ok(())
+        }
+        FixtureCommand::Load { name } => {
+            let fixtures = load_fixtures_from_engine(engine)?;
+            let fixture = fixtures.iter().find(|f| f.name == name);
+            match fixture {
+                Some(f) => {
+                    for entry in &f.entries {
+                        engine.put_cf(
+                            "default",
+                            entry.key.clone(),
+                            entry.value.clone(),
+                        )?;
+                    }
+                    println!(
+                        "Fixture '{}' loaded ({} entries).",
+                        name,
+                        f.entries.len()
+                    );
+                }
+                None => {
+                    println!("Fixture '{}' not found.", name);
+                }
+            }
+            Ok(())
+        }
+        FixtureCommand::Generate { name, count } => {
+            let mut entries = Vec::with_capacity(count as usize);
+            for i in 0..count {
+                entries.push(FixtureEntry {
+                    key: format!("fixture_{}_{}", name, i).into_bytes(),
+                    value: format!("value_{}", i).into_bytes(),
+                });
+            }
+            let fixture = Fixture {
+                name: name.clone(),
+                entries,
+            };
+            save_fixture_to_engine(engine, &fixture)?;
+            println!(
+                "Fixture '{}' generated and registered ({} entries).",
+                name, count
+            );
+            Ok(())
+        }
+        FixtureCommand::Register { name, keys } => {
+            let mut entries = Vec::with_capacity(keys.len());
+            for pair in &keys {
+                if let Some(eq_pos) = pair.find('=') {
+                    let k = pair.as_bytes()[..eq_pos].to_vec();
+                    let v = pair.as_bytes()[eq_pos + 1..].to_vec();
+                    entries.push(FixtureEntry { key: k, value: v });
+                } else {
+                    return Err(crate::infra::error::LsmError::InvalidArgument(
+                        format!("Invalid key=value pair: '{}'. Use format key=value.", pair),
+                    ));
+                }
+            }
+            let fixture = Fixture {
+                name: name.clone(),
+                entries,
+            };
+            save_fixture_to_engine(engine, &fixture)?;
+            println!(
+                "Fixture '{}' registered ({} entries).",
+                name,
+                keys.len()
+            );
             Ok(())
         }
     }
