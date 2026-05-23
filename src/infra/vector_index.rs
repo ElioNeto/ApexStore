@@ -130,20 +130,17 @@ impl VectorIndex {
     ///
     /// Serialises the entire index (keys and embeddings) to the given path.
     pub fn save(&self, path: &Path) -> Result<(), String> {
-        let json = serde_json::to_string(self)
-            .map_err(|e| format!("serialization error: {}", e))?;
-        fs::write(path, &json)
-            .map_err(|e| format!("write error: {}", e))
+        let json =
+            serde_json::to_string(self).map_err(|e| format!("serialization error: {}", e))?;
+        fs::write(path, &json).map_err(|e| format!("write error: {}", e))
     }
 
     /// Load a previously saved index from a JSON file.
     ///
     /// The file must have been written by [`save`](Self::save).
     pub fn load(path: &Path) -> Result<Self, String> {
-        let json = fs::read_to_string(path)
-            .map_err(|e| format!("read error: {}", e))?;
-        serde_json::from_str(&json)
-            .map_err(|e| format!("deserialization error: {}", e))
+        let json = fs::read_to_string(path).map_err(|e| format!("read error: {}", e))?;
+        serde_json::from_str(&json).map_err(|e| format!("deserialization error: {}", e))
     }
 }
 

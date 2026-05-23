@@ -655,17 +655,9 @@ fn cmd_fixture(engine: &CliEngine, sub: FixtureCommand) -> crate::infra::error::
             match fixture {
                 Some(f) => {
                     for entry in &f.entries {
-                        engine.put_cf(
-                            "default",
-                            entry.key.clone(),
-                            entry.value.clone(),
-                        )?;
+                        engine.put_cf("default", entry.key.clone(), entry.value.clone())?;
                     }
-                    println!(
-                        "Fixture '{}' loaded ({} entries).",
-                        name,
-                        f.entries.len()
-                    );
+                    println!("Fixture '{}' loaded ({} entries).", name, f.entries.len());
                 }
                 None => {
                     println!("Fixture '{}' not found.", name);
@@ -700,9 +692,10 @@ fn cmd_fixture(engine: &CliEngine, sub: FixtureCommand) -> crate::infra::error::
                     let v = pair.as_bytes()[eq_pos + 1..].to_vec();
                     entries.push(FixtureEntry { key: k, value: v });
                 } else {
-                    return Err(crate::infra::error::LsmError::InvalidArgument(
-                        format!("Invalid key=value pair: '{}'. Use format key=value.", pair),
-                    ));
+                    return Err(crate::infra::error::LsmError::InvalidArgument(format!(
+                        "Invalid key=value pair: '{}'. Use format key=value.",
+                        pair
+                    )));
                 }
             }
             let fixture = Fixture {
@@ -710,11 +703,7 @@ fn cmd_fixture(engine: &CliEngine, sub: FixtureCommand) -> crate::infra::error::
                 entries,
             };
             save_fixture_to_engine(engine, &fixture)?;
-            println!(
-                "Fixture '{}' registered ({} entries).",
-                name,
-                keys.len()
-            );
+            println!("Fixture '{}' registered ({} entries).", name, keys.len());
             Ok(())
         }
     }

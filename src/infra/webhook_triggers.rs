@@ -102,8 +102,7 @@ impl<E: StorageEngine> WebhookStorage for WebhookAwareEngine<E> {
         // Delegate to the inner engine first.
         self.inner.set(key.clone(), value.clone())?;
         // Fire webhooks for matching prefixes.
-        self.registry
-            .trigger(&key, Some(&value), &*self.publisher);
+        self.registry.trigger(&key, Some(&value), &*self.publisher);
         Ok(())
     }
 
@@ -274,8 +273,8 @@ impl Default for WebhookRegistry {
 mod tests {
     use super::*;
     use crate::infra::cdc::CdcCollector;
-    use std::sync::Arc;
     use crate::infra::multi_model::InMemoryEngine;
+    use std::sync::Arc;
 
     // ── WebhookRegistry tests ─────────────────────────────────────────────
 
@@ -418,7 +417,10 @@ mod tests {
         }
     }
 
-    fn make_engine() -> (WebhookAwareEngine<InMemoryEngine>, Arc<std::sync::Mutex<Vec<CdcEvent>>>) {
+    fn make_engine() -> (
+        WebhookAwareEngine<InMemoryEngine>,
+        Arc<std::sync::Mutex<Vec<CdcEvent>>>,
+    ) {
         let inner = InMemoryEngine::new();
         let mut registry = WebhookRegistry::new();
         registry
@@ -507,9 +509,7 @@ mod tests {
         let (publisher, _events) = SharedCdcPublisher::new();
         let mut engine = WebhookAwareEngine::new(inner, registry, Box::new(publisher));
 
-        engine
-            .put(b"key1".to_vec(), b"val1".to_vec())
-            .unwrap();
+        engine.put(b"key1".to_vec(), b"val1".to_vec()).unwrap();
 
         // Verify data is accessible through the inner engine
         let result = engine.inner().get(b"key1").unwrap();
@@ -527,9 +527,7 @@ mod tests {
         let mut engine = WebhookAwareEngine::new(inner, registry, Box::new(publisher));
 
         // Insert and verify
-        engine
-            .put(b"test/1".to_vec(), b"value".to_vec())
-            .unwrap();
+        engine.put(b"test/1".to_vec(), b"value".to_vec()).unwrap();
         assert_eq!(
             engine.inner().get(b"test/1").unwrap(),
             Some(b"value".to_vec())
@@ -553,9 +551,7 @@ mod tests {
         let (publisher, events) = SharedCdcPublisher::new();
         let mut engine = WebhookAwareEngine::new(inner, registry, Box::new(publisher));
 
-        engine
-            .put(b"orders/1".to_vec(), b"data".to_vec())
-            .unwrap();
+        engine.put(b"orders/1".to_vec(), b"data".to_vec()).unwrap();
 
         // Should have 2 events (one per matching webhook)
         let collected = SharedCdcPublisher::events_from(&events);

@@ -211,9 +211,10 @@ impl TimeTravelEngine {
     /// The file is placed at `{base_path}/snapshot_{timestamp}.json`.
     /// Returns an error if serialization or I/O fails.
     pub fn persist_snapshot(&self, snapshot: &Snapshot) -> Result<(), String> {
-        let base = self.base_path.as_ref().ok_or_else(|| {
-            "Persistence not configured: no base_path set".to_string()
-        })?;
+        let base = self
+            .base_path
+            .as_ref()
+            .ok_or_else(|| "Persistence not configured: no base_path set".to_string())?;
         let filename = format!("snapshot_{}.json", snapshot.timestamp);
         let path = base.join(&filename);
         let json = serde_json::to_string_pretty(snapshot)
@@ -227,9 +228,10 @@ impl TimeTravelEngine {
     ///
     /// Returns a sorted list of `(timestamp, PathBuf)` pairs.
     pub fn load_snapshots(&self) -> Result<Vec<(u128, PathBuf)>, String> {
-        let base = self.base_path.as_ref().ok_or_else(|| {
-            "Persistence not configured: no base_path set".to_string()
-        })?;
+        let base = self
+            .base_path
+            .as_ref()
+            .ok_or_else(|| "Persistence not configured: no base_path set".to_string())?;
         let mut entries = Vec::new();
 
         let dir = std::fs::read_dir(base)
@@ -251,7 +253,7 @@ impl TimeTravelEngine {
         }
 
         // Sort by timestamp ascending.
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries.sort_by_key(|a| a.0);
         Ok(entries)
     }
 
@@ -271,14 +273,18 @@ impl TimeTravelEngine {
                 .map_err(|e| format!("Failed to deserialize snapshot: {}", e))?;
 
             // Avoid duplicates (same timestamp already in memory).
-            if !self.snapshots.iter().any(|s| s.timestamp == snapshot.timestamp) {
+            if !self
+                .snapshots
+                .iter()
+                .any(|s| s.timestamp == snapshot.timestamp)
+            {
                 self.snapshots.push(snapshot);
                 restored += 1;
             }
         }
 
         // Re-sort by timestamp and evict if over capacity.
-        self.snapshots.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        self.snapshots.sort_by_key(|a| a.timestamp);
         while self.snapshots.len() > self.max_snapshots {
             self.snapshots.remove(0);
         }
@@ -537,7 +543,7 @@ mod tests {
         let restored: Snapshot = serde_json::from_str(&raw).unwrap();
         assert_eq!(restored.timestamp, 42);
         assert_eq!(restored.label, "manual");
-        assert_eq!(restored.data.get(&b"k".to_vec()).unwrap(), &b"v".to_vec());
+        assert_eq!(restored.data.get(b"k".as_slice()).unwrap(), &b"v".to_vec());
     }
 
     #[test]

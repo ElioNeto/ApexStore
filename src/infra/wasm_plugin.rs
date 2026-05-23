@@ -114,7 +114,8 @@ impl WasmPlugin {
                 ValType::F32 => {
                     let f = val
                         .as_f64()
-                        .ok_or_else(|| format!("expected f32, got {}", val))? as f32;
+                        .ok_or_else(|| format!("expected f32, got {}", val))?
+                        as f32;
                     Val::F32(f.to_bits())
                 }
                 ValType::F64 => {
@@ -150,16 +151,12 @@ impl WasmPlugin {
             .map(|val| match val {
                 Val::I32(n) => serde_json::Value::Number((*n).into()),
                 Val::I64(n) => serde_json::Value::Number((*n).into()),
-                Val::F32(n) => {
-                    serde_json::Number::from_f64(f32::from_bits(*n) as f64)
-                        .map(serde_json::Value::Number)
-                        .unwrap_or(serde_json::Value::Null)
-                }
-                Val::F64(n) => {
-                    serde_json::Number::from_f64(f64::from_bits(*n))
-                        .map(serde_json::Value::Number)
-                        .unwrap_or(serde_json::Value::Null)
-                }
+                Val::F32(n) => serde_json::Number::from_f64(f32::from_bits(*n) as f64)
+                    .map(serde_json::Value::Number)
+                    .unwrap_or(serde_json::Value::Null),
+                Val::F64(n) => serde_json::Number::from_f64(f64::from_bits(*n))
+                    .map(serde_json::Value::Number)
+                    .unwrap_or(serde_json::Value::Null),
                 _ => serde_json::Value::Null,
             })
             .collect();

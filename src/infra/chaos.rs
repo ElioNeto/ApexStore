@@ -361,7 +361,9 @@ pub fn init_global() {
 /// # Panics
 /// Panics if [`init_global`] has not been called first.
 pub fn global() -> &'static ChaosEngine {
-    CHAOS_ENGINE.get().expect("ChaosEngine global not initialised — call init_global() first")
+    CHAOS_ENGINE
+        .get()
+        .expect("ChaosEngine global not initialised — call init_global() first")
 }
 
 #[cfg(test)]

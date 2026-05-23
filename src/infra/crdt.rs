@@ -209,10 +209,7 @@ impl<T: Hash + Eq + Clone> ORSet<T> {
     ///
     /// If the element was previously removed, this re-adds it under a new tag.
     pub fn add(&mut self, element: T, tag: String) {
-        self.elements
-            .entry(element)
-            .or_default()
-            .insert(tag);
+        self.elements.entry(element).or_default().insert(tag);
     }
 
     /// Remove an element by clearing all of its tags.

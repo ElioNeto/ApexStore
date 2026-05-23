@@ -243,7 +243,7 @@ impl MultiModelEngine {
             }
         }
         // Sort by timestamp ascending
-        points.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        points.sort_by_key(|a| a.timestamp);
         Ok(points)
     }
 
@@ -551,10 +551,7 @@ mod tests {
         assert_eq!(vertex.id, "v1");
         assert_eq!(vertex.label, "person");
         assert_eq!(vertex.edges, vec!["alice", "bob"]);
-        assert_eq!(
-            vertex.properties.get("department").unwrap(),
-            "engineering"
-        );
+        assert_eq!(vertex.properties.get("department").unwrap(), "engineering");
     }
 
     #[test]
