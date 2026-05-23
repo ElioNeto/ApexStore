@@ -1019,6 +1019,14 @@
       "files": [],
       "depends_on": ["T194_6"],
       "notes": "cargo check: passes. cargo clippy: no new warnings (pre-existing issues in bulk_io.rs, blob_store.rs, etc). cargo test --lib: 340 passed, 8 pre-existing failures (unrelated)"
+    },
+    {
+      "id": "T262",
+      "description": "Issue #262: Rate limiter não suporta proxy reverso — X-Forwarded-For ignorado",
+      "status": "done",
+      "files": ["src/api/rate_limiter.rs"],
+      "depends_on": [],
+      "notes": "Added get_client_ip() to extract IP from X-Forwarded-For header (first IP) with fallback to peer_addr(). Changed internal tracking from SocketAddr to IpAddr. Added parse_x_forwarded_for() pure function. 10 tests pass."
     }
   ]
 }

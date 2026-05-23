@@ -14,7 +14,7 @@ use actix_web::Error;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::future::{ready, Ready};
-use std::net::SocketAddr;
+use std::net::IpAddr;
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::task::{Context, Poll};
@@ -47,7 +47,7 @@ impl IpTrack {
 
 /// Shared state for rate limiting, tracked across all worker threads.
 pub struct RateLimiterState {
-    requests: Mutex<HashMap<SocketAddr, IpTrack>>,
+    requests: Mutex<HashMap<IpAddr, IpTrack>>,
     max_requests_per_minute: usize,
     /// Per-endpoint rate limits (requests per minute). Empty = use global default.
     endpoint_limits: HashMap<String, usize>,
@@ -78,7 +78,7 @@ impl RateLimiterState {
             .unwrap_or(self.max_requests_per_minute)
     }
 
-    fn is_rate_limited(&self, peer: SocketAddr, endpoint: Option<&str>) -> bool {
+    fn is_rate_limited(&self, peer: IpAddr, endpoint: Option<&str>) -> bool {
         let now = Instant::now();
         let window = Duration::from_secs(60);
         let limit = match endpoint {
@@ -195,7 +195,7 @@ where
     fn call(&self, req: ServiceRequest) -> Self::Future {
         if let Some(state) = req.app_data::<Data<RateLimiterState>>() {
             if state.max_requests_per_minute > 0 {
-                if let Some(peer) = req.peer_addr() {
+                if let Some(peer) = get_client_ip(&req) {
                     // Extract endpoint path for per-endpoint rate limiting
                     let endpoint = req.path().to_string();
                     if state.is_rate_limited(peer, Some(&endpoint)) {
@@ -210,6 +210,37 @@ where
     }
 }
 
+/// Extract the client IP address from a request.
+///
+/// Checks the `X-Forwarded-For` header first (taking the first IP from the
+/// comma-separated list), which is the standard for reverse proxy deployments.
+/// Falls back to the direct peer address (socket's remote IP) when the header
+/// is not present or cannot be parsed.
+pub fn get_client_ip(req: &ServiceRequest) -> Option<IpAddr> {
+    // 1. Try X-Forwarded-For header (first IP in the list)
+    if let Some(xff) = req.headers().get("X-Forwarded-For") {
+        if let Some(ip) = parse_x_forwarded_for(xff.to_str().ok()?) {
+            return Some(ip);
+        }
+    }
+    // 2. Fallback to direct peer address
+    req.peer_addr().map(|s| s.ip())
+}
+
+/// Parse the first IP address from an `X-Forwarded-For` header value.
+///
+/// The header may contain a comma-separated list of IP addresses; this function
+/// returns only the first (leftmost) one, which represents the original client.
+///
+/// Returns `None` when the value is empty, unparseable, or contains no valid IP.
+pub fn parse_x_forwarded_for(value: &str) -> Option<IpAddr> {
+    value
+        .split(',')
+        .next()
+        .map(str::trim)
+        .and_then(|s| s.parse::<IpAddr>().ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,7 +248,7 @@ mod tests {
     #[test]
     fn test_rate_limiter_basic() {
         let state = RateLimiterState::new(3);
-        let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let peer: IpAddr = "127.0.0.1".parse().unwrap();
 
         // First 3 requests should not be rate limited
         assert!(!state.is_rate_limited(peer, None));
@@ -232,7 +263,7 @@ mod tests {
         let mut state = RateLimiterState::new(10);
         state.set_endpoint_limit("/admin/compact", 2);
 
-        let peer: SocketAddr = "127.0.0.1:54321".parse().unwrap();
+        let peer: IpAddr = "127.0.0.1".parse().unwrap();
 
         // Global route: should use limit 10
         assert!(!state.is_rate_limited(peer, Some("/keys")));
@@ -246,7 +277,7 @@ mod tests {
     #[test]
     fn test_zero_limit_disabled() {
         let state = RateLimiterState::new(0);
-        let peer: SocketAddr = "127.0.0.1:9999".parse().unwrap();
+        let peer: IpAddr = "127.0.0.1".parse().unwrap();
         // Zero = disabled, never limited
         for _ in 0..100 {
             assert!(!state.is_rate_limited(peer, None));
@@ -256,12 +287,57 @@ mod tests {
     #[test]
     fn test_get_state() {
         let state = RateLimiterState::new(5);
-        let peer: SocketAddr = "10.0.0.1:8080".parse().unwrap();
+        let peer: IpAddr = "10.0.0.1".parse().unwrap();
         state.is_rate_limited(peer, Some("/keys"));
 
         let summary = state.get_state();
         assert_eq!(summary.global_limit, 5);
         assert_eq!(summary.tracked_ips.len(), 1);
-        assert_eq!(summary.tracked_ips[0].ip, "10.0.0.1:8080");
+        assert_eq!(summary.tracked_ips[0].ip, "10.0.0.1");
+    }
+
+    // ── parse_x_forwarded_for tests ────────────────────────────────────────
+
+    #[test]
+    fn test_parse_xff_single_ipv4() {
+        assert_eq!(
+            parse_x_forwarded_for("203.0.113.195"),
+            Some("203.0.113.195".parse::<IpAddr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_parse_xff_multiple_ips() {
+        // Only the first IP is returned
+        assert_eq!(
+            parse_x_forwarded_for("203.0.113.195, 198.51.100.42, 192.0.2.1"),
+            Some("203.0.113.195".parse::<IpAddr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_parse_xff_ipv6() {
+        assert_eq!(
+            parse_x_forwarded_for("2001:db8::1"),
+            Some("2001:db8::1".parse::<IpAddr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_parse_xff_invalid() {
+        assert_eq!(parse_x_forwarded_for("not-an-ip"), None);
+    }
+
+    #[test]
+    fn test_parse_xff_empty() {
+        assert_eq!(parse_x_forwarded_for(""), None);
+    }
+
+    #[test]
+    fn test_parse_xff_with_trailing_comma() {
+        assert_eq!(
+            parse_x_forwarded_for("203.0.113.195, "),
+            Some("203.0.113.195".parse::<IpAddr>().unwrap())
+        );
     }
 }
