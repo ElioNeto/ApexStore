@@ -1,3 +1,4 @@
+use crate::infra::telemetry::OtelInstruments;
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -57,12 +58,25 @@ pub struct EngineMetrics {
 
     // Error counter
     pub errors: AtomicU64,
+
+    /// Optional OpenTelemetry instruments for exporting metrics via OTLP.
+    /// When `Some`, every `record_*` call also updates the corresponding OTel counter.
+    pub otel_instruments: Option<Arc<OtelInstruments>>,
 }
 
 impl EngineMetrics {
     /// Create a new `EngineMetrics` with all counters initialised to zero.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            otel_instruments: None,
+            ..Self::default()
+        }
+    }
+
+    /// Attach an OTel instruments handle so that record methods also
+    /// export metrics via the OpenTelemetry OTLP pipeline.
+    pub fn set_otel_instruments(&mut self, instruments: Option<Arc<OtelInstruments>>) {
+        self.otel_instruments = instruments;
     }
 
     // ── Record helpers (counter + latency) ──
@@ -72,6 +86,10 @@ impl EngineMetrics {
         self.sets.fetch_add(1, Ordering::Relaxed);
         self.set_latency_us
             .fetch_add(duration_us, Ordering::Relaxed);
+        if let Some(ref inst) = self.otel_instruments {
+            inst.sets.add(1, &[]);
+            inst.set_latency.add(duration_us, &[]);
+        }
     }
 
     #[inline]
@@ -79,6 +97,10 @@ impl EngineMetrics {
         self.gets.fetch_add(1, Ordering::Relaxed);
         self.get_latency_us
             .fetch_add(duration_us, Ordering::Relaxed);
+        if let Some(ref inst) = self.otel_instruments {
+            inst.gets.add(1, &[]);
+            inst.get_latency.add(duration_us, &[]);
+        }
     }
 
     #[inline]
@@ -86,6 +108,10 @@ impl EngineMetrics {
         self.deletes.fetch_add(1, Ordering::Relaxed);
         self.delete_latency_us
             .fetch_add(duration_us, Ordering::Relaxed);
+        if let Some(ref inst) = self.otel_instruments {
+            inst.deletes.add(1, &[]);
+            inst.delete_latency.add(duration_us, &[]);
+        }
     }
 
     #[inline]
@@ -93,16 +119,26 @@ impl EngineMetrics {
         self.scans.fetch_add(1, Ordering::Relaxed);
         self.scan_latency_us
             .fetch_add(duration_us, Ordering::Relaxed);
+        if let Some(ref inst) = self.otel_instruments {
+            inst.scans.add(1, &[]);
+            inst.scan_latency.add(duration_us, &[]);
+        }
     }
 
     #[inline]
     pub fn record_batch_sets(&self, count: u64) {
         self.batch_sets.fetch_add(count, Ordering::Relaxed);
+        if let Some(ref inst) = self.otel_instruments {
+            inst.batch_sets.add(count, &[]);
+        }
     }
 
     #[inline]
     pub fn record_batch_deletes(&self, count: u64) {
         self.batch_deletes.fetch_add(count, Ordering::Relaxed);
+        if let Some(ref inst) = self.otel_instruments {
+            inst.batch_deletes.add(count, &[]);
+        }
     }
 
     #[inline]
@@ -110,6 +146,10 @@ impl EngineMetrics {
         self.flushes.fetch_add(1, Ordering::Relaxed);
         self.flush_latency_us
             .fetch_add(duration_us, Ordering::Relaxed);
+        if let Some(ref inst) = self.otel_instruments {
+            inst.flushes.add(1, &[]);
+            inst.flush_latency.add(duration_us, &[]);
+        }
     }
 
     #[inline]
@@ -117,26 +157,42 @@ impl EngineMetrics {
         self.compactions.fetch_add(1, Ordering::Relaxed);
         self.compaction_latency_us
             .fetch_add(duration_us, Ordering::Relaxed);
+        if let Some(ref inst) = self.otel_instruments {
+            inst.compactions.add(1, &[]);
+            inst.compaction_latency.add(duration_us, &[]);
+        }
     }
 
     #[inline]
     pub fn record_cache_hit(&self) {
         self.cache_hits.fetch_add(1, Ordering::Relaxed);
+        if let Some(ref inst) = self.otel_instruments {
+            inst.cache_hits.add(1, &[]);
+        }
     }
 
     #[inline]
     pub fn record_cache_miss(&self) {
         self.cache_misses.fetch_add(1, Ordering::Relaxed);
+        if let Some(ref inst) = self.otel_instruments {
+            inst.cache_misses.add(1, &[]);
+        }
     }
 
     #[inline]
     pub fn record_bloom_negative(&self) {
         self.bloom_filter_negatives.fetch_add(1, Ordering::Relaxed);
+        if let Some(ref inst) = self.otel_instruments {
+            inst.bloom_negatives.add(1, &[]);
+        }
     }
 
     #[inline]
     pub fn record_error(&self) {
         self.errors.fetch_add(1, Ordering::Relaxed);
+        if let Some(ref inst) = self.otel_instruments {
+            inst.errors.add(1, &[]);
+        }
     }
 
     // ── Snapshot ──

@@ -38,7 +38,7 @@ impl GlobalBlockCache {
     pub fn new(size_mb: usize, block_size: usize) -> Arc<Self> {
         let max_blocks = (size_mb * 1024 * 1024) / block_size;
         let capacity = NonZeroUsize::new(max_blocks.max(1))
-            .expect("max_blocks is at least 1, NonZeroUsize is safe");
+            .unwrap_or_else(|| NonZeroUsize::new(1).expect("1 is non-zero"));
 
         Arc::new(Self {
             cache: Arc::new(Mutex::new(LruCache::new(capacity))),

@@ -5,9 +5,11 @@ use crate::infra::error::{LsmError, Result};
 use crate::storage::block::Block;
 use crate::storage::builder::{BlockMeta, MetaBlock};
 use crate::storage::cache::GlobalBlockCache;
+use crate::storage::encryption::{EncryptionConfig, Encryptor};
 use bloomfilter::Bloom;
 use crc32fast::Hasher as Crc32Hasher;
 use lz4_flex::decompress_size_prepended;
+use memmap2::Mmap;
 use parking_lot::Mutex;
 use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
@@ -17,6 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 const SST_MAGIC_V2: &[u8; 8] = b"LSMSST03";
+const SST_MAGIC_V2_ENCRYPTED: &[u8; 8] = b"LSMSST04";
 const FOOTER_SIZE: u64 = 8;
 
 /// SSTable V2 Reader with sparse index, Bloom filter, and shared global block caching
@@ -46,6 +49,12 @@ pub struct SstableReader {
     table_id: u64,
     #[allow(dead_code)]
     config: StorageConfig,
+    encryptor: Encryptor,
+    /// Memory-mapped view of the file for zero-copy reads.
+    /// When available, block reads use the mmap slice directly,
+    /// avoiding `pread` syscall overhead.  Falls back to `File`
+    /// when mmap is unavailable (e.g., certain filesystems).
+    mmap: Option<Mmap>,
 }
 
 impl SstableReader {
@@ -60,23 +69,51 @@ impl SstableReader {
         config: StorageConfig,
         block_cache: Arc<GlobalBlockCache>,
     ) -> Result<Self> {
+        Self::open_with_encryption(path, config, block_cache, &EncryptionConfig::default())
+    }
+
+    /// Open an SSTable file with optional encryption support.
+    ///
+    /// Detects encrypted SSTables by checking the magic number:
+    /// - `LSMSST03` = unencrypted
+    /// - `LSMSST04` = encrypted
+    pub fn open_with_encryption(
+        path: PathBuf,
+        config: StorageConfig,
+        block_cache: Arc<GlobalBlockCache>,
+        encryption: &EncryptionConfig,
+    ) -> Result<Self> {
         let mut file = File::open(&path)?;
+        let encryptor = Encryptor::new(encryption);
 
         // Verify magic number
         let mut magic = [0u8; 8];
         file.read_exact(&mut magic)?;
-        if &magic != SST_MAGIC_V2 {
+
+        // Check if this is an encrypted SSTable
+        let is_encrypted = if &magic == SST_MAGIC_V2_ENCRYPTED {
+            true
+        } else if &magic == SST_MAGIC_V2 {
+            false
+        } else {
             return Err(LsmError::InvalidSstableFormat(format!(
-                "Invalid magic number: expected {:?}, found {:?}",
-                SST_MAGIC_V2, magic
+                "Invalid magic number: expected {:?} or {:?}, found {:?}",
+                SST_MAGIC_V2, SST_MAGIC_V2_ENCRYPTED, magic
             )));
+        };
+
+        // If the file is encrypted but the encryptor is disabled, fail early
+        if is_encrypted && !encryptor.is_enabled() {
+            return Err(LsmError::InvalidSstableFormat(
+                "SSTable is encrypted but no encryption key was provided".to_string(),
+            ));
         }
 
         // Read footer to get metadata offset
         let meta_offset = Self::read_footer(&mut file)?;
 
-        // Read and decompress metadata block
-        let metadata = Self::read_meta_block(&mut file, meta_offset)?;
+        // Read, decrypt (if needed), and decompress metadata block
+        let metadata = Self::read_meta_block(&mut file, meta_offset, &encryptor)?;
 
         // Deserialize Bloom filter from stored bytes (clone to avoid moving)
         let bloom_filter =
@@ -89,6 +126,21 @@ impl SstableReader {
         path.hash(&mut hasher);
         let table_id = hasher.finish();
 
+        // Memory-map the file for zero-copy block reads.
+        // This is best-effort — if mmap fails (e.g. on certain filesystems),
+        // we fall back to pread via the File handle.
+        let mmap = match unsafe { Mmap::map(&file) } {
+            Ok(m) => Some(m),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to memory-map SSTable {:?}: {:?}. Falling back to pread.",
+                    path,
+                    e
+                );
+                None
+            }
+        };
+
         Ok(Self {
             metadata,
             bloom_filter,
@@ -97,6 +149,8 @@ impl SstableReader {
             path,
             table_id,
             config,
+            encryptor,
+            mmap,
         })
     }
 
@@ -344,19 +398,26 @@ impl SstableReader {
         Ok(meta_offset)
     }
 
-    fn read_meta_block(file: &mut File, offset: u64) -> Result<MetaBlock> {
+    fn read_meta_block(file: &mut File, offset: u64, encryptor: &Encryptor) -> Result<MetaBlock> {
         // Seek to metadata block
         file.seek(SeekFrom::Start(offset))?;
 
-        // Read compressed metadata until footer
+        // Read compressed (and possibly encrypted) metadata until footer
         let file_len = file.metadata()?.len();
         let meta_size = (file_len - offset - FOOTER_SIZE) as usize;
 
-        let mut compressed_meta = vec![0u8; meta_size];
-        file.read_exact(&mut compressed_meta)?;
+        let mut encrypted_or_compressed = vec![0u8; meta_size];
+        file.read_exact(&mut encrypted_or_compressed)?;
+
+        // Decrypt first if encryption is enabled
+        let compressed = if encryptor.is_enabled() {
+            encryptor.decrypt_block(&encrypted_or_compressed)?
+        } else {
+            encrypted_or_compressed
+        };
 
         // Decompress metadata
-        let decompressed = decompress_size_prepended(&compressed_meta).map_err(|e| {
+        let decompressed = decompress_size_prepended(&compressed).map_err(|e| {
             LsmError::DecompressionFailed(format!("Metadata decompression failed: {}", e))
         })?;
 
@@ -395,25 +456,54 @@ impl SstableReader {
     }
 
     fn read_and_decompress_block(&self, block_meta: &BlockMeta) -> Result<Vec<u8>> {
-        // Read compressed block + CRC32 (lock held only during I/O)
-        let (compressed_block, stored_crc32) = {
+        // Read (possibly encrypted) compressed block + CRC32.
+        //
+        // When an mmap is available we read directly from the memory-mapped
+        // slice — zero-copy, no syscall overhead, no lock contention on
+        // `self.file`.  Fall back to `pread` via the File handle when mmap
+        // is not available (e.g. certain filesystems).
+        let offset = block_meta.offset as usize;
+        let on_disk_size = block_meta.size as usize - 4; // exclude CRC32 bytes
+        let (on_disk_data, stored_crc32) = if let Some(ref mmap) = self.mmap {
+            // Bounds check — mmap length must cover the block + CRC32 trailer
+            if offset + block_meta.size as usize <= mmap.len() {
+                let block_end = offset + on_disk_size;
+                let data = mmap[offset..block_end].to_vec();
+                let crc32_bytes: [u8; 4] =
+                    mmap[block_end..block_end + 4].try_into().map_err(|_| {
+                        LsmError::CorruptedData(format!(
+                            "Block CRC32 at offset {} extends past file",
+                            block_meta.offset
+                        ))
+                    })?;
+                let stored_crc32 = u32::from_le_bytes(crc32_bytes);
+                (data, stored_crc32)
+            } else {
+                // mmap is too short — fall back to file I/O
+                let mut file = self.file.lock();
+                file.seek(SeekFrom::Start(block_meta.offset))?;
+                let mut on_disk_data = vec![0u8; on_disk_size];
+                file.read_exact(&mut on_disk_data)?;
+                let mut crc32_bytes = [0u8; 4];
+                file.read_exact(&mut crc32_bytes)?;
+                let stored_crc32 = u32::from_le_bytes(crc32_bytes);
+                (on_disk_data, stored_crc32)
+            }
+        } else {
+            // No mmap — use pread via the File handle (lock held only during I/O)
             let mut file = self.file.lock();
             file.seek(SeekFrom::Start(block_meta.offset))?;
-            let compressed_size = block_meta.size as usize - 4; // exclude CRC32 bytes
-            let mut compressed_block = vec![0u8; compressed_size];
-            file.read_exact(&mut compressed_block)?;
-
-            // Read CRC32 (4 bytes)
+            let mut on_disk_data = vec![0u8; on_disk_size];
+            file.read_exact(&mut on_disk_data)?;
             let mut crc32_bytes = [0u8; 4];
             file.read_exact(&mut crc32_bytes)?;
             let stored_crc32 = u32::from_le_bytes(crc32_bytes);
-
-            (compressed_block, stored_crc32)
+            (on_disk_data, stored_crc32)
         };
 
-        // Verify CRC32 of compressed data
+        // Verify CRC32 of what's on disk (encrypted data if encryption enabled)
         let mut hasher = Crc32Hasher::new();
-        hasher.update(&compressed_block);
+        hasher.update(&on_disk_data);
         let computed_crc32 = hasher.finalize();
 
         if computed_crc32 != stored_crc32 {
@@ -422,6 +512,13 @@ impl SstableReader {
                 block_meta.offset, stored_crc32, computed_crc32
             )));
         }
+
+        // Decrypt if encryption is enabled (no lock - CPU intensive work)
+        let compressed_block = if self.encryptor.is_enabled() {
+            self.encryptor.decrypt_block(&on_disk_data)?
+        } else {
+            on_disk_data
+        };
 
         // Decompress block (no lock - CPU intensive work)
         let decompressed = decompress_size_prepended(&compressed_block).map_err(|e| {

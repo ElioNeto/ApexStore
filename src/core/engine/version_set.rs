@@ -1,4 +1,7 @@
-use crate::storage::cache::Cache;
+use crate::infra::config::StorageConfig;
+use crate::storage::cache::{Cache, GlobalBlockCache};
+use crate::storage::encryption::EncryptionConfig;
+use crate::storage::reader::SstableReader;
 use lru::LruCache;
 use parking_lot::Mutex;
 use std::num::NonZeroUsize;
@@ -22,18 +25,47 @@ pub struct VersionSet<C: Cache> {
     /// so repeated reads for the same key bypass table iteration.
     kv_cache: Arc<Mutex<LruCache<Vec<u8>, Vec<u8>>>>,
     tables: std::collections::HashMap<String, Vec<crate::core::table::Table>>,
+    /// Storage configuration used to open SstableReaders for on-disk tables.
+    storage_config: StorageConfig,
+    /// Shared block cache for SSTable block caching. `None` when no block cache
+    /// is available (e.g., in tests with `NoopCache`).
+    block_cache: Option<Arc<GlobalBlockCache>>,
+    /// Encryption configuration for reading encrypted SSTables.
+    encryption: EncryptionConfig,
+    /// Monotonically increasing counter incremented every time tables are
+    /// added or removed.  Background compaction plans capture this value
+    /// at build time and reject their results at apply time if the counter
+    /// has advanced (indicating the plan's indices are stale).
+    compaction_generation: u64,
 }
 
 impl<C: Cache> VersionSet<C> {
-    pub fn new(options: crate::core::engine::EngineOptions, _cache: C) -> Self {
+    pub fn new(
+        options: crate::core::engine::EngineOptions,
+        _cache: C,
+        storage_config: StorageConfig,
+        block_cache: Option<Arc<GlobalBlockCache>>,
+    ) -> Self {
         // Derive KV cache capacity from block cache size (rough estimate: entry ~200 bytes)
         let kv_capacity = (options.block_cache_size_mb * 1024 * 1024 / 200).max(1000);
-        let kv_capacity =
-            NonZeroUsize::new(kv_capacity).expect("kv_capacity >= 1000, NonZeroUsize is safe");
+        let kv_capacity = NonZeroUsize::new(kv_capacity)
+            .unwrap_or_else(|| NonZeroUsize::new(1000).expect("1000 is non-zero"));
+        // Build EncryptionConfig from the infra config
+        let encryption = if storage_config.encryption_enabled {
+            EncryptionConfig::from_key_path(storage_config.encryption_key_path.as_deref())
+                .unwrap_or_default()
+        } else {
+            EncryptionConfig::default()
+        };
+
         Self {
             _cache: std::marker::PhantomData,
             kv_cache: Arc::new(Mutex::new(LruCache::new(kv_capacity))),
             tables: std::collections::HashMap::new(),
+            storage_config,
+            block_cache,
+            encryption,
+            compaction_generation: 0,
         }
     }
 
@@ -58,6 +90,10 @@ impl<C: Cache> VersionSet<C> {
     pub fn get(&self, cf: &str, key: &[u8]) -> Option<Vec<u8>> {
         // 1. Check KV cache first — avoids table iteration entirely for hot keys
         if let Some(cached) = self.get_cached(key) {
+            if cached.is_empty() {
+                // Empty value in cache means tombstone — key was deleted
+                return None;
+            }
             return Some(cached);
         }
 
@@ -80,10 +116,51 @@ impl<C: Cache> VersionSet<C> {
                     // Bloom says key might exist, fall through to BTreeMap lookup
                 }
 
+                // Check in-memory data first
                 if let Some(val) = table.data.get(key) {
-                    // 2. Populate cache after successful read
-                    self.put_cached(key.to_vec(), val.clone());
-                    return Some(val.clone());
+                    if val.is_empty() {
+                        // No on-disk SSTable to fall back to:
+                        // empty value means tombstone.
+                        table.path.as_ref()?;
+                        // Has a path: fall through to the SSTable reader
+                        // which correctly distinguishes tombstones from
+                        // legitimate empty values via the is_deleted flag.
+                    } else {
+                        // Non-empty value: populate cache and return
+                        self.put_cached(key.to_vec(), val.clone());
+                        return Some(val.clone());
+                    }
+                }
+
+                // 3. If not in memory but has a disk path, try reading from SSTable
+                if let Some(ref path) = table.path {
+                    if let Some(ref block_cache) = self.block_cache {
+                        match SstableReader::open_with_encryption(
+                            path.clone(),
+                            self.storage_config.clone(),
+                            block_cache.clone(),
+                            &self.encryption,
+                        ) {
+                            Ok(reader) => match reader.get(key) {
+                                Ok(Some(record)) => {
+                                    // Tombstone: SSTable reader sets is_deleted flag
+                                    if !record.is_deleted {
+                                        let value = record.value;
+                                        self.put_cached(key.to_vec(), value.clone());
+                                        return Some(value);
+                                    }
+                                    // Tombstone → key is deleted, stop searching
+                                    return None;
+                                }
+                                // Not found in this SSTable — continue to next table
+                                Ok(None) => continue 'table_loop,
+                                // I/O error — skip this table and try next
+                                Err(_) => continue 'table_loop,
+                            },
+                            // Can't open reader — skip this table
+                            Err(_) => continue 'table_loop,
+                        }
+                    }
                 }
             }
         }
@@ -121,6 +198,7 @@ impl<C: Cache> VersionSet<C> {
         self.tables.entry(cf.to_string()).or_default().push(table);
         // New table means previously cached entries might have been superseded
         self.clear_cache();
+        self.compaction_generation += 1;
     }
 
     pub fn table_count(&self, cf: &str) -> usize {
@@ -190,6 +268,7 @@ impl<C: Cache> VersionSet<C> {
         let entry = self.tables.entry(cf.to_string()).or_default();
         entry.clear();
         entry.push(new_table);
+        self.compaction_generation += 1;
     }
 
     /// Get all tables for a column family (without draining)
@@ -198,6 +277,9 @@ impl<C: Cache> VersionSet<C> {
     }
 
     /// Atomically replace specific tables with new ones.
+    ///
+    /// Returns the list of old SSTable file paths that were removed, so the
+    /// caller can clean up orphaned `.sst` files from disk.
     ///
     /// New tables are inserted at the position of the first (minimum-index) removed table,
     /// preserving the invariant that tables in the Vec are ordered oldest-first.
@@ -210,7 +292,8 @@ impl<C: Cache> VersionSet<C> {
         cf: &str,
         indices: &[usize],
         new_tables: Vec<crate::core::table::Table>,
-    ) {
+    ) -> Vec<std::path::PathBuf> {
+        let mut removed_paths = Vec::new();
         if let Some(tables) = self.tables.get_mut(cf) {
             if new_tables.is_empty() {
                 // Only removing — no insertion needed
@@ -218,10 +301,22 @@ impl<C: Cache> VersionSet<C> {
                 sorted_indices.sort_unstable_by(|a, b| b.cmp(a));
                 for &idx in &sorted_indices {
                     if idx < tables.len() {
+                        if let Some(ref path) = tables[idx].path {
+                            removed_paths.push(path.clone());
+                        }
                         tables.remove(idx);
                     }
                 }
-                return;
+                return removed_paths;
+            }
+
+            // Record old table paths before removal
+            for &idx in indices {
+                if idx < tables.len() {
+                    if let Some(ref path) = tables[idx].path {
+                        removed_paths.push(path.clone());
+                    }
+                }
             }
 
             // The insertion point: where the first (oldest) removed table was
@@ -244,7 +339,9 @@ impl<C: Cache> VersionSet<C> {
             // compacted result, so they are checked first by `get()`'s `.rev()`.
             let insert_at = insert_at.min(tables.len());
             let _ = tables.splice(insert_at..insert_at, new_tables);
+            self.compaction_generation += 1;
         }
+        removed_paths
     }
 
     /// Return statistics about the tables in a column family.
@@ -279,5 +376,11 @@ impl<C: Cache> VersionSet<C> {
     /// Get list of all column families
     pub fn column_families(&self) -> Vec<String> {
         self.tables.keys().cloned().collect()
+    }
+
+    /// Current compaction generation.  Stale-plan detection:
+    /// capture this before building a plan, and compare when applying results.
+    pub fn compaction_generation(&self) -> u64 {
+        self.compaction_generation
     }
 }

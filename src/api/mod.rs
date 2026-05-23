@@ -1,11 +1,23 @@
+pub mod admin;
 pub mod auth;
 pub mod config;
+pub mod graphql;
+pub mod health;
+pub mod rate_limiter;
+pub mod timeout_middleware;
 
+pub use self::auth::TokenManager;
 pub use self::config::ServerConfig;
+pub use self::graphql::AppSchema;
+use self::rate_limiter::{RateLimiter, RateLimiterState};
 use crate::LsmEngine;
 use actix_web::{delete, get, post, put, web, App, HttpResponse, HttpServer, Responder};
+use actix_web_httpauth::middleware::HttpAuthentication;
+use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
+use async_graphql_actix_web::{GraphQLRequest, GraphQLResponse};
 use serde::Deserialize;
 use serde_json::json;
+use std::sync::Arc;
 
 /// Query parameters for `GET /keys`
 #[derive(Deserialize)]
@@ -165,6 +177,15 @@ async fn get_stats(engine: web::Data<LsmEngine>) -> impl Responder {
     }
 }
 
+/// Handler for `GET /admin/rate_limits` — view current rate limit state.
+#[get("/admin/rate_limits")]
+async fn admin_rate_limits(rate_limiter: web::Data<RateLimiterState>) -> impl Responder {
+    let summary = rate_limiter.get_state();
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .json(summary)
+}
+
 /// Handler for `POST /admin/flush` — force memtable flush.
 #[post("/admin/flush")]
 async fn admin_flush(engine: web::Data<LsmEngine>) -> impl Responder {
@@ -210,6 +231,24 @@ async fn admin_compact(engine: web::Data<LsmEngine>) -> impl Responder {
     }
 }
 
+// ── GraphQL handlers ────────────────────────────────────────────────────────
+
+/// GraphQL endpoint — handles all queries and mutations.
+async fn graphql_handler(schema: web::Data<AppSchema>, req: GraphQLRequest) -> GraphQLResponse {
+    let res = schema.execute(req.into_inner()).await;
+    GraphQLResponse::from(res)
+}
+
+/// GraphQL playground (interactive IDE).
+async fn graphql_playground() -> HttpResponse {
+    let html = playground_source(
+        GraphQLPlaygroundConfig::new("/graphql").title("ApexStore GraphQL Playground"),
+    );
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html)
+}
+
 // ── Route configuration ───────────────────────────────────────────────────
 
 /// Register API routes.
@@ -221,26 +260,103 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .service(get_metrics)
         .service(get_stats)
         .service(admin_flush)
-        .service(admin_compact);
+        .service(admin_compact)
+        .service(admin_rate_limits)
+        .service(web::scope("/admin").configure(admin::configure))
+        // Health endpoints (no auth required)
+        .service(health::liveness)
+        .service(health::readiness)
+        .service(health::startup)
+        // GraphQL endpoints
+        .route("/graphql", web::post().to(graphql_handler))
+        .route("/graphql", web::get().to(graphql_handler))
+        .route("/graphql/playground", web::get().to(graphql_playground));
 }
 
 /// Start the REST API server.
-pub async fn start_server(engine: LsmEngine, config: ServerConfig) -> std::io::Result<()> {
+///
+/// Registers SIGINT and SIGTERM handlers so that `engine.close()` is called
+/// before the server shuts down, ensuring WALs are synced and compaction
+/// finishes cleanly.
+pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::io::Result<()> {
     let host = config.host.clone();
     let port = config.port;
 
     tracing::info!(target: "apexstore::api", "Starting server at {}:{}", host, port);
-    println!("🚀 Starting server at http://{}:{}", host, port);
+    println!("Starting server at http://{}:{}", host, port);
 
-    let engine_data = web::Data::new(engine);
+    // Configure CDC if an endpoint was provided
+    if let Some(ref endpoint) = config.cdc_endpoint {
+        let cdc_config = crate::infra::cdc::CdcConfig::with_endpoint(endpoint.clone());
+        engine.set_cdc(cdc_config);
+        tracing::info!(target: "apexstore::api", "CDC enabled, endpoint: {}", endpoint);
+    }
 
-    HttpServer::new(move || {
+    let engine_data = web::Data::from(engine.clone());
+    let rate_limiter_state =
+        web::Data::new(RateLimiterState::new(config.rate_limit_requests_per_minute));
+    let token_manager = web::Data::new(TokenManager::new());
+    let auth_enabled = web::Data::new(config.auth.enabled);
+    let graphql_schema = web::Data::new(graphql::build_schema(engine.clone()));
+
+    let mut server_builder = HttpServer::new(move || {
         App::new()
+            .wrap(self::timeout_middleware::RequestTimeout)
+            .wrap(RateLimiter)
             .wrap(actix_web::middleware::Logger::default())
+            .wrap(HttpAuthentication::bearer(self::auth::bearer_validator))
             .app_data(engine_data.clone())
+            .app_data(rate_limiter_state.clone())
+            .app_data(token_manager.clone())
+            .app_data(auth_enabled.clone())
+            .app_data(graphql_schema.clone())
             .configure(configure)
     })
-    .bind((host, port))?
-    .run()
-    .await
+    .max_connections(config.max_connections)
+    .backlog(config.backlog)
+    .bind((host, port))?;
+
+    if let Some(workers) = config.workers {
+        server_builder = server_builder.workers(workers);
+    }
+
+    let server = server_builder.run();
+
+    let server_handle = server.handle();
+
+    // Spawn a signal handler that waits for SIGINT (Ctrl+C) or SIGTERM,
+    // calls engine.close() to sync WALs and join the compaction thread,
+    // then gracefully stops the HTTP server.
+    let signal_engine = engine.clone();
+    tokio::spawn(async move {
+        // Wait for SIGINT (cross-platform) or SIGTERM (Unix).
+        #[cfg(unix)]
+        {
+            let mut term_signal =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("Failed to register SIGTERM handler");
+
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("Received SIGINT (Ctrl+C), shutting down...");
+                }
+                _ = term_signal.recv() => {
+                    tracing::info!("Received SIGTERM, shutting down...");
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c().await.ok();
+            tracing::info!("Received shutdown signal, shutting down...");
+        }
+
+        // Sync WALs and wait for compaction to finish.
+        signal_engine.close();
+        tracing::info!("Engine closed, stopping HTTP server...");
+
+        server_handle.stop(true).await;
+    });
+
+    server.await
 }

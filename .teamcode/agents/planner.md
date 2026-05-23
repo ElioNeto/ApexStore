@@ -2,6 +2,7 @@
 name: planner
 description: Use when a task needs to be decomposed into structured steps before execution. The Planner analyzes requirements, breaks work into parallel/sequential tasks, defines success criteria for each step, and produces a clear execution plan. Do NOT use for simple single-step requests.
 mode: subagent
+maxSteps: 9999
 permission:
   edit: deny
   glob: allow

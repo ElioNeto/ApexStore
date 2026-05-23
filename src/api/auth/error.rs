@@ -22,6 +22,8 @@ pub enum AuthError {
     TokenNotFound,
     /// Token generation failed
     TokenGenerationFailed,
+    /// Invalid permission string
+    InvalidPermission(String),
     /// Internal error
     Internal(String),
 }
@@ -35,6 +37,7 @@ impl fmt::Display for AuthError {
             AuthError::InsufficientPermissions => write!(f, "Insufficient permissions"),
             AuthError::TokenNotFound => write!(f, "Token not found"),
             AuthError::TokenGenerationFailed => write!(f, "Failed to generate token"),
+            AuthError::InvalidPermission(p) => write!(f, "Invalid permission: {}", p),
             AuthError::Internal(msg) => write!(f, "Internal auth error: {}", msg),
         }
     }
@@ -50,6 +53,7 @@ impl ResponseError for AuthError {
             }
             AuthError::InsufficientPermissions => StatusCode::FORBIDDEN,
             AuthError::TokenNotFound => StatusCode::NOT_FOUND,
+            AuthError::InvalidPermission(_) => StatusCode::BAD_REQUEST,
             AuthError::TokenGenerationFailed | AuthError::Internal(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }

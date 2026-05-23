@@ -1,7 +1,9 @@
+use apexstore::infra::telemetry;
 use apexstore::{LsmConfig, LsmEngine};
 use std::env;
 use std::io;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -11,10 +13,10 @@ async fn main() -> std::io::Result<()> {
         let _ = dotenvy::dotenv();
     }
 
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .with_level(true)
-        .init();
+    // Initialise OpenTelemetry tracing + metrics (falls back to console fmt
+    // when OTEL_EXPORTER_OTLP_ENDPOINT is not set).
+    telemetry::init_tracing();
+    telemetry::init_metrics();
 
     println!("╔═══════════════════════════════════════════════════════╗");
     println!("║         LSM-Tree REST API Server                      ║");
@@ -51,6 +53,11 @@ async fn main() -> std::io::Result<()> {
         .parse::<f64>()
         .unwrap_or(0.01);
 
+    let prefix_compression = env::var("PREFIX_COMPRESSION_ENABLED")
+        .unwrap_or_else(|_| "false".to_string())
+        .parse::<bool>()
+        .unwrap_or(false);
+
     let config = LsmConfig::builder()
         .dir_path(PathBuf::from(&data_dir))
         .memtable_max_size(memtable_max_size)
@@ -58,6 +65,7 @@ async fn main() -> std::io::Result<()> {
         .block_cache_size_mb(block_cache_size_mb)
         .sparse_index_interval(sparse_index_interval)
         .bloom_false_positive_rate(bloom_false_positive_rate)
+        .prefix_compression(prefix_compression)
         .build()
         .map_err(|e: apexstore::LsmError| {
             io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
@@ -77,6 +85,7 @@ async fn main() -> std::io::Result<()> {
     println!("   Block Cache: {} MB", block_cache_size_mb);
     println!("   Sparse Index Interval: {}", sparse_index_interval);
     println!("   Bloom Filter FP Rate: {}", bloom_false_positive_rate);
+    println!("   Prefix Compression: {}", prefix_compression);
     println!();
 
     let engine = match LsmEngine::new_from_config(
@@ -98,7 +107,7 @@ async fn main() -> std::io::Result<()> {
 
     println!("✓ Engine initialized successfully!\n");
 
-    apexstore::api::start_server(engine, server_config)
+    apexstore::api::start_server(Arc::new(engine), server_config)
         .await
         .map_err(|e: io::Error| e)
 }

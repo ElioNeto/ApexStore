@@ -1,3 +1,4 @@
+use crate::storage::encryption::EncryptionConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +14,14 @@ pub struct StorageConfig {
     pub sparse_index_interval: usize,
     pub compaction_strategy: CompactionStrategy,
     pub bloom_false_positive_rate: f64,
+    /// Encryption configuration (disabled by default).
+    #[serde(default)]
+    pub encryption: EncryptionConfig,
+    /// Whether to enable block-level key prefix compression.
+    /// When enabled, consecutive keys within a block share their common prefix,
+    /// reducing storage size by ~10-30% for keys with common prefixes.
+    #[serde(default)]
+    pub prefix_compression: bool,
 }
 
 impl Default for StorageConfig {
@@ -23,6 +32,8 @@ impl Default for StorageConfig {
             sparse_index_interval: 16,
             compaction_strategy: CompactionStrategy::SizeTiered,
             bloom_false_positive_rate: 0.01,
+            encryption: EncryptionConfig::default(),
+            prefix_compression: false,
         }
     }
 }

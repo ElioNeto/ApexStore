@@ -1,7 +1,7 @@
 use crate::core::engine::EngineOptions;
 use crate::core::iterators::{MergeIterator, StorageIterator};
 use crate::core::key::KeySlice;
-use crate::core::log_record::LogRecord;
+use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::core::table::Table;
 use crate::infra::config::StorageConfig;
 use crate::infra::error::Result;
@@ -46,7 +46,7 @@ pub struct CompactionMetrics {
 ///
 /// let output_dir = dir.path().to_path_buf();
 /// let (new_tables, metrics) = strategy
-///     .execute(vec![table], &options, &storage, &output_dir)
+///     .execute(vec![table], &options, &storage, &output_dir, &[])
 ///     .unwrap();
 ///
 /// assert!(!new_tables.is_empty());
@@ -58,25 +58,46 @@ pub trait CompactionStrategy: Send + Sync {
     fn pick_tables(&self, tables: &[Table], options: &EngineOptions) -> Vec<Vec<usize>>;
 
     /// Execute compaction on the given tables and return new tables.
+    ///
+    /// `range_tombstones` is the list of active range tombstones that should be
+    /// applied during compaction (keys falling within any range tombstone are dropped).
     fn execute(
         &self,
         tables: Vec<Table>,
         options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &Path,
+        range_tombstones: &[RangeTombstone],
     ) -> Result<(Vec<Table>, CompactionMetrics)>;
 
     /// Returns the name of the strategy.
     fn name(&self) -> &'static str;
 }
 
+/// Check if a key falls within any of the given range tombstones.
+fn is_key_in_range_tombstones(key: &[u8], tombstones: &[RangeTombstone]) -> bool {
+    tombstones
+        .iter()
+        .any(|rt| rt.start_key.as_slice() <= key && key < rt.end_key.as_slice())
+}
+
 /// Shared helper for compaction execution logic
+///
+/// NOTE: TTL / `expires_at` metadata is not available at compaction time
+/// because `Table` stores only raw `(Vec<u8>, Vec<u8>)` pairs — the
+/// `LogRecord` metadata is stripped during `flush_memtable_impl()`.
+/// Expired keys are therefore filtered **before** they reach the SSTable
+/// (in `flush_memtable_impl`).  Compaction itself does not re-check TTL.
+///
+/// If TTL-awareness is needed at the compaction layer in the future, the
+/// `Table` / SSTable format will need to carry expiration metadata.
 fn execute_compaction(
     tables: &[Table],
     storage_config: &StorageConfig,
     output_dir: &Path,
     output_prefix: &str,
     level: Option<usize>,
+    range_tombstones: &[RangeTombstone],
 ) -> Result<(Vec<Table>, CompactionMetrics)> {
     let start_time = SystemTime::now();
     let mut metrics = CompactionMetrics {
@@ -94,35 +115,75 @@ fn execute_compaction(
     }
 
     // Merge tables using MergeIterator
+    // IMPORTANT: Iterate tables in REVERSE order (newest first) so that
+    // the MergeIterator's "lower index wins" rule correctly picks the
+    // newest value when duplicate keys exist across tables.
     let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
-    for table in tables {
+    for table in tables.iter().rev() {
         iters.push(Box::new(table.iter()));
     }
 
     let mut merge_iter = MergeIterator::new(iters);
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
 
-    // Create output SSTable
-    let output_path = output_dir.join(format!("{}_{}.sst", output_prefix, timestamp));
-    let mut builder = SstableBuilder::new(output_path.clone(), storage_config.clone(), timestamp)?;
+    // Build EncryptionConfig from the infra StorageConfig
+    let encryption = if storage_config.encryption_enabled {
+        crate::storage::encryption::EncryptionConfig::from_key_path(
+            storage_config.encryption_key_path.as_deref(),
+        )
+        .unwrap_or_default()
+    } else {
+        crate::storage::encryption::EncryptionConfig::default()
+    };
 
-    let mut record_count = 0u64;
+    // Create output SSTable — use encrypted builder if encryption is enabled
+    let output_path = output_dir.join(format!("{}_{}.sst", output_prefix, timestamp));
+    let mut builder = SstableBuilder::new_with_encryption(
+        output_path.clone(),
+        (*storage_config).clone(),
+        timestamp,
+        &encryption,
+    )?;
+
+    let mut merged_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> =
+        std::collections::BTreeMap::new();
     while merge_iter.is_valid() {
         let key = merge_iter.key();
         let value = merge_iter.value();
 
+        // Tombstone convention: deleted keys are stored with an empty value
+        // (Vec<u8> of length 0) throughout the system.  All paths — memtable
+        // flush, compaction, and point lookups — treat `is_empty()` as the
+        // tombstone signal.  This avoids carrying a separate boolean per
+        // record in the SSTable format while keeping tombstone detection
+        // cheap (a single length check).
+        //
+        // During compaction, tombstones are dropped entirely: the deleted key
+        // no longer appears in the compacted output since it cannot affect
+        // future reads (a later tombstone overriding an earlier value would
+        // be resolved the same way — dropped).
         // Skip tombstones (empty values) during compaction
         if !value.is_empty() {
+            // Apply range tombstones: skip keys that fall within a range tombstone
+            if is_key_in_range_tombstones(key.as_slice(), range_tombstones) {
+                merge_iter.next();
+                continue;
+            }
             let key_vec: Vec<u8> = key.as_slice().to_vec();
-            let record = LogRecord::new(key_vec, value.to_vec());
+            let value_vec = value.to_vec();
+            // Keep the raw data in a BTreeMap so the resulting Table has
+            // fast in-memory lookups AND can be re-compacted (otherwise a
+            // Table created via from_sstable_path has data = empty, making
+            // its contents invisible to subsequent compaction passes).
+            merged_data.insert(key_vec.clone(), value_vec.clone());
+            let record = LogRecord::new(key_vec, value_vec);
             builder.add(key.as_ref(), &record)?;
-            record_count += 1;
         }
 
         merge_iter.next();
     }
 
-    if record_count == 0 {
+    if merged_data.is_empty() {
         // All data was tombstones, no output
         return Ok((Vec::new(), metrics));
     }
@@ -132,8 +193,11 @@ fn execute_compaction(
         .map(|m| m.len())
         .unwrap_or(0);
 
-    // Create new Table from the SSTable
-    let mut new_table = Table::from_sstable_path(&result_path)?;
+    // Create new Table from the SSTable (for its metadata: bloom filter,
+    // min/max keys) and then populate its in-memory data so subsequent
+    // compaction passes can see the records via table.iter().
+    let mut new_table = Table::from_sstable_path(&result_path, Some(&encryption))?;
+    new_table.data = merged_data;
     if let Some(lvl) = level {
         new_table.level = lvl;
     }
@@ -217,8 +281,16 @@ impl CompactionStrategy for SizeTieredCompaction {
         _options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &Path,
+        range_tombstones: &[RangeTombstone],
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
-        execute_compaction(&tables, storage_config, output_dir, "sst", None)
+        execute_compaction(
+            &tables,
+            storage_config,
+            output_dir,
+            "sst",
+            None,
+            range_tombstones,
+        )
     }
 
     fn name(&self) -> &'static str {
@@ -287,8 +359,16 @@ impl CompactionStrategy for LeveledCompaction {
         _options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &Path,
+        range_tombstones: &[RangeTombstone],
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
-        execute_compaction(&tables, storage_config, output_dir, "sst_L1", Some(1))
+        execute_compaction(
+            &tables,
+            storage_config,
+            output_dir,
+            "sst_L1",
+            Some(1),
+            range_tombstones,
+        )
     }
 
     fn name(&self) -> &'static str {
@@ -327,12 +407,13 @@ impl CompactionStrategy for LazyLevelingCompaction {
                 self.size_tiered.min_tables_to_merge,
             );
 
-            // Map back to original indices
+            // Map back to original indices (with bounds check)
             buckets
                 .into_iter()
                 .map(|bucket| {
                     bucket
                         .iter()
+                        .filter(|&&local_idx| local_idx < l0_indices.len())
                         .map(|&local_idx| l0_indices[local_idx])
                         .collect()
                 })
@@ -349,16 +430,27 @@ impl CompactionStrategy for LazyLevelingCompaction {
         _options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &Path,
+        range_tombstones: &[RangeTombstone],
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
         // Determine which strategy to use based on table levels
         let has_l0 = tables.iter().any(|t| t.level == 0);
 
         if has_l0 {
-            self.size_tiered
-                .execute(tables, _options, storage_config, output_dir)
+            self.size_tiered.execute(
+                tables,
+                _options,
+                storage_config,
+                output_dir,
+                range_tombstones,
+            )
         } else {
-            self.leveled
-                .execute(tables, _options, storage_config, output_dir)
+            self.leveled.execute(
+                tables,
+                _options,
+                storage_config,
+                output_dir,
+                range_tombstones,
+            )
         }
     }
 
@@ -373,6 +465,9 @@ pub struct CompactionOptions {
     pub strategy_type: CompactionStrategyType,
     pub compaction_threshold: usize,
     pub max_tables_per_compaction: usize,
+    /// Maximum number of concurrent background compaction threads.
+    /// Each thread compacts a different column family.
+    pub max_concurrent_compactions: usize,
 }
 
 impl Default for CompactionOptions {
@@ -381,6 +476,7 @@ impl Default for CompactionOptions {
             strategy_type: CompactionStrategyType::SizeTiered,
             compaction_threshold: 4,
             max_tables_per_compaction: 8,
+            max_concurrent_compactions: 2,
         }
     }
 }
@@ -414,6 +510,7 @@ impl From<crate::infra::config::CompactionStrategy> for CompactionOptions {
             strategy_type,
             compaction_threshold: 4,      // default
             max_tables_per_compaction: 8, // default
+            max_concurrent_compactions: 2,
         }
     }
 }
@@ -489,12 +586,16 @@ impl Compaction {
             strategy_type,
             compaction_threshold: config.compaction.min_compaction_threshold,
             max_tables_per_compaction: config.compaction.max_sstables,
+            max_concurrent_compactions: 2,
         };
-        let storage_config = crate::infra::config::StorageConfig {
+        let storage_config = StorageConfig {
             block_size: config.storage.block_size,
             block_cache_size_mb: config.storage.block_cache_size_mb,
             sparse_index_interval: config.storage.sparse_index_interval,
             bloom_false_positive_rate: config.storage.bloom_false_positive_rate,
+            encryption_enabled: config.storage.encryption_enabled,
+            encryption_key_path: config.storage.encryption_key_path.clone(),
+            prefix_compression_enabled: config.storage.prefix_compression_enabled,
         };
 
         Self::new(strategy_type, options, storage_config, output_dir)
@@ -511,14 +612,27 @@ impl Compaction {
         table_indices: &[usize],
         all_tables: &[Table],
         options: &EngineOptions,
+        range_tombstones: &[RangeTombstone],
     ) -> Result<(Vec<Table>, CompactionMetrics)> {
+        // Defensive bounds check: skip indices out of range to avoid panics
+        // from off-by-one errors in group index selection.
         let tables: Vec<Table> = table_indices
             .iter()
+            .filter(|&&i| i < all_tables.len())
             .map(|i| all_tables[*i].clone())
             .collect();
 
-        self.strategy
-            .execute(tables, options, &self.storage_config, &self.output_dir)
+        if tables.is_empty() {
+            return Ok((Vec::new(), CompactionMetrics::default()));
+        }
+
+        self.strategy.execute(
+            tables,
+            options,
+            &self.storage_config,
+            &self.output_dir,
+            range_tombstones,
+        )
     }
 
     /// Get the strategy name

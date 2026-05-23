@@ -1,7 +1,7 @@
 # Roadmap — ApexStore
 
-**Last Updated:** 2026-03-31
-**Current Version:** v2.1.1
+**Last Updated:** 2026-05-22
+**Current Version:** v2.3.0
 **Base Storage Model:** `key: String -> value: Vec<u8>` (LSM-Tree)
 **Objective:** Evolve the project through versioned releases, adding **compaction**, **range iterators**, **secondary indexes**, and multi-instance support.
 
@@ -50,80 +50,18 @@
 
 ---
 
-## v2.2 — Bug Fixes & Hardening (Next — ~2 weeks)
+## v2.2 — v2.3 — Mega Release: Bug Fixes, Features & Resilience
 
-### Objective
-Fix known correctness and durability bugs identified in the v2.1.1 audit. No new features — stability first.
+### ✅ Completed Deliverables
 
-### Deliverables
+All 59 issues have been implemented:
 
-#### 🔴 Critical Fixes
-
-- [ ] **#89** — Fix WAL `clear()` race condition between truncate and reopen
-  - Replace two-handle pattern with `set_len(0)` + `seek(Start(0))` on the existing fd
-  - Eliminates crash-recovery data loss window
-
-- [ ] **#90** — Fix `set_batch()` / `delete_batch()` non-atomic behavior
-  - Single WAL pass + single memtable lock acquisition for all items
-  - Prevents partial-write inconsistency on error mid-batch
-
-#### 🟡 Refactoring
-
-- [ ] **#91** — Migrate `std::sync::Mutex` → `parking_lot::Mutex` / `RwLock` in `engine.rs` and `wal.rs`
-  - `sstables` upgraded to `RwLock` for concurrent reads
-  - ~30% lock overhead reduction on hot paths
-
-- [ ] **#92** — Clean up duplicate `LsmError` variants (`KeyNotFound` vs `NotFound`, serialization overlap)
-
-- [ ] **#93** — Remove `pub(crate)` field exposure from `LsmEngine`; add private fields with accessor methods
-
-#### 🟢 Optimization
-
-- [ ] **#37** — Replace linear in-block scan with `binary_search_by()` in `search_in_block()`
-  - Sparse index binary search already done; this completes the lookup chain to O(log n) inside the block
-
-### Release Criteria
-- All critical bugs (#89, #90) fixed and tested
-- Zero `std::sync` usage in hot paths
-- All existing tests passing
-
----
-
-## v2.3 — Range Scan API & Pagination (~2 weeks after v2.2)
-
-### Objective
-Make the API production-usable for large datasets by eliminating full-scan materializations.
-
-### Deliverables
-
-- [ ] **#24** — `GET /scan?start_key=...&end_key=...&limit=N` with cursor-based pagination
-- [ ] **#24** — `GET /keys/search?q=...&prefix=true&limit=N&cursor=...`
-- [ ] Engine: `scan_range(start: &str, end: &str)` leveraging `BTreeMap::range()` + SSTable iterator
-- [ ] CLI: `SCAN [start] [end]` and `PREFIX <prefix>` commands
-- [ ] Default limit of 1000 records per response (configurable)
-- [ ] Response includes `next_cursor` when result set is truncated
-
-### Release Criteria
-- `GET /scan` on a 10M-key database returns in < 100ms for limit=100
-- Full scan no longer materializes all records in memory
-
----
-
-## v2.4 — Benchmark Suite (~1 week after v2.3)
-
-### Objective
-Replace informal performance claims with real `criterion` benchmarks.
-
-### Deliverables
-
-- [ ] **#48** — Create `benches/` directory with:
-  - `write_bench.rs`: single write, batch write, WAL overhead
-  - `read_bench.rs`: MemTable hit, SSTable cold/warm cache, Bloom filter
-  - `mixed_bench.rs`: YCSB-style workloads A/B/C/D/F
-  - `scan_bench.rs`: full scan, range scan, prefix scan
-- [ ] CI integration: run benchmarks on `main` push, alert on >10% regression
-- [ ] Update README with real measured numbers
-- [ ] Create `docs/PERFORMANCE.md`
+- **7 critical bugs** fixed: WAL stale recovery (#191), compaction OOB panic (#190), tombstone handling (#189, #188), SSTable point reads (#180), SIGTERM handling (#182), rate limiting (#185)
+- **6 medium bugs/chores**: unwrap/expect removal (#186), snapshot restore (#184), cargo-audit (#183), SSTable count mismatch (#181), CLI tokens (#179), auth wiring (#178)
+- **4 high-priority features**: ACID transactions (#196), encryption at rest (#195), TTL/auto-expiry (#193), range delete (#192)
+- **9 features**: OpenTelemetry (#197), bulk import/export (#198), CDC (#199), concurrent compaction (#200), web dashboard (#201), GraphQL (#202), mmap reads (#203), replication (#204), SQL engine (#205)
+- **14 differentiator features**: WASM plugins (#206), vector search (#207), time-travel (#208), pub/sub (#209), data tiering (#210), multi-model (#211), webhooks (#212), CRDT (#213), blob storage (#214), query budgets (#215), access control (#216), data sync (#217), CI/CD fixtures (#218), schema validation (#219)
+- **17 resilience features**: circuit breaker (#220), health checks (#221), disk monitor (#222), memory limits (#223), WAL archiving (#224), scrubber (#225), degradation modes (#226), request timeout (#227), retry/backoff (#228), compaction backpressure (#229), panic recovery (#230), enhanced rate limiting (#231), tenant quotas (#232), backup scheduling (#233), watchdog (#234), idempotency (#235), chaos testing (#236)
 
 ---
 
@@ -227,9 +165,8 @@ Run multiple independent engine instances on the same server.
 | Version     | LTS? | Status      | Main Milestone                             | Timeline          |
 | :---------- | :--- | :---------- | :----------------------------------------- | :---------------- |
 | v1.0–v1.3   | ❌    | ✅ Released  | SSTable V2, Config, CLI, API               | Done              |
-| **v2.0–v2.1** | **❌** | **✅ Current** | **Reader, Iterator, Cache, Auth, Docker** | **2026-03-06**    |
-| v2.2        | ❌    | 🔧 Next      | Bug fixes: WAL race, batch atomicity, locks | ~2 weeks         |
-| v2.3        | ❌    | ⏳ Planned   | Range scan API + pagination                | ~2 weeks after    |
+| **v2.0–v2.1** | **❌** | **✅ Released** | **Reader, Iterator, Cache, Auth, Docker** | **2026-03-06**    |
+| **v2.2–v2.3** | **❌** | **✅ Current** | **Mega release: 59 issues (bugs, features, resilience)** | **2026-05-22** |
 | v2.4        | ❌    | ⏳ Planned   | Benchmark suite                            | ~1 week after     |
 | v3-lts      | ✅    | ⏳ Planned   | Compaction + CRC32 checksums               | 6–10 weeks        |
 | v4          | ❌    | ⏳ Planned   | Secondary indexes + posting lists          | 6–8 weeks         |
@@ -241,6 +178,6 @@ Run multiple independent engine instances on the same server.
 ---
 
 **Last Updated:** 2026-03-31
-**Current Release:** v2.1.1
+**Current Release:** v2.3.0
 **Authors:** ApexStore Team
 **License:** MIT

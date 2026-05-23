@@ -1,4 +1,4 @@
-use crate::core::log_record::LogRecord;
+use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::storage::iterator::MemTableIterator;
 use std::collections::BTreeMap;
 
@@ -6,6 +6,8 @@ pub struct MemTable {
     pub(crate) data: BTreeMap<Vec<u8>, LogRecord>,
     pub(crate) size_bytes: usize,
     pub(crate) max_size_bytes: usize,
+    /// Active range tombstones that apply to this memtable's data.
+    pub(crate) range_tombstones: Vec<RangeTombstone>,
 }
 
 impl MemTable {
@@ -18,6 +20,7 @@ impl MemTable {
             data: BTreeMap::new(),
             size_bytes: 0,
             max_size_bytes,
+            range_tombstones: Vec::new(),
         }
     }
 
@@ -96,15 +99,33 @@ impl MemTable {
         MemTableIterator::new_from(&self.data, start_key)
     }
 
+    /// Add a range tombstone covering [start, end).
+    pub fn add_range_tombstone(&mut self, range: RangeTombstone) {
+        self.range_tombstones.push(range);
+    }
+
+    /// Check if a key falls within any active range tombstone.
+    ///
+    /// Returns `true` if the key is covered by any range tombstone
+    /// (i.e. `start_key <= key < end_key`).
+    pub fn contains_range_tombstone(&self, key: &[u8]) -> bool {
+        self.range_tombstones
+            .iter()
+            .any(|rt| rt.start_key.as_slice() <= key && key < rt.end_key.as_slice())
+    }
+
     pub fn clear(&mut self) -> usize {
         let count = self.data.len();
         self.data.clear();
+        self.range_tombstones.clear();
         self.size_bytes = 0;
         count
     }
 
     fn estimate_size(record: &LogRecord) -> usize {
-        record.key.len() + record.value.len() + 32
+        // Base overhead: timestamp(16) + is_deleted(1) + column_family tag(1) +
+        //               expires_at tag(1) + expires_at data(16) + misc(16) = ~51
+        record.key.len() + record.value.len() + 51
     }
 }
 

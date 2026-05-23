@@ -9,6 +9,21 @@ pub struct ServerConfig {
     pub max_raw_payload_size: usize,
     pub feature_cache_ttl_secs: u64,
     pub auth: AuthConfig,
+
+    /// Maximum number of concurrent connections (default: 10000)
+    pub max_connections: usize,
+    /// TCP listen backlog size (default: 1024)
+    pub backlog: u32,
+    /// Number of worker threads (None = auto-detect based on CPU cores)
+    pub workers: Option<usize>,
+    /// Enable/disable IP-based rate limiting (default: true)
+    pub rate_limit_enabled: bool,
+    /// Max requests per minute per IP (default: 100)
+    pub rate_limit_requests_per_minute: usize,
+
+    /// CDC endpoint URL for streaming data changes.
+    /// When set, CDC is enabled and data mutations are posted as JSON to this endpoint.
+    pub cdc_endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +43,12 @@ impl Default for ServerConfig {
             max_raw_payload_size: 50 * 1024 * 1024,  // 50MB
             feature_cache_ttl_secs: 10,
             auth: AuthConfig::default(),
+            max_connections: 10_000,
+            backlog: 1024u32,
+            workers: None,
+            rate_limit_enabled: true,
+            rate_limit_requests_per_minute: 100,
+            cdc_endpoint: None,
         }
     }
 }
@@ -74,6 +95,32 @@ impl ServerConfig {
             .ok()
             .and_then(|s| s.parse::<u32>().ok());
 
+        let max_connections = env::var("MAX_CONNECTIONS")
+            .unwrap_or_else(|_| "10000".to_string())
+            .parse::<usize>()
+            .unwrap_or(10_000);
+
+        let backlog = env::var("BACKLOG")
+            .unwrap_or_else(|_| "1024".to_string())
+            .parse::<u32>()
+            .unwrap_or(1024);
+
+        let workers = env::var("WORKERS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok());
+
+        let rate_limit_enabled = env::var("RATE_LIMIT_ENABLED")
+            .unwrap_or_else(|_| "true".to_string())
+            .parse::<bool>()
+            .unwrap_or(true);
+
+        let rate_limit_requests_per_minute = env::var("RATE_LIMIT_REQUESTS_PER_MINUTE")
+            .unwrap_or_else(|_| "100".to_string())
+            .parse::<usize>()
+            .unwrap_or(100);
+
+        let cdc_endpoint = env::var("CDC_ENDPOINT").ok();
+
         Self {
             host,
             port,
@@ -84,6 +131,12 @@ impl ServerConfig {
                 enabled: auth_enabled,
                 token_expiry_days,
             },
+            max_connections,
+            backlog,
+            workers,
+            rate_limit_enabled,
+            rate_limit_requests_per_minute,
+            cdc_endpoint,
         }
     }
 
@@ -113,6 +166,30 @@ impl ServerConfig {
         } else {
             println!("   Token Expiry: Never");
         }
+        println!("   Max Connections: {}", self.max_connections);
+        println!("   Backlog: {}", self.backlog);
+        match self.workers {
+            Some(w) => println!("   Workers: {}", w),
+            None => println!("   Workers: auto (CPU cores)"),
+        }
+        println!(
+            "   Rate Limiting: {}",
+            if self.rate_limit_enabled {
+                format!(
+                    "Enabled ({} req/min/IP)",
+                    self.rate_limit_requests_per_minute
+                )
+            } else {
+                "Disabled".to_string()
+            }
+        );
+        println!(
+            "   CDC: {}",
+            match &self.cdc_endpoint {
+                Some(url) => format!("Enabled ({})", url),
+                None => "Disabled".to_string(),
+            }
+        );
         println!();
     }
 }

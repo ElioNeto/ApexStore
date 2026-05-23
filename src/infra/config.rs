@@ -1,11 +1,12 @@
 use crate::infra::error::{LsmError, Result};
+use crate::infra::replication::ReplicationConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Top-level configuration for the ApexStore LSM engine.
 ///
-/// Groups configuration into three categories: [`CoreConfig`], [`StorageConfig`],
-/// and [`CompactionConfig`].
+/// Groups configuration into four categories: [`CoreConfig`], [`StorageConfig`],
+/// [`CompactionConfig`], and [`WalConfig`].
 ///
 /// # Usage example
 ///
@@ -30,6 +31,43 @@ pub struct LsmConfig {
     pub storage: StorageConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
+    #[serde(default)]
+    pub replication: ReplicationConfig,
+    #[serde(default)]
+    pub wal: WalConfig,
+}
+
+/// Configuration for WAL archiving and rotation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalConfig {
+    /// Maximum WAL file size in bytes before automatic archiving is triggered.
+    /// Default: 64 MiB.
+    #[serde(default = "default_wal_max_size")]
+    pub max_wal_size: u64,
+    /// Whether to enable automatic WAL archiving in the background.
+    #[serde(default)]
+    pub archive_enabled: bool,
+    /// Interval in seconds between WAL size checks (default: 60).
+    #[serde(default = "default_wal_check_interval_secs")]
+    pub check_interval_secs: u64,
+}
+
+fn default_wal_max_size() -> u64 {
+    64 * 1024 * 1024 // 64 MiB
+}
+
+fn default_wal_check_interval_secs() -> u64 {
+    60
+}
+
+impl Default for WalConfig {
+    fn default() -> Self {
+        Self {
+            max_wal_size: default_wal_max_size(),
+            archive_enabled: false,
+            check_interval_secs: default_wal_check_interval_secs(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +82,15 @@ pub struct StorageConfig {
     pub block_cache_size_mb: usize,
     pub sparse_index_interval: usize,
     pub bloom_false_positive_rate: f64,
+    /// Whether encryption at rest is enabled.
+    #[serde(default)]
+    pub encryption_enabled: bool,
+    /// Path to file containing the hex-encoded AES-256 key (64 hex chars).
+    #[serde(default)]
+    pub encryption_key_path: Option<String>,
+    /// Whether to enable block-level key prefix compression.
+    #[serde(default)]
+    pub prefix_compression_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +133,9 @@ impl Default for StorageConfig {
             block_cache_size_mb: 64,
             sparse_index_interval: 16,
             bloom_false_positive_rate: 0.01,
+            encryption_enabled: false,
+            encryption_key_path: None,
+            prefix_compression_enabled: false,
         }
     }
 }
@@ -302,6 +352,16 @@ pub struct LsmConfigBuilder {
     max_sstables: Option<usize>,
     min_compaction_threshold: Option<usize>,
     strategy: Option<CompactionStrategy>,
+    encryption_enabled: Option<bool>,
+    encryption_key_path: Option<String>,
+    prefix_compression_enabled: Option<bool>,
+    replication_role: Option<super::replication::ReplicationRole>,
+    replica_endpoints: Option<Vec<String>>,
+    replication_sync_interval_ms: Option<u64>,
+    // WAL archiving config
+    wal_max_size: Option<u64>,
+    wal_archive_enabled: Option<bool>,
+    wal_check_interval_secs: Option<u64>,
 }
 
 impl LsmConfigBuilder {
@@ -355,6 +415,58 @@ impl LsmConfigBuilder {
         self
     }
 
+    pub fn encryption_enabled(mut self, enabled: bool) -> Self {
+        self.encryption_enabled = Some(enabled);
+        self
+    }
+
+    pub fn encryption_key_path(mut self, path: String) -> Self {
+        self.encryption_key_path = Some(path);
+        self
+    }
+
+    /// Set the replication role (Primary or Replica).
+    pub fn replication_role(mut self, role: super::replication::ReplicationRole) -> Self {
+        self.replication_role = Some(role);
+        self
+    }
+
+    /// Set the list of replica endpoint URLs (used on Primary).
+    pub fn replica_endpoints(mut self, endpoints: Vec<String>) -> Self {
+        self.replica_endpoints = Some(endpoints);
+        self
+    }
+
+    /// Set the replication sync interval in milliseconds.
+    pub fn replication_sync_interval_ms(mut self, ms: u64) -> Self {
+        self.replication_sync_interval_ms = Some(ms);
+        self
+    }
+
+    /// Set the maximum WAL file size before archiving.
+    pub fn wal_max_size(mut self, size: u64) -> Self {
+        self.wal_max_size = Some(size);
+        self
+    }
+
+    /// Enable or disable block-level key prefix compression.
+    pub fn prefix_compression(mut self, enabled: bool) -> Self {
+        self.prefix_compression_enabled = Some(enabled);
+        self
+    }
+
+    /// Enable or disable automatic WAL archiving.
+    pub fn wal_archive_enabled(mut self, enabled: bool) -> Self {
+        self.wal_archive_enabled = Some(enabled);
+        self
+    }
+
+    /// Set the interval (in seconds) between WAL size checks.
+    pub fn wal_check_interval_secs(mut self, secs: u64) -> Self {
+        self.wal_check_interval_secs = Some(secs);
+        self
+    }
+
     pub fn build(self) -> Result<LsmConfig> {
         let defaults = LsmConfig::default();
 
@@ -376,6 +488,15 @@ impl LsmConfigBuilder {
                 bloom_false_positive_rate: self
                     .bloom_false_positive_rate
                     .unwrap_or(defaults.storage.bloom_false_positive_rate),
+                encryption_enabled: self
+                    .encryption_enabled
+                    .unwrap_or(defaults.storage.encryption_enabled),
+                encryption_key_path: self
+                    .encryption_key_path
+                    .or_else(|| defaults.storage.encryption_key_path.clone()),
+                prefix_compression_enabled: self
+                    .prefix_compression_enabled
+                    .unwrap_or(defaults.storage.prefix_compression_enabled),
             },
             compaction: CompactionConfig {
                 level_size: self.level_size.unwrap_or(defaults.compaction.level_size),
@@ -386,6 +507,24 @@ impl LsmConfigBuilder {
                     .min_compaction_threshold
                     .unwrap_or(defaults.compaction.min_compaction_threshold),
                 strategy: self.strategy.unwrap_or(defaults.compaction.strategy),
+            },
+            replication: ReplicationConfig {
+                role: self.replication_role.unwrap_or(defaults.replication.role),
+                replica_endpoints: self
+                    .replica_endpoints
+                    .unwrap_or(defaults.replication.replica_endpoints),
+                sync_interval_ms: self
+                    .replication_sync_interval_ms
+                    .unwrap_or(defaults.replication.sync_interval_ms),
+            },
+            wal: WalConfig {
+                max_wal_size: self.wal_max_size.unwrap_or(defaults.wal.max_wal_size),
+                archive_enabled: self
+                    .wal_archive_enabled
+                    .unwrap_or(defaults.wal.archive_enabled),
+                check_interval_secs: self
+                    .wal_check_interval_secs
+                    .unwrap_or(defaults.wal.check_interval_secs),
             },
         };
 
@@ -398,6 +537,7 @@ impl LsmConfigBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::replication::ReplicationRole;
 
     #[test]
     fn test_default_config_is_valid() {
@@ -604,5 +744,23 @@ mod tests {
             config.compaction.strategy,
             CompactionStrategy::Leveled
         ));
+    }
+
+    #[test]
+    fn test_builder_replication_config() {
+        let config = LsmConfig::builder()
+            .replication_role(ReplicationRole::Replica)
+            .replica_endpoints(vec!["http://replica1:8080".to_string()])
+            .replication_sync_interval_ms(500)
+            .build();
+
+        assert!(config.is_ok());
+        let config = config.unwrap();
+        assert_eq!(config.replication.role, ReplicationRole::Replica);
+        assert_eq!(
+            config.replication.replica_endpoints,
+            vec!["http://replica1:8080"]
+        );
+        assert_eq!(config.replication.sync_interval_ms, 500);
     }
 }

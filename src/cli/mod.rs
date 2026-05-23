@@ -11,10 +11,14 @@
 //!   apexstore-cli --db <PATH> flush
 //!   apexstore-cli --db <PATH> compact
 
+use crate::api::auth::token::{ApiToken, Permission};
+use crate::api::auth::TokenManager;
 use crate::core::engine::{Engine, MAX_SCAN_LIMIT};
+use crate::infra::cdc::CdcConfig;
 use crate::infra::config::LsmConfig;
+use crate::infra::sql::{format_sql_result, SqlEngine};
 use crate::storage::cache::GlobalBlockCache;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::sync::Arc;
 
 type CliEngine = Engine<Arc<GlobalBlockCache>>;
@@ -27,9 +31,22 @@ struct Cli {
     #[arg(short = 'D', long = "db", default_value = "./apexstore_data")]
     db_path: std::path::PathBuf,
 
+    /// Path to file containing the hex-encoded AES-256 encryption key (64 hex chars).
+    /// When provided, enables transparent encryption at rest for SSTables and WAL.
+    #[arg(long = "encrypt-key-file")]
+    encrypt_key_file: Option<std::path::PathBuf>,
+
+    /// CDC endpoint URL for streaming data changes (e.g. http://localhost:9000/webhook).
+    /// When set, CDC is enabled and data mutations are posted as JSON to this endpoint.
+    #[arg(long = "cdc-endpoint")]
+    cdc_endpoint: Option<String>,
+
     #[command(subcommand)]
     command: Command,
 }
+
+/// Token prefix used for storing API tokens in the engine
+const TOKEN_PREFIX: &str = "__token:";
 
 #[derive(Parser, Debug)]
 enum Command {
@@ -97,17 +114,79 @@ enum Command {
     Flush,
     /// Trigger compaction
     Compact,
+    /// Execute SQL query against the engine
+    Sql {
+        /// SQL query to execute (e.g. "SELECT * FROM default", "INSERT INTO default (key, value) VALUES ('k', 'v')")
+        query: String,
+    },
+    /// Import key-value pairs from a file
+    Import {
+        /// File format: "json" or "csv"
+        format: String,
+        /// Path to the input file (use "-" for stdin)
+        file: String,
+        /// Column family (default: "default")
+        #[arg(short, long, default_value = "default")]
+        cf: String,
+    },
+    /// Export key-value pairs to a file
+    Export {
+        /// File format: "json" or "csv"
+        format: String,
+        /// Path to the output file (use "-" for stdout)
+        file: String,
+        /// Column family (default: "default")
+        #[arg(short, long, default_value = "default")]
+        cf: String,
+    },
+    /// Manage API tokens
+    #[command(subcommand)]
+    Token(TokenCommand),
+}
+
+/// Token management subcommands
+#[derive(Subcommand, Debug)]
+enum TokenCommand {
+    /// Create a new API token with optional permissions
+    Create {
+        /// Human-readable name for the token
+        name: String,
+        /// Permissions to grant (default: read). Options: read, write, delete, admin
+        #[arg(short, long, default_values = &["read"])]
+        permissions: Vec<String>,
+    },
+    /// List all API tokens
+    List,
+    /// Revoke (delete) an API token by its ID
+    Revoke {
+        /// Token ID to revoke
+        id: String,
+    },
 }
 
 pub fn main() -> crate::infra::error::Result<()> {
     let cli = Cli::parse();
 
     // Build config from CLI args
-    let config = LsmConfig::builder().dir_path(cli.db_path).build()?;
+    let mut builder = LsmConfig::builder().dir_path(cli.db_path);
+    if let Some(key_path) = cli.encrypt_key_file {
+        let key_str = key_path.to_string_lossy().to_string();
+        builder = builder
+            .encryption_enabled(true)
+            .encryption_key_path(key_str);
+    }
+    let config = builder.build()?;
 
     // Open engine with a shared block cache
     let cache = GlobalBlockCache::new(100, 4096);
     let engine = Engine::new_from_config(&config, cache)?;
+
+    // Configure CDC if an endpoint was provided
+    if let Some(endpoint) = &cli.cdc_endpoint {
+        let cdc_config = CdcConfig::with_endpoint(endpoint.clone());
+        engine.set_cdc(cdc_config);
+        tracing::info!(target: "apexstore::cli", "CDC enabled, endpoint: {}", endpoint);
+    }
 
     match cli.command {
         Command::Get { key, cf } => cmd_get(&engine, &cf, &key),
@@ -124,6 +203,10 @@ pub fn main() -> crate::infra::error::Result<()> {
         Command::Stats => cmd_stats(&engine),
         Command::Flush => cmd_flush(&engine),
         Command::Compact => cmd_compact(&engine),
+        Command::Sql { query } => cmd_sql(&engine, &query),
+        Command::Import { format, file, cf } => cmd_import(&engine, &format, &file, &cf),
+        Command::Export { format, file, cf } => cmd_export(&engine, &format, &file, &cf),
+        Command::Token(sub) => cmd_token(&engine, sub),
     }
 }
 
@@ -264,4 +347,229 @@ fn cmd_compact(engine: &CliEngine) -> crate::infra::error::Result<()> {
         println!("(nothing to compact)");
     }
     Ok(())
+}
+
+fn cmd_sql(engine: &CliEngine, query: &str) -> crate::infra::error::Result<()> {
+    let sql_engine = SqlEngine::new(engine);
+    let result = sql_engine.execute(query)?;
+    let output = format_sql_result(&result);
+    print!("{}", output);
+    Ok(())
+}
+
+// ── Import / Export command implementations ──────────────────────────────────
+
+/// Handle `import` subcommand.
+fn cmd_import(
+    engine: &CliEngine,
+    format: &str,
+    file: &str,
+    cf: &str,
+) -> crate::infra::error::Result<()> {
+    use crate::infra::bulk_io;
+
+    let start = std::time::Instant::now();
+
+    // Progress callback that prints a simple progress line
+    let progress: Option<bulk_io::ProgressFn> = Some(Box::new(|current, total| {
+        if total > 0 {
+            eprint!("\rImported: {} / {} records", current, total);
+        } else {
+            eprint!("\rImported: {} records", current);
+        }
+    }));
+
+    match format.to_lowercase().as_str() {
+        "json" => {
+            if file == "-" {
+                bulk_io::import_json(engine, std::io::stdin(), Some(cf), progress)?;
+            } else {
+                let f = std::fs::File::open(file)?;
+                let reader = std::io::BufReader::new(f);
+                bulk_io::import_json(engine, reader, Some(cf), progress)?;
+            }
+        }
+        "csv" => {
+            if file == "-" {
+                bulk_io::import_csv(engine, std::io::stdin(), Some(cf), progress)?;
+            } else {
+                let f = std::fs::File::open(file)?;
+                let reader = std::io::BufReader::new(f);
+                bulk_io::import_csv(engine, reader, Some(cf), progress)?;
+            }
+        }
+        other => {
+            return Err(crate::infra::error::LsmError::InvalidArgument(format!(
+                "Unsupported import format: '{}'. Use 'json' or 'csv'.",
+                other
+            )));
+        }
+    }
+
+    let elapsed = start.elapsed();
+    eprintln!(); // newline after progress
+    println!("Import completed in {:.2}s", elapsed.as_secs_f64());
+    Ok(())
+}
+
+/// Handle `export` subcommand.
+fn cmd_export(
+    engine: &CliEngine,
+    format: &str,
+    file: &str,
+    cf: &str,
+) -> crate::infra::error::Result<()> {
+    use crate::infra::bulk_io;
+
+    let start = std::time::Instant::now();
+
+    let progress: Option<bulk_io::ProgressFn> = Some(Box::new(|current, total| {
+        if total > 0 {
+            eprint!("\rExported: {} / {} records", current, total);
+        } else {
+            eprint!("\rExported: {} records", current);
+        }
+    }));
+
+    match format.to_lowercase().as_str() {
+        "json" => {
+            if file == "-" {
+                bulk_io::export_json(engine, &mut std::io::stdout(), Some(cf), progress)?;
+            } else {
+                let f = std::fs::File::create(file)?;
+                let mut writer = std::io::BufWriter::new(f);
+                bulk_io::export_json(engine, &mut writer, Some(cf), progress)?;
+            }
+        }
+        "csv" => {
+            if file == "-" {
+                bulk_io::export_csv(engine, &mut std::io::stdout(), Some(cf), progress)?;
+            } else {
+                let f = std::fs::File::create(file)?;
+                let mut writer = std::io::BufWriter::new(f);
+                bulk_io::export_csv(engine, &mut writer, Some(cf), progress)?;
+            }
+        }
+        other => {
+            return Err(crate::infra::error::LsmError::InvalidArgument(format!(
+                "Unsupported export format: '{}'. Use 'json' or 'csv'.",
+                other
+            )));
+        }
+    }
+
+    let elapsed = start.elapsed();
+    eprintln!(); // newline after progress
+    println!("Export completed in {:.2}s", elapsed.as_secs_f64());
+    Ok(())
+}
+
+// ── Token command implementations ──────────────────────────────────────────
+
+/// Load all tokens from the engine (persisted under `__token:*` keys).
+fn load_tokens_from_engine(engine: &CliEngine) -> crate::infra::error::Result<Vec<ApiToken>> {
+    let (results, _cursor) = engine.search_prefix(TOKEN_PREFIX, None, MAX_SCAN_LIMIT)?;
+    let mut tokens = Vec::new();
+    for (_key, value) in &results {
+        if let Ok(token) = serde_json::from_slice::<ApiToken>(value) {
+            tokens.push(token);
+        }
+    }
+    Ok(tokens)
+}
+
+/// Save a list of tokens to the engine (replaces all existing token entries).
+fn save_tokens_to_engine(
+    engine: &CliEngine,
+    tokens: &[ApiToken],
+) -> crate::infra::error::Result<()> {
+    // Remove all existing __token:* keys
+    let existing = load_tokens_from_engine(engine)?;
+    for token in &existing {
+        let key = format!("{}{}", TOKEN_PREFIX, token.id);
+        engine.delete_cf("default", key.as_bytes())?;
+    }
+    // Write all tokens
+    for token in tokens {
+        let key = format!("{}{}", TOKEN_PREFIX, token.id);
+        let value = serde_json::to_vec(token)?;
+        engine.put_cf("default", key.as_bytes().to_vec(), value)?;
+    }
+    Ok(())
+}
+
+fn cmd_token(engine: &CliEngine, sub: TokenCommand) -> crate::infra::error::Result<()> {
+    match sub {
+        TokenCommand::Create { name, permissions } => {
+            let parsed_perms: Vec<Permission> = permissions
+                .iter()
+                .map(|p| {
+                    p.parse::<Permission>()
+                        .map_err(|e| crate::infra::error::LsmError::InvalidArgument(e.to_string()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let manager = TokenManager::new();
+            let (raw_token, api_token) = manager
+                .create_token(name, None, parsed_perms)
+                .map_err(|e| crate::infra::error::LsmError::InvalidArgument(e.to_string()))?;
+
+            // Persist the token
+            let mut tokens = load_tokens_from_engine(engine)?;
+            tokens.push(api_token.clone());
+            save_tokens_to_engine(engine, &tokens)?;
+
+            println!("Token created successfully!");
+            println!("  ID:    {}", api_token.id);
+            println!("  Name:  {}", api_token.name);
+            println!("  Token: {}", raw_token);
+            println!();
+            println!("⚠  Store this token securely. It will not be shown again.");
+            Ok(())
+        }
+        TokenCommand::List => {
+            let tokens = load_tokens_from_engine(engine)?;
+            if tokens.is_empty() {
+                println!("No tokens found.");
+                return Ok(());
+            }
+            println!(
+                "{:<38} {:<20} {:<10} {:<20}",
+                "ID", "Name", "Perms", "Created"
+            );
+            println!("{}", "-".repeat(90));
+            for token in &tokens {
+                let perms_str: Vec<String> = token
+                    .permissions
+                    .iter()
+                    .map(|p| format!("{:?}", p))
+                    .collect();
+                let epoch_secs = token.created_at / 1_000_000_000;
+                // Format as a simple date string
+                let created = chrono::DateTime::from_timestamp(epoch_secs as i64, 0)
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .unwrap_or_else(|| epoch_secs.to_string());
+                println!(
+                    "{:<38} {:<20} {:<10} {:<20}",
+                    token.id,
+                    token.name,
+                    perms_str.join(","),
+                    created,
+                );
+            }
+            Ok(())
+        }
+        TokenCommand::Revoke { id } => {
+            let mut tokens = load_tokens_from_engine(engine)?;
+            let before = tokens.len();
+            tokens.retain(|t| t.id != id);
+            if tokens.len() == before {
+                println!("Token not found: {}", id);
+                return Ok(());
+            }
+            save_tokens_to_engine(engine, &tokens)?;
+            println!("Token revoked: {}", id);
+            Ok(())
+        }
+    }
 }

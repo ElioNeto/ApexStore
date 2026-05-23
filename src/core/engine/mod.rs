@@ -1,23 +1,27 @@
 pub mod compaction;
+pub mod transaction;
 pub mod version_set;
 
-use crate::core::log_record::LogRecord;
+use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::core::table::Table;
-use crate::infra::config::StorageConfig;
+use crate::infra::cdc::{CdcConfig, CdcEvent, CdcEventType, CdcPublisher};
 use crate::infra::error::Result;
 use crate::infra::metrics::EngineMetrics;
+use crate::infra::replication::{ReplicationClient, ReplicationConfig, ReplicationRole};
 use crate::storage::builder::SstableBuilder;
-use crate::storage::cache::Cache;
+use crate::storage::cache::{Cache, GlobalBlockCache};
+use crate::storage::encryption::EncryptionConfig;
 use crate::storage::wal::WriteAheadLog;
 use fs2::FileExt;
 use parking_lot::Mutex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::Semaphore;
 
 use self::compaction::{Compaction, CompactionMetrics, CompactionOptions, CompactionStrategyType};
 
@@ -64,6 +68,12 @@ pub struct EngineOptions {
     pub max_write_buffer_number: usize,
     pub block_cache_size_mb: usize,
     pub compaction_options: CompactionOptions,
+    /// Default TTL for keys.  If set, all keys written via `set()`, `put_cf()`,
+    /// etc. will automatically expire after this duration unless overridden via
+    /// `set_with_ttl()` / `set_cf_with_ttl()`.
+    pub default_ttl: Option<std::time::Duration>,
+    /// Encryption configuration for data at rest (SSTable blocks and WAL frames).
+    pub encryption: EncryptionConfig,
 }
 
 impl Default for EngineOptions {
@@ -79,6 +89,8 @@ impl Default for EngineOptions {
             max_write_buffer_number: 4,
             block_cache_size_mb: 64,
             compaction_options: CompactionOptions::default(),
+            default_ttl: None,
+            encryption: EncryptionConfig::default(),
         }
     }
 }
@@ -89,6 +101,24 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             strategy_type: config.compaction.strategy.clone().into(),
             compaction_threshold: config.compaction.min_compaction_threshold,
             max_tables_per_compaction: config.compaction.max_sstables,
+            max_concurrent_compactions: 2,
+        };
+
+        // Build encryption config from the config
+        let encryption = if config.storage.encryption_enabled {
+            config
+                .storage
+                .encryption_key_path
+                .as_deref()
+                .map(|path| EncryptionConfig::from_key_path(Some(path)))
+                .unwrap_or_else(|| {
+                    Err(crate::infra::error::LsmError::InvalidArgument(
+                        "Encryption enabled but no key path provided".to_string(),
+                    ))
+                })
+                .unwrap_or_default()
+        } else {
+            EncryptionConfig::default()
         };
 
         Self {
@@ -102,6 +132,8 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             max_write_buffer_number: 4,
             block_cache_size_mb: config.storage.block_cache_size_mb,
             compaction_options,
+            default_ttl: None,
+            encryption,
         }
     }
 }
@@ -122,6 +154,14 @@ pub struct SnapshotInfo {
     pub file_count: usize,
 }
 
+/// Manifest file written by create_snapshot() and read by restore_snapshot()
+/// and engine startup.  Maps each column family to its list of SSTable filenames.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotManifest {
+    /// Map from column family name → list of SSTable filenames (relative to snapshot dir)
+    pub column_families: HashMap<String, Vec<String>>,
+}
+
 /// All mutable state of the engine, protected behind a Mutex.
 pub(crate) struct EngineCore<C: Cache> {
     memtables: HashMap<String, Vec<MemTable>>,
@@ -133,6 +173,10 @@ pub(crate) struct EngineCore<C: Cache> {
     wals: HashMap<String, WriteAheadLog>,
     /// Database directory path, used to create new per-CF WALs lazily.
     dir_path: std::path::PathBuf,
+    /// Active range tombstones per column family.
+    range_tombstones: HashMap<String, Vec<crate::core::log_record::RangeTombstone>>,
+    /// Encryption config used when creating new WALs.
+    encryption: EncryptionConfig,
 }
 
 impl<C: Cache> EngineCore<C> {
@@ -162,12 +206,29 @@ impl<C: Cache> EngineCore<C> {
     }
     /// Get a mutable reference to the WAL for a specific column family.
     /// Creates a new WAL file if one doesn't exist yet.
-    pub(crate) fn wal_mut(&mut self, cf: &str) -> &mut WriteAheadLog {
+    pub(crate) fn wal_mut(&mut self, cf: &str) -> Result<&mut WriteAheadLog> {
         if !self.wals.contains_key(cf) {
-            let wal = WriteAheadLog::new(&self.dir_path, cf).expect("Failed to create WAL for CF");
+            let wal = WriteAheadLog::new_with_encryption(&self.dir_path, cf, &self.encryption)?;
             self.wals.insert(cf.to_string(), wal);
         }
-        self.wals.get_mut(cf).unwrap()
+        self.wals.get_mut(cf).ok_or_else(|| {
+            crate::infra::error::LsmError::InvalidArgument(format!(
+                "WAL not found for column family: {}",
+                cf
+            ))
+        })
+    }
+
+    pub(crate) fn range_tombstones(
+        &self,
+    ) -> &HashMap<String, Vec<crate::core::log_record::RangeTombstone>> {
+        &self.range_tombstones
+    }
+
+    pub(crate) fn range_tombstones_mut(
+        &mut self,
+    ) -> &mut HashMap<String, Vec<crate::core::log_record::RangeTombstone>> {
+        &mut self.range_tombstones
     }
 }
 
@@ -204,10 +265,14 @@ pub struct Engine<C: Cache> {
     options: EngineOptions,
     /// All mutable state behind a mutex for thread-safe access.
     core: Arc<Mutex<EngineCore<C>>>,
-    /// Background compaction running flag.
-    compaction_running: Arc<AtomicBool>,
-    /// Handle to the background compaction thread.
-    compaction_thread: Mutex<Option<JoinHandle<()>>>,
+    /// Semaphore that limits the number of concurrent compaction threads.
+    /// Acquire a permit before spawning a compaction thread; the permit is
+    /// released when the thread finishes.
+    compaction_semaphore: Arc<Semaphore>,
+    /// Handles to all running background compaction threads.
+    compaction_threads: Mutex<Vec<JoinHandle<()>>>,
+    /// Flag set during close() to prevent new compaction threads from spawning.
+    closing: Arc<AtomicBool>,
     /// Path to the manifest file (unused currently).
     _manifest: PathBuf,
     /// SSTable output directory (used during initialization).
@@ -217,6 +282,22 @@ pub struct Engine<C: Cache> {
     _lock_file: std::fs::File,
     /// Engine metrics (counters and latency accumulators).
     pub metrics: Arc<EngineMetrics>,
+
+    /// Optional replication client for shipping WAL records to replicas.
+    /// Only active when the replication role is Primary.
+    pub(crate) replication_client: Option<Arc<ReplicationClient>>,
+
+    /// Handle to the background replication shipping task (Primary only).
+    pub(crate) _replication_handle: Option<tokio::task::JoinHandle<()>>,
+
+    /// CDC state (config + publisher).
+    cdc: Mutex<CdcState>,
+}
+
+/// Holds the CDC state behind a single mutex for atomic access.
+struct CdcState {
+    config: CdcConfig,
+    publisher: Option<Box<dyn CdcPublisher>>,
 }
 
 pub type LsmEngineGeneric<C> = Engine<C>;
@@ -252,6 +333,59 @@ impl<C: Cache> Engine<C> {
     pub fn metrics(&self) -> Arc<EngineMetrics> {
         self.metrics.clone()
     }
+
+    /// Returns `true` if compaction is currently running (at least one permit
+    /// of the compaction semaphore is acquired).
+    pub fn is_compaction_running(&self) -> bool {
+        let max = self.options.compaction_options.max_concurrent_compactions;
+        self.compaction_semaphore.available_permits() < max
+    }
+
+    /// Configure CDC on this engine.
+    ///
+    /// If `config.enabled` is `true`, a collector or webhook publisher is created
+    /// according to `config.endpoint`.
+    pub fn set_cdc(&self, config: CdcConfig) {
+        let publisher = crate::infra::cdc::create_publisher(&config);
+        let mut cdc = self.cdc.lock();
+        cdc.config = config;
+        cdc.publisher = publisher;
+    }
+
+    /// Set a custom CDC publisher (e.g. for testing).
+    pub fn set_cdc_publisher(&self, publisher: Box<dyn CdcPublisher>) {
+        let mut cdc = self.cdc.lock();
+        cdc.config = CdcConfig {
+            enabled: true,
+            endpoint: None,
+        };
+        cdc.publisher = Some(publisher);
+    }
+
+    /// Publish a CDC event if a publisher is configured.
+    fn publish_cdc_event(&self, cf: &str, key: &[u8], value: Option<&[u8]>) {
+        let cdc = self.cdc.lock();
+        if let Some(ref publisher) = cdc.publisher {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let event = CdcEvent {
+                event_type: if value.is_some() {
+                    CdcEventType::Put
+                } else {
+                    CdcEventType::Delete
+                },
+                cf: cf.to_string(),
+                key: key.to_vec(),
+                value: value.map(|v| v.to_vec()),
+                timestamp,
+            };
+            if let Err(e) = publisher.publish(event) {
+                tracing::warn!(target: "apexstore::engine", "CDC publish failed: {:?}", e);
+            }
+        }
+    }
 }
 
 /// Compact a single column family, operating directly on `&mut EngineCore`.
@@ -277,33 +411,29 @@ fn compact_cf_core<C: Cache>(
         return Ok(None);
     }
 
-    // Phase 1: Plan — quickly pick which tables to compact (under lock).
-
-    // Clone table metadata and group indices so we can release the lock
-    // during I/O (Phase 2).  The tables vector contains only metadata
-    // (key ranges, file paths, levels); the actual I/O is done by
-    // Compaction::compact which creates new SstableBuilders.
-    let plan: Vec<(Vec<usize>, Vec<Table>)> = groups
-        .iter()
-        .map(|indices| {
-            let group_tables: Vec<Table> = indices.iter().map(|&i| tables[i].clone()).collect();
-            (indices.clone(), group_tables)
-        })
-        .collect();
-    // Drop core lock — Phase 2 (I/O) runs without it.
-    drop(tables);
-    // Note: we still hold &mut EngineCore from the caller (compact_cf),
-    // so we can't fully release the lock here. The actual release
-    // happens in compact_cf() which calls this function.
-    // This function is marked for future refactoring to three-phase.
+    // Collect active range tombstones for this CF to pass to compaction
+    let rt = core.range_tombstones().get(cf).cloned().unwrap_or_default();
 
     let mut all_metrics = CompactionMetrics::default();
-    for (indices, group_tables) in &plan {
-        let (new_tables, metrics) =
-            core.compaction_mut()
-                .compact(indices, group_tables, options)?;
-        core.version_set_mut()
+    for indices in &groups {
+        let (new_tables, metrics) = core
+            .compaction_mut()
+            .compact(indices, &tables, options, &rt)?;
+        let removed_paths = core
+            .version_set_mut()
             .atomic_replace(cf, indices, new_tables);
+        // Delete orphaned SSTable files from disk
+        for path in &removed_paths {
+            if path.exists() {
+                if let Err(e) = std::fs::remove_file(path) {
+                    tracing::warn!(
+                        "compact_cf_core: failed to remove orphaned SSTable {:?}: {:?}",
+                        path,
+                        e
+                    );
+                }
+            }
+        }
         all_metrics.bytes_read += metrics.bytes_read;
         all_metrics.bytes_written += metrics.bytes_written;
         all_metrics.files_merged += metrics.files_merged;
@@ -340,12 +470,17 @@ impl<C: Cache> Engine<C> {
             }
         })?;
 
-        // Create storage config from options
+        // Create storage config from options (with encryption derived from engine options)
+        let encryption_enabled = options.encryption.enabled;
+        let encryption_key_path = None; // Key is already loaded in options.encryption
         let storage_config = crate::infra::config::StorageConfig {
             block_size: options.block_size,
             block_cache_size_mb: options.block_cache_size_mb,
             sparse_index_interval: 16,
             bloom_false_positive_rate: 0.01,
+            encryption_enabled,
+            encryption_key_path,
+            prefix_compression_enabled: false,
         };
 
         // Create compaction with strategy from options
@@ -359,16 +494,35 @@ impl<C: Cache> Engine<C> {
             strategy_type,
             compaction_threshold: options.compaction_options.compaction_threshold,
             max_tables_per_compaction: options.compaction_options.max_tables_per_compaction,
+            max_concurrent_compactions: options.compaction_options.max_concurrent_compactions,
         };
 
+        // Create shared block cache for on-disk SSTable reads
+        let block_cache = GlobalBlockCache::new(options.block_cache_size_mb, options.block_size);
+
+        let version_set = VersionSet::new(
+            options.clone(),
+            cache,
+            storage_config.clone(),
+            Some(block_cache),
+        );
+
+        // Convert infra config to storage config for the compaction layer
+        let compaction_storage_config = crate::infra::config::StorageConfig {
+            block_size: storage_config.block_size,
+            block_cache_size_mb: storage_config.block_cache_size_mb,
+            sparse_index_interval: storage_config.sparse_index_interval,
+            bloom_false_positive_rate: storage_config.bloom_false_positive_rate,
+            encryption_enabled: storage_config.encryption_enabled,
+            encryption_key_path: storage_config.encryption_key_path.clone(),
+            prefix_compression_enabled: storage_config.prefix_compression_enabled,
+        };
         let compaction = Compaction::new(
             strategy_type,
             compaction_options,
-            storage_config,
+            compaction_storage_config,
             sst_dir.clone(),
         );
-
-        let version_set = VersionSet::new(options.clone(), cache);
 
         // ── Recover all per-CF WALs ──────────────────────────────────
         // Start with the default WAL, then discover any wal-{cf}.log files.
@@ -379,11 +533,14 @@ impl<C: Cache> Engine<C> {
             compaction,
             wals: HashMap::new(),
             dir_path: dir_path.to_path_buf(),
+            range_tombstones: HashMap::new(),
+            encryption: options.encryption.clone(),
         };
 
         // Create and recover the "default" CF WAL
         {
-            let default_wal = WriteAheadLog::new(dir_path, "default")?;
+            let default_wal =
+                WriteAheadLog::new_with_encryption(dir_path, "default", &options.encryption)?;
             let records = default_wal.recover()?;
             core.wals.insert("default".to_string(), default_wal);
             Self::replay_wal_records_core(&mut core, records)?;
@@ -400,7 +557,8 @@ impl<C: Cache> Engine<C> {
                     .and_then(|s| s.strip_suffix(".log"))
                 {
                     if cf != "default" && !core.wals.contains_key(cf) {
-                        match WriteAheadLog::new(dir_path, cf) {
+                        match WriteAheadLog::new_with_encryption(dir_path, cf, &options.encryption)
+                        {
                             Ok(wal) => {
                                 let records = wal.recover()?;
                                 core.wals.insert(cf.to_string(), wal);
@@ -415,15 +573,80 @@ impl<C: Cache> Engine<C> {
             }
         }
 
+        // ── Discover SSTables from disk (for snapshot restore recovery) ──
+        // Check for a disk.sst.manifest written by restore_snapshot().
+        Self::discover_sstables_from_disk(&mut core, dir_path, &sst_dir)?;
+
+        // Initialize replication client if configured as Primary
+        let (replication_client, replication_handle) = {
+            // Attempt to read replication config; default is Primary with no endpoints,
+            // which means replication is effectively disabled.
+            //
+            // The new_from_config caller can set up replication endpoints.  Since this
+            // constructor is generic, we check via a config file or env-var convention.
+            // For simplicity, if REPLICATION_ROLE env var is set to "primary" and
+            // REPLICA_ENDPOINTS is non-empty, we start the client.
+            let role = std::env::var("REPLICATION_ROLE")
+                .ok()
+                .and_then(|s| match s.to_lowercase().as_str() {
+                    "primary" => Some(ReplicationRole::Primary),
+                    "replica" => Some(ReplicationRole::Replica),
+                    _ => None,
+                })
+                .unwrap_or(ReplicationRole::Primary);
+
+            let replica_endpoints = std::env::var("REPLICA_ENDPOINTS")
+                .ok()
+                .map(|s| {
+                    s.split(',')
+                        .map(|ep| ep.trim().to_string())
+                        .filter(|ep| !ep.is_empty())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            let sync_interval_ms = std::env::var("REPLICATION_SYNC_INTERVAL_MS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(100);
+
+            if role == ReplicationRole::Primary && !replica_endpoints.is_empty() {
+                let repl_config = ReplicationConfig {
+                    role,
+                    replica_endpoints,
+                    sync_interval_ms,
+                };
+                tracing::info!(
+                    target: "apexstore::engine",
+                    "Starting replication client (Primary) with {} endpoints, interval={}ms",
+                    repl_config.replica_endpoints.len(),
+                    repl_config.sync_interval_ms,
+                );
+                let (client, handle) = ReplicationClient::start(repl_config);
+                (Some(Arc::new(client)), Some(handle))
+            } else {
+                (None, None)
+            }
+        };
+
         let engine = Self {
             options: options.clone(),
             core: Arc::new(Mutex::new(core)),
-            compaction_running: Arc::new(AtomicBool::new(false)),
-            compaction_thread: Mutex::new(None),
+            compaction_semaphore: Arc::new(Semaphore::new(
+                options.compaction_options.max_concurrent_compactions,
+            )),
+            compaction_threads: Mutex::new(Vec::new()),
+            closing: Arc::new(AtomicBool::new(false)),
             _manifest: PathBuf::new(),
             _sst_dir: sst_dir,
             _lock_file: lock_file,
             metrics: Arc::new(EngineMetrics::new()),
+            replication_client,
+            _replication_handle: replication_handle,
+            cdc: Mutex::new(CdcState {
+                config: CdcConfig::disabled(),
+                publisher: None,
+            }),
         };
 
         Ok(engine)
@@ -433,25 +656,72 @@ impl<C: Cache> Engine<C> {
     pub fn new_from_config(config: &crate::infra::config::LsmConfig, cache: C) -> Result<Self> {
         let options: EngineOptions = config.into();
         let dir_path = std::path::PathBuf::from(&config.core.dir_path);
-        Self::new_generic(options, cache, &dir_path)
+        let mut engine = Self::new_generic(options, cache, &dir_path)?;
+
+        // If LsmConfig has explicit replication settings, prefer them over env vars
+        // by re-initializing the replication client if needed.
+        if !config.replication.replica_endpoints.is_empty()
+            && config.replication.role == ReplicationRole::Primary
+            && engine.replication_client.is_none()
+        {
+            let repl_config = ReplicationConfig {
+                role: config.replication.role.clone(),
+                replica_endpoints: config.replication.replica_endpoints.clone(),
+                sync_interval_ms: config.replication.sync_interval_ms,
+            };
+            tracing::info!(
+                target: "apexstore::engine",
+                "Starting replication client from config (Primary) with {} endpoints",
+                repl_config.replica_endpoints.len(),
+            );
+            let (client, handle) = ReplicationClient::start(repl_config);
+            engine.replication_client = Some(Arc::new(client));
+            engine._replication_handle = Some(handle);
+        }
+
+        Ok(engine)
     }
 
     /// Replay WAL records to reconstruct memtable state (operates on EngineCore directly).
     fn replay_wal_records_core(core: &mut EngineCore<C>, records: Vec<LogRecord>) -> Result<()> {
         for record in records {
             let cf = record.column_family.as_deref().unwrap_or("default");
-            let mem = core.memtables_mut().entry(cf.to_string()).or_default();
-            if mem.is_empty() {
-                mem.push(MemTable::new_unlimited());
-            }
-            let last = mem.len() - 1;
-            if record.is_deleted {
+            if record.is_range_tombstone() {
+                // Range tombstone records are stored at the EngineCore level
+                // and also added to the current memtable's range tombstone list.
+                let range = crate::core::log_record::RangeTombstone {
+                    start_key: record.range_start.clone().unwrap_or_default(),
+                    end_key: record.range_end.clone().unwrap_or_default(),
+                    timestamp: record.timestamp,
+                };
+                core.range_tombstones_mut()
+                    .entry(cf.to_string())
+                    .or_default()
+                    .push(range.clone());
+                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
+                if mem.is_empty() {
+                    mem.push(MemTable::new_unlimited());
+                }
+                let last = mem.len() - 1;
+                mem[last].add_range_tombstone(range);
+            } else if record.is_deleted {
+                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
+                if mem.is_empty() {
+                    mem.push(MemTable::new_unlimited());
+                }
+                let last = mem.len() - 1;
                 mem[last].delete(record.key.clone());
+                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() += record.key.len();
             } else {
+                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
+                if mem.is_empty() {
+                    mem.push(MemTable::new_unlimited());
+                }
+                let last = mem.len() - 1;
                 mem[last].put(record.key.clone(), record.value.clone());
+                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
+                    record.key.len() + record.value.len();
             }
-            *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
-                record.key.len() + record.value.len();
         }
         Ok(())
     }
@@ -463,25 +733,55 @@ impl<C: Cache> Engine<C> {
 // maybe_compact() which may spawn a background compaction thread.
 
 impl<C: Cache> Engine<C> {
-    /// Put a key-value pair into the specified column family.
-    pub fn put_cf(&self, cf: &str, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+    /// Put a key-value pair into the specified column family with an optional TTL.
+    ///
+    /// If `ttl` is `Some(duration)`, the key will expire after that duration.
+    /// If `ttl` is `None`, no expiry is set (unless `default_ttl` is configured).
+    fn put_cf_with_ttl_inner(
+        &self,
+        cf: &str,
+        key: Vec<u8>,
+        value: Vec<u8>,
+        ttl: Option<std::time::Duration>,
+    ) -> Result<()> {
         let start = std::time::Instant::now();
         let key_str = String::from_utf8_lossy(&key).into_owned();
         let value_size = value.len();
         let needs_compact;
+        let replication_record: Option<LogRecord>;
         {
             let mut core = self.core.lock();
             // Write to WAL first (before modifying memtable) for crash safety
-            let mut record = LogRecord::new(key.clone(), value.clone());
-            record.column_family = Some(cf.to_string());
-            core.wal_mut(cf).write_record(&record)?;
+            let mut record = if let Some(ttl) = ttl {
+                let mut r = LogRecord::new_with_ttl(key.clone(), value.clone(), ttl);
+                r.column_family = Some(cf.to_string());
+                r
+            } else {
+                let mut r = LogRecord::new(key.clone(), value.clone());
+                r.column_family = Some(cf.to_string());
+                r
+            };
+            // Apply default_ttl if no explicit TTL was given
+            if record.expires_at.is_none() {
+                if let Some(default_ttl) = self.options.default_ttl {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    record.expires_at = Some(now.saturating_add(default_ttl.as_nanos()));
+                }
+            }
+            core.wal_mut(cf)?.write_record(&record)?;
+
+            // Save a clone for replication before moving record into memtable
+            replication_record = Some(record.clone());
 
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
                 mem.push(MemTable::new_unlimited());
             }
             let last = mem.len() - 1;
-            mem[last].put(key.clone(), value.clone());
+            mem[last].insert(record);
             *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
                 key.len() + value.len();
             let write_buffer_limit =
@@ -493,6 +793,17 @@ impl<C: Cache> Engine<C> {
                     false
                 };
         } // core lock is dropped here
+
+        // Ship the record to replicas (Primary only)
+        if let Some(client) = &self.replication_client {
+            if let Some(record) = replication_record {
+                client.ship_records(vec![record]);
+            }
+        }
+
+        // Publish CDC event (fire-and-forget, runs outside core lock)
+        self.publish_cdc_event(cf, &key, Some(&value));
+
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_set(elapsed_us);
         tracing::debug!(
@@ -516,6 +827,11 @@ impl<C: Cache> Engine<C> {
         Ok(())
     }
 
+    /// Put a key-value pair into the specified column family.
+    pub fn put_cf(&self, cf: &str, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+        self.put_cf_with_ttl_inner(cf, key, value, None)
+    }
+
     pub fn set<K, V>(&self, key: K, value: V) -> Result<()>
     where
         K: Into<Vec<u8>>,
@@ -533,6 +849,53 @@ impl<C: Cache> Engine<C> {
         self.put_cf("default", key_vec, value_vec)
     }
 
+    /// Store a key-value pair with a Time-To-Live (TTL).
+    ///
+    /// After `ttl` elapses, the key will be treated as non-existent
+    /// by `get()` and `scan()`.
+    pub fn set_with_ttl<K, V>(&self, key: K, value: V, ttl: std::time::Duration) -> Result<()>
+    where
+        K: Into<Vec<u8>>,
+        V: Into<Vec<u8>>,
+    {
+        let key_vec = key.into();
+        let value_vec = value.into();
+        tracing::info!(
+            target: "apexstore::engine",
+            operation = "set_with_ttl",
+            cf = "default",
+            key = %String::from_utf8_lossy(&key_vec),
+            value_size = value_vec.len(),
+            ttl_ms = ttl.as_millis(),
+        );
+        self.put_cf_with_ttl_inner("default", key_vec, value_vec, Some(ttl))
+    }
+
+    /// Store a key-value pair with a Time-To-Live (TTL) in the given column family.
+    pub fn set_cf_with_ttl<K, V>(
+        &self,
+        cf: &str,
+        key: K,
+        value: V,
+        ttl: std::time::Duration,
+    ) -> Result<()>
+    where
+        K: Into<Vec<u8>>,
+        V: Into<Vec<u8>>,
+    {
+        let key_vec = key.into();
+        let value_vec = value.into();
+        tracing::info!(
+            target: "apexstore::engine",
+            operation = "set_cf_with_ttl",
+            cf = cf,
+            key = %String::from_utf8_lossy(&key_vec),
+            value_size = value_vec.len(),
+            ttl_ms = ttl.as_millis(),
+        );
+        self.put_cf_with_ttl_inner(cf, key_vec, value_vec, Some(ttl))
+    }
+
     pub fn delete_cf<K>(&self, cf: &str, key: K) -> Result<()>
     where
         K: Into<Vec<u8>>,
@@ -541,13 +904,17 @@ impl<C: Cache> Engine<C> {
         let start = std::time::Instant::now();
         let key_str = String::from_utf8_lossy(&key).into_owned();
         let needs_compact;
+        let replication_record: Option<LogRecord>;
         {
             let mut core = self.core.lock();
 
             // Write tombstone to WAL first (before modifying memtable) for crash safety
             let mut record = LogRecord::tombstone(key.clone());
             record.column_family = Some(cf.to_string());
-            core.wal_mut(cf).write_record(&record)?;
+            core.wal_mut(cf)?.write_record(&record)?;
+
+            // Save clone for replication before consuming record
+            replication_record = Some(record.clone());
 
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
@@ -565,6 +932,17 @@ impl<C: Cache> Engine<C> {
                     false
                 };
         }
+
+        // Ship tombstone to replicas (Primary only)
+        if let Some(client) = &self.replication_client {
+            if let Some(record) = replication_record {
+                client.ship_records(vec![record]);
+            }
+        }
+
+        // Publish CDC event (fire-and-forget, runs outside core lock)
+        self.publish_cdc_event(cf, &key, None);
+
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_delete(elapsed_us);
         tracing::info!(
@@ -595,6 +973,27 @@ impl<C: Cache> Engine<C> {
         self.delete_cf("default", key_vec)
     }
 
+    /// Check if a key falls within any active range tombstone for the given column family.
+    fn is_in_range_tombstone(core: &EngineCore<C>, cf: &str, key: &[u8]) -> bool {
+        if let Some(tombstones) = core.range_tombstones().get(cf) {
+            if tombstones
+                .iter()
+                .any(|rt| rt.start_key.as_slice() <= key && key < rt.end_key.as_slice())
+            {
+                return true;
+            }
+        }
+        // Also check memtable-level range tombstones
+        if let Some(memtables) = core.memtables().get(cf) {
+            for mem in memtables.iter() {
+                if mem.contains_range_tombstone(key) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub fn get_cf<K>(&self, cf: &str, key: K) -> Result<Option<Vec<u8>>>
     where
         K: AsRef<[u8]>,
@@ -603,11 +1002,18 @@ impl<C: Cache> Engine<C> {
         let start = std::time::Instant::now();
         let key_str = String::from_utf8_lossy(key).into_owned();
         let core = self.core.lock();
+
+        // First check memtables (newest first) — point writes take precedence
+        // over range tombstones.
         if let Some(memtables) = core.memtables().get(cf) {
             for mem in memtables.iter().rev() {
                 if let Some(v) = mem.data.get(key) {
                     // Skip tombstones (deleted records)
                     if v.is_deleted {
+                        return Ok(None);
+                    }
+                    // Skip expired keys (TTL-based auto-expiry)
+                    if v.is_expired() {
                         return Ok(None);
                     }
                     let elapsed_us = start.elapsed().as_micros() as u64;
@@ -627,6 +1033,24 @@ impl<C: Cache> Engine<C> {
                 }
             }
         }
+
+        // After memtable lookup, check if key falls within a range tombstone.
+        // This is done after memtable check so point writes take precedence.
+        if Self::is_in_range_tombstone(&core, cf, key) {
+            let elapsed_us = start.elapsed().as_micros() as u64;
+            self.metrics.record_get(elapsed_us);
+            tracing::debug!(
+                target: "apexstore::engine",
+                operation = "get_cf",
+                cf = cf,
+                key = %key_str,
+                found = false,
+                reason = "range_tombstone",
+                duration_us = elapsed_us,
+            );
+            return Ok(None);
+        }
+
         let result = core.version_set().get(cf, key);
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_get(elapsed_us);
@@ -718,8 +1142,41 @@ impl<C: Cache> Engine<C> {
                     break;
                 }
             }
+            // Skip keys that fall within active range tombstones
+            let key = merge_iter.key();
+            if Self::is_in_range_tombstone(&core, cf, key.as_slice()) {
+                merge_iter.next();
+                continue;
+            }
             results.push((merge_iter.key(), merge_iter.value().to_vec()));
             merge_iter.next();
+        }
+
+        // Filter out expired entries that are still in a memtable.
+        // Keys from SSTables cannot be checked for TTL because the
+        // LogRecord metadata (including expires_at) is lost during
+        // flush (see flush_memtable_impl / Table::build).
+        //
+        // NOTE: flush_memtable_impl already skips expired keys, so
+        // the only expired keys that can appear are those written
+        // recently (still in memtable, not yet flushed).  We look
+        // them up here and remove them from results.
+        if let Some(memtables) = core.memtables().get(cf) {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            results.retain(|(k, _)| {
+                // Check memtables in reverse (newest first)
+                for mem in memtables.iter().rev() {
+                    if let Some(record) = mem.data.get(k) {
+                        // Found in a memtable — keep only if not expired
+                        return !record.is_expired_at(now);
+                    }
+                }
+                // Not found in any memtable (from SSTable) — keep as-is
+                true
+            });
         }
 
         let elapsed_us = start.elapsed().as_micros() as u64;
@@ -908,10 +1365,67 @@ impl<C: Cache> Engine<C> {
         if let Some(memtables) = core.memtables_mut().get_mut(cf) {
             if let Some(mem) = memtables.pop() {
                 let records = mem.data.len();
-                // Convert LogRecord values to raw Vec<u8> for Table::build
-                let raw_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> =
-                    mem.data.into_iter().map(|(k, r)| (k, r.value)).collect();
-                let table = Table::build(raw_data, &self.options);
+                // NOTE: TTL / expires_at metadata is stripped when converting
+                // LogRecord to raw Vec<u8> for Table::build.  Expired keys
+                // are filtered out here so they never reach the SSTable.
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos();
+
+                // ── Persist SSTable to disk for crash recovery ──────────────
+                // The SSTable file survives engine restarts, so data is not
+                // lost even though the WAL is cleared after this flush.
+                let sst_dir = &self._sst_dir;
+                std::fs::create_dir_all(sst_dir)?;
+                let timestamp = now;
+                let output_path = sst_dir.join(format!("flush_{}.sst", timestamp));
+
+                let storage_config = crate::infra::config::StorageConfig {
+                    block_size: self.options.block_size,
+                    block_cache_size_mb: self.options.block_cache_size_mb,
+                    sparse_index_interval: 16,
+                    bloom_false_positive_rate: 0.01,
+                    encryption_enabled: self.options.encryption.enabled,
+                    encryption_key_path: None,
+                    prefix_compression_enabled: false,
+                };
+
+                // Write SSTable using SstableBuilder (preserves LogRecord
+                // metadata including is_deleted for correct tombstone vs
+                // empty-value distinction when read back via SstableReader).
+                {
+                    let mut builder = SstableBuilder::new_with_encryption(
+                        output_path.clone(),
+                        storage_config,
+                        timestamp,
+                        &self.options.encryption,
+                    )?;
+                    for (key, record) in mem.data.iter() {
+                        if record.is_expired_at(now) {
+                            continue;
+                        }
+                        builder.add(key, record)?;
+                    }
+                    builder.finish()?;
+                }
+
+                // ── Build in-memory Table (for fast reads) ───────────────────
+                // Keep the raw BTreeMap for the in-memory fast path, but also
+                // set the path so that VersionSet::get() can fall through to
+                // the SSTable reader for correct tombstone detection.
+                let raw_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> = mem
+                    .data
+                    .into_iter()
+                    .filter(|(_, r)| !r.is_expired_at(now))
+                    .map(|(k, r)| (k, r.value))
+                    .collect();
+
+                let mut table =
+                    Table::from_sstable_path(&output_path, Some(&self.options.encryption))?;
+                table.data = raw_data;
+                table.level = 0; // Flushed tables are level 0
+
                 core.version_set_mut().add_table(cf, table);
                 let bytes = core.memtable_bytes_mut().get_mut(cf).ok_or_else(|| {
                     crate::LsmError::InvalidArgument(format!(
@@ -924,7 +1438,7 @@ impl<C: Cache> Engine<C> {
                 // ✅ Per-CF WAL: clear the flushed CF's WAL directly
                 // instead of calling retain() on a global WAL (which was O(N)
                 // per flush).  Each CF has its own WAL file, so clear() is O(1).
-                core.wal_mut(cf).clear()?;
+                core.wal_mut(cf)?.clear()?;
 
                 tracing::info!(
                     target: "apexstore::engine",
@@ -985,12 +1499,18 @@ impl<C: Cache> Engine<C> {
     pub fn compact(&self) -> Result<Vec<(String, CompactionMetrics)>> {
         let start = std::time::Instant::now();
         let mut results = Vec::new();
-        let core = self.core.lock();
+        // Hold the lock continuously to prevent background compaction threads
+        // from applying stale plans (with obsolete table indices) between
+        // individual CF compactions.  All CFs are compacted under a single
+        // lock acquisition to avoid the race where maybe_compact() builds a
+        // plan with table indices that become invalid after compact_cf_core()
+        // replaces tables.  The three-phase background path in maybe_compact()
+        // is inherently racy because it builds a plan snapshot, drops the lock
+        // for I/O, then re-acquires it to apply potentially-stale indices.
+        let mut core = self.core.lock();
         let column_families = core.version_set().column_families();
-        drop(core); // Release lock before calling compact_cf which will re-acquire
-                    // Actually, we need the lock for compact_cf, so just call it per CF
         for cf in column_families {
-            if let Some(metrics) = self.compact_cf(&cf)? {
+            if let Some(metrics) = compact_cf_core(&mut core, &self.options, &cf)? {
                 results.push((cf, metrics));
             }
         }
@@ -1006,84 +1526,107 @@ impl<C: Cache> Engine<C> {
         Ok(results)
     }
 
-    /// Check if compaction should be triggered and run it in background
+    /// Check if compaction should be triggered and run one or more CF
+    /// compactions in the background — each CF gets its own thread, up to
+    /// `max_concurrent_compactions` at once (controlled by a semaphore).
     pub fn maybe_compact(&self) {
-        // Quick check to avoid unnecessary lock contention
-        if self.compaction_running.load(Ordering::SeqCst) {
+        // Fast-path: skip if the engine is closing
+        if self.closing.load(Ordering::SeqCst) {
             return;
         }
 
-        // Acquire the compaction_thread lock FIRST before spawning.
-        // This prevents a TOCTOU race with close(): when close() holds
-        // this lock, no new thread can be spawned and join-handle-stored
-        // after close() has already taken the handle.
-        let mut thread_guard = self.compaction_thread.lock();
+        // ── Phase 1: Build compaction plans while holding the core lock ──
+        // Snapshot which CFs need compaction and what tables/groups to compact.
+        // Then drop the lock so writes can proceed during I/O.
 
-        // Now we hold the lock. Check running flag again — close() may
-        // have acquired this lock ahead of us and set running = false.
-        if self.compaction_running.load(Ordering::SeqCst) {
+        #[derive(Clone)]
+        struct CompactionPlan {
+            cf: String,
+            tables: Vec<Table>,
+            groups: Vec<Vec<usize>>,
+            compaction: Compaction,
+            options: EngineOptions,
+            range_tombstones: Vec<RangeTombstone>,
+            /// VersionSet generation when this plan was built.
+            /// Used to detect stale plans after lock re-acquisition.
+            generation: u64,
+        }
+
+        let plans: Vec<CompactionPlan> = {
+            let core = self.core.lock();
+            let master_options = self.options.clone();
+
+            core.version_set()
+                .column_families()
+                .iter()
+                .filter_map(|cf| {
+                    let tables = core.version_set().get_tables(cf);
+                    if tables.len() < core.compaction().options().compaction_threshold {
+                        return None;
+                    }
+                    let groups = core.compaction().pick_compaction(&tables, &master_options);
+                    if groups.is_empty() {
+                        return None;
+                    }
+                    let generation = core.version_set().compaction_generation();
+                    Some(CompactionPlan {
+                        cf: cf.clone(),
+                        tables,
+                        groups,
+                        compaction: core.compaction().clone(),
+                        options: master_options.clone(),
+                        range_tombstones: core
+                            .range_tombstones()
+                            .get(cf)
+                            .cloned()
+                            .unwrap_or_default(),
+                        generation,
+                    })
+                })
+                .collect()
+        }; // MutexGuard dropped here → core lock is released
+
+        if plans.is_empty() {
             return;
         }
 
-        // Claim the compaction slot inside the lock, so close() is
-        // guaranteed to see this flag change before we store the handle.
-        self.compaction_running.store(true, Ordering::Release);
+        let max_concurrent = self.options.compaction_options.max_concurrent_compactions;
 
-        // Clone what the thread needs before spawning
-        let core = self.core.clone();
-        let running = self.compaction_running.clone();
-        let options = self.options.clone();
+        // Spawn at most `max_concurrent` threads, one per CF.  Each thread
+        // acquires a semaphore permit; when the limit is reached ({c} threads
+        // already running) the loop stops and the remaining CFs will be picked
+        // up on the next call to maybe_compact().
+        for plan in plans.iter().take(max_concurrent) {
+            // If the engine is closing, stop spawning new threads
+            if self.closing.load(Ordering::SeqCst) {
+                break;
+            }
 
-        let handle = std::thread::spawn(move || {
-            // Wrap compaction logic in catch_unwind to prevent panics from propagating
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                // ── Phase 1: Build compaction plans while holding the lock ──
-                // Snapshot which CFs need compaction and what tables/groups to compact.
-                // Then drop the lock so writes can proceed during I/O.
-                #[derive(Clone)]
-                struct CompactionPlan {
-                    cf: String,
-                    tables: Vec<Table>,
-                    groups: Vec<Vec<usize>>,
-                    compaction: Compaction,
-                    options: EngineOptions,
-                }
+            // Non-blocking acquire — if at capacity, leave remaining CFs
+            // for a future maybe_compact() call.
+            let permit = match self.compaction_semaphore.clone().try_acquire_owned() {
+                Ok(p) => p,
+                Err(_) => break,
+            };
 
-                let plans: Vec<CompactionPlan> = {
-                    let core = core.lock();
+            let core = self.core.clone();
+            let plan = plan.clone();
 
-                    core.version_set()
-                        .column_families()
-                        .iter()
-                        .filter_map(|cf| {
-                            let tables = core.version_set().get_tables(cf);
-                            if tables.len() < core.compaction().options().compaction_threshold {
-                                return None;
-                            }
-                            let groups = core.compaction().pick_compaction(&tables, &options);
-                            if groups.is_empty() {
-                                return None;
-                            }
-                            Some(CompactionPlan {
-                                cf: cf.clone(),
-                                tables,
-                                groups,
-                                compaction: core.compaction().clone(),
-                                options: options.clone(),
-                            })
-                        })
-                        .collect()
-                }; // MutexGuard dropped here → core lock is released
+            let handle = std::thread::spawn(move || {
+                // The permit is held for the entire thread lifetime and
+                // released automatically when the thread exits.
+                let _permit = permit;
 
-                // ── Phase 2: Execute compaction I/O without holding the lock ──
-                // This is the slow part: read SSTables, merge, write new SSTable.
-                let mut results: Vec<(String, Vec<usize>, Vec<Table>)> = Vec::new();
-                for plan in &plans {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // ── Phase 2: Execute compaction I/O without holding the lock ──
+                    let mut results: Vec<(String, Vec<usize>, Vec<Table>)> = Vec::new();
                     for group_indices in &plan.groups {
-                        match plan
-                            .compaction
-                            .compact(group_indices, &plan.tables, &plan.options)
-                        {
+                        match plan.compaction.compact(
+                            group_indices,
+                            &plan.tables,
+                            &plan.options,
+                            &plan.range_tombstones,
+                        ) {
                             Ok((new_tables, _metrics)) => {
                                 results.push((plan.cf.clone(), group_indices.clone(), new_tables));
                             }
@@ -1096,30 +1639,66 @@ impl<C: Cache> Engine<C> {
                             }
                         }
                     }
-                }
 
-                // ── Phase 3: Re-acquire lock and apply results ──
-                let mut core = core.lock();
-                for (cf, group_indices, new_tables) in results {
-                    core.version_set_mut()
-                        .atomic_replace(&cf, &group_indices, new_tables);
-                }
-            }));
+                    // ── Phase 3: Re-acquire lock and apply results ──
+                    let mut core = core.lock();
+                    // Stale-plan detection: if the VersionSet's generation
+                    // has advanced since we built this plan, the captured
+                    // table indices are stale (another compaction already
+                    // modified the table list).  Discard this plan's results
+                    // to avoid removing tables that no longer match the
+                    // expected indices.
+                    if plan.generation != core.version_set().compaction_generation() {
+                        tracing::debug!(
+                            "Discarding stale compaction result for CF {} \
+                             (generation {} != current {})",
+                            plan.cf,
+                            plan.generation,
+                            core.version_set().compaction_generation(),
+                        );
+                    } else {
+                        for (cf, group_indices, new_tables) in results {
+                            let removed_paths = core.version_set_mut().atomic_replace(
+                                &cf,
+                                &group_indices,
+                                new_tables,
+                            );
+                            // Delete orphaned SSTable files from disk
+                            for path in &removed_paths {
+                                if path.exists() {
+                                    if let Err(e) = std::fs::remove_file(path) {
+                                        tracing::warn!(
+                                            "background compaction: failed to remove orphaned \
+                                             SSTable {:?}: {:?}",
+                                            path,
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }));
 
-            if let Err(panic_info) = result {
-                tracing::error!("Compaction thread panicked: {:?}", panic_info);
+                if let Err(panic_info) = result {
+                    tracing::error!("Compaction thread panicked: {:?}", panic_info);
+                }
+            });
+
+            // Store the handle while holding the threads lock.
+            // This guarantees that any concurrent close() either:
+            //   a) blocks on the lock and finds this handle after we release it, or
+            //   b) has already taken all handles; but then close() cannot have
+            //      spawned new threads because it can't acquire this lock while we hold it.
+            let mut threads_guard = self.compaction_threads.lock();
+            if self.closing.load(Ordering::SeqCst) {
+                // close() may have set the flag while we were spawning;
+                // drop the handle and let the thread run detached.
+                break;
             }
-
-            running.store(false, Ordering::Release);
-        });
-
-        // Store the join handle while we still hold the lock.
-        // This guarantees that any concurrent close() either:
-        //   a) blocks on the lock and finds this handle after we release it, or
-        //   b) has already taken the handle (closing an earlier thread),
-        //      but then close() cannot spawn new threads because it can't
-        //      acquire this lock while we hold it.
-        *thread_guard = Some(handle);
+            threads_guard.push(handle);
+            drop(threads_guard);
+        }
     }
 
     /// Close the engine gracefully.
@@ -1135,16 +1714,21 @@ impl<C: Cache> Engine<C> {
     /// only durable record of those writes, causing data loss on restart.
     /// Instead, `close()` focuses on durability of the WAL itself.
     pub fn close(&self) {
-        // 1. Lock compaction_thread first, then signal stop.
-        //    This ordering prevents a TOCTOU race with maybe_compact():
-        //    while we hold the lock, no new compaction thread can be
-        //    spawned that would store its handle after we've taken it.
-        let mut handle_opt = self.compaction_thread.lock();
-        self.compaction_running.store(false, Ordering::Release);
+        // 1. Set the closing flag so no new compaction threads are spawned.
+        //    Lock compaction_threads first to synchronise with maybe_compact()
+        //    which also takes this lock before pushing a handle.
+        let mut threads_guard = self.compaction_threads.lock();
+        self.closing.store(true, Ordering::Release);
 
-        // 2. Wait for the compaction thread to finish (releases its core
-        //    lock, so we can safely acquire it in the sync step below).
-        if let Some(handle) = handle_opt.take() {
+        // 2. Take all handles while still holding the lock.
+        //    This guarantees that any concurrent maybe_compact() either:
+        //      a) sees closing=true and returns before spawning, or
+        //      b) has already stored its handle and we find it here.
+        let handles: Vec<JoinHandle<()>> = std::mem::take(&mut *threads_guard);
+        drop(threads_guard); // allow maybe_compact to proceed (but it sees closing=true)
+
+        // 3. Wait for all compaction threads to finish.
+        for handle in handles {
             match handle.join() {
                 Ok(()) => {}
                 Err(e) => {
@@ -1152,9 +1736,14 @@ impl<C: Cache> Engine<C> {
                 }
             }
         }
-        drop(handle_opt);
 
-        // 3. Sync all per-CF WALs so all buffered data is durably on disk.
+        // 4. Abort the replication shipping task (if running).
+        if let Some(handle) = self._replication_handle.as_ref() {
+            handle.abort();
+            tracing::info!("Replication background task aborted on shutdown");
+        }
+
+        // 5. Sync all per-CF WALs so all buffered data is durably on disk.
         //    The WALs are the sole persistence mechanism across restarts.
         {
             let core = self.core.lock();
@@ -1280,6 +1869,7 @@ impl<C: Cache> Engine<C> {
     {
         let start = std::time::Instant::now();
         let needs_compact;
+        let batch_records: Vec<LogRecord>;
         {
             let mut core = self.core.lock();
 
@@ -1292,7 +1882,8 @@ impl<C: Cache> Engine<C> {
                     record
                 })
                 .collect();
-            core.wal_mut(cf).write_batch(&records)?;
+            batch_records = records.clone();
+            core.wal_mut(cf)?.write_batch(&records)?;
 
             // Apply to memtable
             for (key, value) in items {
@@ -1314,6 +1905,19 @@ impl<C: Cache> Engine<C> {
                     false
                 };
         }
+
+        // Ship batch to replicas (Primary only)
+        if let Some(client) = &self.replication_client {
+            if !batch_records.is_empty() {
+                client.ship_records(batch_records);
+            }
+        }
+
+        // Publish CDC events for each item in the batch
+        for (key, value) in items {
+            self.publish_cdc_event(cf, key.as_ref(), Some(value.as_ref()));
+        }
+
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_batch_sets(items.len() as u64);
         self.metrics.record_set(elapsed_us);
@@ -1352,6 +1956,7 @@ impl<C: Cache> Engine<C> {
     {
         let start = std::time::Instant::now();
         let needs_compact;
+        let batch_records: Vec<LogRecord>;
         {
             let mut core = self.core.lock();
 
@@ -1364,7 +1969,8 @@ impl<C: Cache> Engine<C> {
                     record
                 })
                 .collect();
-            core.wal_mut(cf).write_batch(&records)?;
+            batch_records = records.clone();
+            core.wal_mut(cf)?.write_batch(&records)?;
 
             // Apply to memtable
             for key in keys {
@@ -1385,6 +1991,19 @@ impl<C: Cache> Engine<C> {
                     false
                 };
         }
+
+        // Ship tombstones to replicas (Primary only)
+        if let Some(client) = &self.replication_client {
+            if !batch_records.is_empty() {
+                client.ship_records(batch_records);
+            }
+        }
+
+        // Publish CDC events for each deleted key
+        for key in keys {
+            self.publish_cdc_event(cf, key.as_ref(), None);
+        }
+
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_batch_deletes(keys.len() as u64);
         self.metrics.record_delete(elapsed_us);
@@ -1402,6 +2021,108 @@ impl<C: Cache> Engine<C> {
         Ok(())
     }
 
+    // ── Transaction API ──
+
+    /// Begin a new transaction with buffered writes and snapshot isolation.
+    ///
+    /// Writes performed via the returned [`Transaction`](transaction::Transaction)
+    /// are buffered in memory until [`commit`](transaction::Transaction::commit)
+    /// is called, at which point they are applied atomically to the WAL and
+    /// memtable.  Calling [`rollback`](transaction::Transaction::rollback)
+    /// discards all buffered writes.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use apexstore::LsmConfig;
+    /// # use apexstore::core::engine::Engine;
+    /// # use apexstore::storage::cache::GlobalBlockCache;
+    /// # let dir = tempfile::tempdir().unwrap();
+    /// # let mut config = LsmConfig::default();
+    /// # config.core.dir_path = dir.path().to_path_buf();
+    /// # let engine = Engine::new_from_config(&config, GlobalBlockCache::new(100, 4096)).unwrap();
+    /// let mut txn = engine.begin_transaction();
+    /// txn.put_cf("default", b"k1", b"v1").unwrap();
+    /// txn.put_cf("accounts", b"alice", b"100").unwrap();
+    /// txn.commit().unwrap();
+    /// ```
+    pub fn begin_transaction(&self) -> transaction::Transaction<C> {
+        transaction::Transaction::new(
+            self.core.clone(),
+            self.options.clone(),
+            self.metrics.clone(),
+        )
+    }
+
+    // ── Range Delete API ──
+
+    /// Delete all keys in the range [start, end) from the specified column family.
+    ///
+    /// A range tombstone record is written to the WAL and the active range tombstone
+    /// list in the memtable.  All subsequent reads and scans will filter out keys
+    /// that fall within the range.
+    pub fn delete_range_cf(&self, cf: &str, start: &[u8], end: &[u8]) -> Result<()> {
+        let start_time = std::time::Instant::now();
+        let replication_record: Option<LogRecord>;
+        {
+            let mut core = self.core.lock();
+
+            let range = crate::core::log_record::RangeTombstone {
+                start_key: start.to_vec(),
+                end_key: end.to_vec(),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos(),
+            };
+
+            // Write range tombstone to WAL
+            let mut record = LogRecord::range_tombstone(start.to_vec(), end.to_vec());
+            record.column_family = Some(cf.to_string());
+            core.wal_mut(cf)?.write_record(&record)?;
+
+            // Save clone for replication
+            replication_record = Some(record.clone());
+
+            // Add to EngineCore-level range tombstones (survives flushes)
+            core.range_tombstones_mut()
+                .entry(cf.to_string())
+                .or_default()
+                .push(range.clone());
+
+            // Add to current memtable
+            let mem = core.memtables_mut().entry(cf.to_string()).or_default();
+            if mem.is_empty() {
+                mem.push(MemTable::new_unlimited());
+            }
+            let last = mem.len() - 1;
+            mem[last].add_range_tombstone(range);
+        }
+
+        // Ship range tombstone to replicas (Primary only)
+        if let Some(client) = &self.replication_client {
+            if let Some(record) = replication_record {
+                client.ship_records(vec![record]);
+            }
+        }
+
+        let elapsed = start_time.elapsed();
+        tracing::info!(
+            target: "apexstore::engine",
+            operation = "delete_range_cf",
+            cf = cf,
+            range_start = %String::from_utf8_lossy(start),
+            range_end = %String::from_utf8_lossy(end),
+            duration_us = elapsed.as_micros() as u64,
+        );
+        Ok(())
+    }
+
+    /// Delete all keys in the range [start, end) from the default column family.
+    pub fn delete_range(&self, start: &[u8], end: &[u8]) -> Result<()> {
+        self.delete_range_cf("default", start, end)
+    }
+
     // ── Snapshot / Backup API ──
 
     /// Write an in-memory Table's data to an SSTable file at the given path.
@@ -1410,14 +2131,22 @@ impl<C: Cache> Engine<C> {
         path: &Path,
         options: &EngineOptions,
     ) -> Result<PathBuf> {
-        let storage_config = StorageConfig {
+        let storage_config = crate::infra::config::StorageConfig {
             block_size: options.block_size,
             block_cache_size_mb: options.block_cache_size_mb,
             sparse_index_interval: 16,
             bloom_false_positive_rate: 0.01,
+            encryption_enabled: options.encryption.enabled,
+            encryption_key_path: None,
+            prefix_compression_enabled: false,
         };
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let mut builder = SstableBuilder::new(path.to_path_buf(), storage_config, timestamp)?;
+        let mut builder = SstableBuilder::new_with_encryption(
+            path.to_path_buf(),
+            storage_config,
+            timestamp,
+            &options.encryption,
+        )?;
         for (key, value) in &table.data {
             let record = LogRecord::new(key.clone(), value.clone());
             builder.add(key, &record)?;
@@ -1468,25 +2197,57 @@ impl<C: Cache> Engine<C> {
         // Lock core and copy / persist data
         let core = self.core.lock();
 
+        // Build manifest mapping CF → SSTable filenames
+        let mut manifest = SnapshotManifest {
+            column_families: HashMap::new(),
+        };
+
         // Copy or persist each table
         for cf in core.version_set().column_families() {
             let tables = core.version_set().get_tables(&cf);
+            let mut cf_filenames = Vec::new();
             for (i, table) in tables.iter().enumerate() {
-                if let Some(ref path) = table.path {
-                    let fname = path
-                        .file_name()
+                let fname = if let Some(ref path) = table.path {
+                    path.file_name()
                         .map(|n| n.to_os_string())
                         .unwrap_or_else(|| {
                             std::ffi::OsString::from(format!("cf_{}_table_{}.sst", cf, i))
-                        });
-                    let dest = backup_dir.join(fname);
+                        })
+                } else {
+                    std::ffi::OsString::from(format!("{}_{}.sst", cf, i))
+                };
+                let fname_string = fname.to_string_lossy().to_string();
+                let dest = backup_dir.join(&fname_string);
+                if let Some(ref path) = table.path {
                     std::fs::copy(path, &dest)?;
                 } else {
-                    let sst_path = backup_dir.join(format!("{}_{}.sst", cf, i));
-                    Self::persist_table_to_sstable(table, &sst_path, &self.options)?;
+                    Self::persist_table_to_sstable(table, &dest, &self.options)?;
+                }
+                cf_filenames.push(fname_string);
+            }
+            manifest.column_families.insert(cf, cf_filenames);
+        }
+
+        // Also copy all orphaned .sst files from the sstables directory
+        // so that the snapshot contains a complete copy of the data dir.
+        if let Ok(entries) = std::fs::read_dir(&self._sst_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "sst") {
+                    let fname = path.file_name().unwrap_or_default();
+                    let dest = backup_dir.join(fname);
+                    if !dest.exists() {
+                        let _ = std::fs::copy(&path, &dest);
+                    }
                 }
             }
         }
+
+        // Write the manifest
+        let manifest_json = serde_json::to_string(&manifest).map_err(|e| {
+            crate::LsmError::InvalidArgument(format!("Failed to serialize manifest: {}", e))
+        })?;
+        std::fs::write(backup_dir.join("snapshot.manifest"), &manifest_json)?;
 
         // Copy saved WALs into the backup directory.
         // Always write at least an empty wal.log so list_snapshots can
@@ -1509,6 +2270,19 @@ impl<C: Cache> Engine<C> {
         }
 
         Ok(())
+    }
+
+    /// Load a `SnapshotManifest` from a snapshot directory, if present.
+    fn load_snapshot_manifest(snapshot_dir: &Path) -> Result<Option<SnapshotManifest>> {
+        let manifest_path = snapshot_dir.join("snapshot.manifest");
+        if !manifest_path.exists() {
+            return Ok(None);
+        }
+        let json_str = std::fs::read_to_string(&manifest_path)?;
+        let manifest: SnapshotManifest = serde_json::from_str(&json_str).map_err(|e| {
+            crate::LsmError::InvalidArgument(format!("Failed to parse snapshot manifest: {}", e))
+        })?;
+        Ok(Some(manifest))
     }
 
     /// List all snapshots found inside `backup_dir`.
@@ -1575,14 +2349,18 @@ impl<C: Cache> Engine<C> {
 
     /// Restore engine data from a previously created snapshot.
     pub fn restore_snapshot(&self, snapshot_dir: &Path) -> Result<()> {
-        let data_dir = self
-            ._sst_dir
-            .parent()
-            .expect("sst_dir must have a parent (engine data dir)");
+        let data_dir = self._sst_dir.parent().ok_or_else(|| {
+            crate::infra::error::LsmError::InvalidArgument(
+                "sst_dir must have a parent (engine data dir)".to_string(),
+            )
+        })?;
         let sst_dir = &self._sst_dir;
 
         std::fs::create_dir_all(data_dir)?;
         std::fs::create_dir_all(sst_dir)?;
+
+        // Track which SSTable filenames we copy from the snapshot
+        let mut copied_sst_files: Vec<String> = Vec::new();
 
         for entry in std::fs::read_dir(snapshot_dir)? {
             let entry = entry?;
@@ -1591,8 +2369,13 @@ impl<C: Cache> Engine<C> {
                 continue;
             }
             if path.extension().is_some_and(|ext| ext == "sst") {
-                let dest = sst_dir.join(path.file_name().unwrap());
+                let Some(fname) = path.file_name() else {
+                    continue;
+                };
+                let fname_str = fname.to_string_lossy().to_string();
+                let dest = sst_dir.join(&fname_str);
                 std::fs::copy(&path, &dest)?;
+                copied_sst_files.push(fname_str);
             } else if path.file_name().is_some_and(|n| n == "wal.log") {
                 let dest = data_dir.join("wal.log");
                 std::fs::copy(&path, &dest)?;
@@ -1605,7 +2388,170 @@ impl<C: Cache> Engine<C> {
             }
         }
 
+        // Load the manifest and register SSTables in the engine's VersionSet
+        let manifest = Self::load_snapshot_manifest(snapshot_dir)?;
+
+        // Write the disk manifest for new_generic() to discover on startup
+        if let Some(ref m) = manifest {
+            let disk_manifest_path = data_dir.join("disk.sst.manifest");
+            let json = serde_json::to_string(m).map_err(|e| {
+                crate::LsmError::InvalidArgument(format!(
+                    "Failed to serialize disk manifest: {}",
+                    e
+                ))
+            })?;
+            std::fs::write(&disk_manifest_path, &json)?;
+        }
+
+        // Register SSTables in the running engine's VersionSet
+        if let Some(m) = manifest {
+            let mut core = self.core.lock();
+            let sst_dir = sst_dir.clone();
+            let enc = &self.options.encryption;
+            for (cf, filenames) in &m.column_families {
+                for fname in filenames {
+                    let sst_path = sst_dir.join(fname);
+                    if sst_path.exists() {
+                        match Table::from_sstable_path(&sst_path, Some(enc)) {
+                            Ok(table) => {
+                                core.version_set_mut().add_table(cf, table);
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "restore_snapshot: failed to load SSTable {} for CF {}: {:?}",
+                                    fname,
+                                    cf,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
+    }
+
+    /// Discover SSTables on disk and load them into the VersionSet.
+    ///
+    /// Called during engine startup (`new_generic`) after WAL replay.
+    /// First checks for a `disk.sst.manifest` written by `restore_snapshot()`.
+    /// If no manifest exists, falls back to loading all `.sst` files from the
+    /// sst_dir into the "default" column family (legacy behavior).
+    fn discover_sstables_from_disk(
+        core: &mut EngineCore<C>,
+        data_dir: &Path,
+        sst_dir: &Path,
+    ) -> Result<()> {
+        let enc = core.encryption.clone();
+        let manifest_path = data_dir.join("disk.sst.manifest");
+        if manifest_path.exists() {
+            // Use the manifest written by restore_snapshot()
+            let json_str = std::fs::read_to_string(&manifest_path).map_err(|e| {
+                crate::LsmError::InvalidArgument(format!("Failed to read disk manifest: {}", e))
+            })?;
+            let manifest: SnapshotManifest = serde_json::from_str(&json_str).map_err(|e| {
+                crate::LsmError::InvalidArgument(format!("Failed to parse disk manifest: {}", e))
+            })?;
+            for (cf, filenames) in &manifest.column_families {
+                for fname in filenames {
+                    let sst_path = sst_dir.join(fname);
+                    if sst_path.exists() {
+                        match Table::from_sstable_path(&sst_path, Some(&enc)) {
+                            Ok(table) => {
+                                core.version_set_mut().add_table(cf, table);
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "discover_sstables: failed to load {} for CF {}: {:?}",
+                                    fname,
+                                    cf,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Fallback: scan for .sst files and add them to default CF
+            if let Ok(entries) = std::fs::read_dir(sst_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|ext| ext == "sst") {
+                        if let Some(fname) = path.file_name() {
+                            let fname_str = fname.to_string_lossy();
+                            tracing::info!(
+                                "discover_sstables: loading orphaned SSTable {} into default CF",
+                                fname_str
+                            );
+                            match Table::from_sstable_path(&path, Some(&enc)) {
+                                Ok(table) => {
+                                    core.version_set_mut().add_table("default", table);
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "discover_sstables: failed to load {}: {:?}",
+                                        fname_str,
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Reconcile in-memory table state with `.sst` files on disk.
+    ///
+    /// 1. Lists all `.sst` files in the sst_dir.
+    /// 2. Compares them with the paths tracked by the VersionSet.
+    /// 3. Removes orphaned `.sst` files that are no longer referenced.
+    ///
+    /// Returns the number of orphaned files removed.
+    pub fn reconcile_tables(&self) -> Result<usize> {
+        let mut removed = 0usize;
+
+        // Collect all paths tracked by VersionSet
+        let tracked_paths: std::collections::HashSet<PathBuf> = {
+            let core = self.core.lock();
+            let mut paths = std::collections::HashSet::new();
+            for cf in core.version_set().column_families() {
+                for table in core.version_set().get_tables(&cf) {
+                    if let Some(ref p) = table.path {
+                        paths.insert(p.clone());
+                    }
+                }
+            }
+            paths
+        };
+
+        // Scan sst_dir for orphaned .sst files
+        if let Ok(entries) = std::fs::read_dir(&self._sst_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "sst")
+                    && !tracked_paths.contains(&path)
+                {
+                    if let Err(e) = std::fs::remove_file(&path) {
+                        tracing::warn!(
+                            "reconcile_tables: failed to remove orphaned SSTable {:?}: {:?}",
+                            path,
+                            e
+                        );
+                    } else {
+                        tracing::info!("reconcile_tables: removed orphaned SSTable {:?}", path);
+                        removed += 1;
+                    }
+                }
+            }
+        }
+
+        Ok(removed)
     }
 }
 
@@ -1760,7 +2706,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (new_tables, _metrics) = strategy
-            .execute(tables, &options, &storage_config, &output_dir)
+            .execute(tables, &options, &storage_config, &output_dir, &[])
             .unwrap();
 
         assert!(
@@ -1801,7 +2747,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (new_tables, _) = strategy
-            .execute(tables, &options, &storage_config, &output_dir)
+            .execute(tables, &options, &storage_config, &output_dir, &[])
             .unwrap();
 
         assert!(
@@ -1841,7 +2787,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (new_tables, _) = strategy
-            .execute(vec![table], &options, &storage_config, &output_dir)
+            .execute(vec![table], &options, &storage_config, &output_dir, &[])
             .unwrap();
 
         // The new table should not contain tombstones
@@ -1881,7 +2827,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (_, metrics) = strategy
-            .execute(tables, &options, &storage_config, &output_dir)
+            .execute(tables, &options, &storage_config, &output_dir, &[])
             .unwrap();
 
         assert!(metrics.bytes_read > 0, "Should track bytes read");
@@ -1919,11 +2865,17 @@ mod tests {
 
     #[test]
     fn test_atomic_replace_in_version_set() {
+        use crate::infra::config::StorageConfig;
         use crate::storage::cache::NoopCache;
 
         let options = crate::core::engine::EngineOptions::default();
         let cache = NoopCache;
-        let mut vs = crate::core::engine::version_set::VersionSet::<NoopCache>::new(options, cache);
+        let mut vs = crate::core::engine::version_set::VersionSet::<NoopCache>::new(
+            options,
+            cache,
+            StorageConfig::default(),
+            None,
+        );
 
         // Add some tables
         for i in 0..5 {
@@ -1988,7 +2940,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (_new_tables, metrics) = strategy
-            .execute(tables, &options, &storage_config, &output_dir)
+            .execute(tables, &options, &storage_config, &output_dir, &[])
             .unwrap();
 
         // Write amplification = bytes_written / bytes_read
@@ -2031,7 +2983,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (new_tables, metrics) = strategy
-            .execute(tables, &options, &storage_config, &output_dir)
+            .execute(tables, &options, &storage_config, &output_dir, &[])
             .unwrap();
 
         assert!(
@@ -2075,7 +3027,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
         let (_new_tables, metrics) = strategy
-            .execute(tables, &options, &storage_config, &output_dir)
+            .execute(tables, &options, &storage_config, &output_dir, &[])
             .unwrap();
 
         // Write amplification = bytes_written / bytes_read
@@ -2962,5 +3914,432 @@ mod tests {
             assert!(info.size_bytes > 0, "Snapshot should have non-zero size");
             assert!(info.file_count > 0, "Snapshot should have at least 1 file");
         }
+    }
+
+    // ── Issue #193: TTL / auto-expiry tests ──
+
+    #[test]
+    fn test_ttl_key_expires_after_duration() {
+        use crate::infra::config::LsmConfig;
+        use std::time::Duration;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Set a key with a 1ms TTL
+        engine
+            .set_with_ttl(
+                b"ephemeral".to_vec(),
+                b"value".to_vec(),
+                Duration::from_millis(1),
+            )
+            .unwrap();
+
+        // Immediately after write, key should be present
+        assert_eq!(
+            engine.get(b"ephemeral").unwrap(),
+            Some(b"value".to_vec()),
+            "Key should be visible immediately after write"
+        );
+
+        // Wait for TTL to expire
+        std::thread::sleep(Duration::from_millis(5));
+
+        // Key should now be expired
+        assert_eq!(
+            engine.get(b"ephemeral").unwrap(),
+            None,
+            "Key should be None after TTL expiry"
+        );
+    }
+
+    #[test]
+    fn test_ttl_key_without_ttl_never_expires() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Set a key without TTL
+        engine
+            .set(b"persistent".to_vec(), b"value".to_vec())
+            .unwrap();
+
+        // Key should be present
+        assert_eq!(engine.get(b"persistent").unwrap(), Some(b"value".to_vec()),);
+
+        // Even after a short wait, key should still be present
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        assert_eq!(
+            engine.get(b"persistent").unwrap(),
+            Some(b"value".to_vec()),
+            "Key without TTL should never expire"
+        );
+    }
+
+    #[test]
+    fn test_ttl_scan_filters_expired_entries() {
+        use crate::infra::config::LsmConfig;
+        use std::time::Duration;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Insert a key without TTL (permanent)
+        engine.set(b"permanent".to_vec(), b"keep".to_vec()).unwrap();
+        // Insert a key with short TTL
+        engine
+            .set_with_ttl(b"temp".to_vec(), b"gone".to_vec(), Duration::from_millis(1))
+            .unwrap();
+
+        // Both keys should appear in scan before expiry
+        let results = engine.scan_cf("default", None, None, Some(10)).unwrap();
+        assert_eq!(
+            results.len(),
+            2,
+            "Both keys should appear before TTL expiry"
+        );
+
+        // Wait for TTL to expire
+        std::thread::sleep(Duration::from_millis(5));
+
+        // Only the permanent key should appear in scan
+        let results = engine.scan_cf("default", None, None, Some(10)).unwrap();
+        assert_eq!(results.len(), 1, "Only permanent key should appear in scan");
+        assert_eq!(results[0].0, b"permanent".to_vec());
+    }
+
+    #[test]
+    fn test_ttl_in_column_family() {
+        use crate::infra::config::LsmConfig;
+        use std::time::Duration;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Insert a key with TTL in a non-default column family
+        engine
+            .set_cf_with_ttl(
+                "sessions",
+                b"session:1",
+                b"active",
+                Duration::from_millis(1),
+            )
+            .unwrap();
+
+        // Immediately after write, key should be present
+        assert_eq!(
+            engine.get_cf("sessions", b"session:1").unwrap(),
+            Some(b"active".to_vec())
+        );
+
+        // Wait for TTL to expire
+        std::thread::sleep(Duration::from_millis(5));
+
+        // Key should now be expired in the CF
+        assert_eq!(
+            engine.get_cf("sessions", b"session:1").unwrap(),
+            None,
+            "Key in CF should be None after TTL expiry"
+        );
+    }
+
+    #[test]
+    fn test_ttl_default_ttl_config() {
+        use crate::infra::config::LsmConfig;
+        use std::time::Duration;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        // Build engine with a default TTL and use set()
+        let options = EngineOptions {
+            default_ttl: Some(Duration::from_millis(1)),
+            ..Default::default()
+        };
+        let engine = Engine::new_generic(
+            options,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+            dir.path(),
+        )
+        .unwrap();
+
+        // set() should inherit the default TTL
+        engine
+            .set(b"auto_expire".to_vec(), b"value".to_vec())
+            .unwrap();
+
+        // Immediately readable
+        assert_eq!(engine.get(b"auto_expire").unwrap(), Some(b"value".to_vec()));
+
+        // Wait for default TTL to expire
+        std::thread::sleep(Duration::from_millis(5));
+
+        // Key should be expired via default_ttl
+        assert_eq!(
+            engine.get(b"auto_expire").unwrap(),
+            None,
+            "Key with default TTL should expire"
+        );
+    }
+
+    #[test]
+    fn test_ttl_log_record_new_with_ttl() {
+        use std::time::Duration;
+
+        // Test the LogRecord constructor directly
+        let record =
+            LogRecord::new_with_ttl(b"k".to_vec(), b"v".to_vec(), Duration::from_secs(3600));
+        assert!(
+            !record.is_expired(),
+            "Fresh TTL record should not be expired"
+        );
+
+        // A record with 0 TTL should be expired immediately
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let expired_record = LogRecord {
+            expires_at: Some(now.saturating_sub(1)), // 1 nanosecond ago
+            ..LogRecord::new(b"k".to_vec(), b"v".to_vec())
+        };
+        assert!(
+            expired_record.is_expired(),
+            "Past expires_at should be expired"
+        );
+
+        // Non-TTL record should never be expired
+        let no_ttl = LogRecord::new(b"k".to_vec(), b"v".to_vec());
+        assert!(!no_ttl.is_expired(), "No TTL record should never expire");
+        assert_eq!(no_ttl.expires_at, None);
+    }
+
+    // ── Range Delete Tests ──
+
+    #[test]
+    fn test_delete_range_removes_keys_in_range() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Write keys "a", "b", "c", "d", "e" and flush to SSTable
+        // so that range tombstones can mask them
+        engine
+            .put_cf("default", b"a".to_vec(), b"value_a".to_vec())
+            .unwrap();
+        engine
+            .put_cf("default", b"b".to_vec(), b"value_b".to_vec())
+            .unwrap();
+        engine
+            .put_cf("default", b"c".to_vec(), b"value_c".to_vec())
+            .unwrap();
+        engine
+            .put_cf("default", b"d".to_vec(), b"value_d".to_vec())
+            .unwrap();
+        engine
+            .put_cf("default", b"e".to_vec(), b"value_e".to_vec())
+            .unwrap();
+        engine.flush_memtable().unwrap();
+
+        // Verify all keys are present
+        assert_eq!(engine.get(b"a").unwrap(), Some(b"value_a".to_vec()));
+        assert_eq!(engine.get(b"b").unwrap(), Some(b"value_b".to_vec()));
+        assert_eq!(engine.get(b"c").unwrap(), Some(b"value_c".to_vec()));
+
+        // Delete range [b, d) — should delete "b", "c"
+        engine.delete_range(b"b", b"d").unwrap();
+
+        // Keys in range should be removed
+        assert_eq!(engine.get(b"a").unwrap(), Some(b"value_a".to_vec()));
+        assert_eq!(engine.get(b"b").unwrap(), None);
+        assert_eq!(engine.get(b"c").unwrap(), None);
+        assert_eq!(engine.get(b"d").unwrap(), Some(b"value_d".to_vec()));
+        assert_eq!(engine.get(b"e").unwrap(), Some(b"value_e".to_vec()));
+    }
+
+    #[test]
+    fn test_delete_range_preserves_keys_outside_range() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Write keys with numerical prefixes and flush to SSTable
+        for i in 0..10 {
+            let key = format!("key_{}", i).into_bytes();
+            let value = format!("value_{}", i).into_bytes();
+            engine.put_cf("default", key, value).unwrap();
+        }
+        engine.flush_memtable().unwrap();
+
+        // Delete range "key_3".."key_7"
+        engine.delete_range(b"key_3", b"key_7").unwrap();
+
+        // Keys outside range should remain
+        assert_eq!(engine.get(b"key_0").unwrap(), Some(b"value_0".to_vec()));
+        assert_eq!(engine.get(b"key_2").unwrap(), Some(b"value_2".to_vec()));
+        assert_eq!(engine.get(b"key_7").unwrap(), Some(b"value_7".to_vec()));
+        assert_eq!(engine.get(b"key_9").unwrap(), Some(b"value_9".to_vec()));
+
+        // Keys inside range should be gone
+        assert_eq!(engine.get(b"key_3").unwrap(), None);
+        assert_eq!(engine.get(b"key_4").unwrap(), None);
+        assert_eq!(engine.get(b"key_5").unwrap(), None);
+        assert_eq!(engine.get(b"key_6").unwrap(), None);
+    }
+
+    #[test]
+    fn test_range_tombstone_interaction_with_point_writes() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Write key "x" with value "original" and flush to SSTable
+        engine
+            .put_cf("default", b"x".to_vec(), b"original".to_vec())
+            .unwrap();
+        engine.flush_memtable().unwrap();
+        assert_eq!(engine.get(b"x").unwrap(), Some(b"original".to_vec()));
+
+        // Delete range [x, z) — should shadow "x" in SSTable
+        engine.delete_range(b"x", b"z").unwrap();
+
+        // "x" should now be deleted (range tombstone masks SSTable data)
+        assert_eq!(engine.get(b"x").unwrap(), None);
+
+        // Write "x" again with a new value — point write in memtable
+        // should take precedence over the range tombstone
+        engine
+            .put_cf("default", b"x".to_vec(), b"new_value".to_vec())
+            .unwrap();
+
+        // "x" should have the new value (memtable point write wins)
+        assert_eq!(engine.get(b"x").unwrap(), Some(b"new_value".to_vec()));
+
+        // "y" should still be deleted by the range tombstone
+        assert_eq!(engine.get(b"y").unwrap(), None);
+    }
+
+    #[test]
+    fn test_delete_range_scan_filters_out_tombstoned_keys() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Write keys 1-5 and flush to SSTable
+        for i in 1..=5 {
+            let key = format!("k{}", i).into_bytes();
+            let value = format!("v{}", i).into_bytes();
+            engine.put_cf("default", key, value).unwrap();
+        }
+        engine.flush_memtable().unwrap();
+
+        // Delete range "k2".."k4"
+        engine.delete_range(b"k2", b"k4").unwrap();
+
+        // Scan should only return k1, k4, k5
+        let results = engine.scan().unwrap();
+        let keys: Vec<&[u8]> = results.iter().map(|(k, _)| k.as_slice()).collect();
+        assert_eq!(keys, vec![b"k1", b"k4", b"k5"]);
+    }
+
+    #[test]
+    fn test_delete_range_cf() {
+        use crate::infra::config::LsmConfig;
+
+        let dir = tempdir().unwrap();
+        let mut config = LsmConfig::default();
+        config.core.dir_path = dir.path().to_path_buf();
+
+        let engine = Engine::new_from_config(
+            &config,
+            crate::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+
+        // Write keys in custom CF and flush to SSTable
+        engine.put_cf("cf1", b"a".to_vec(), b"1".to_vec()).unwrap();
+        engine.put_cf("cf1", b"b".to_vec(), b"2".to_vec()).unwrap();
+        engine.put_cf("cf1", b"c".to_vec(), b"3".to_vec()).unwrap();
+        engine.flush_memtable_cf("cf1").unwrap();
+
+        // Verify keys in CF
+        assert_eq!(engine.get_cf("cf1", b"a").unwrap(), Some(b"1".to_vec()));
+        assert_eq!(engine.get_cf("cf1", b"b").unwrap(), Some(b"2".to_vec()));
+
+        // Delete range [a, c) in CF
+        engine.delete_range_cf("cf1", b"a", b"c").unwrap();
+
+        // Keys in range should be deleted
+        assert_eq!(engine.get_cf("cf1", b"a").unwrap(), None);
+        assert_eq!(engine.get_cf("cf1", b"b").unwrap(), None);
+        assert_eq!(engine.get_cf("cf1", b"c").unwrap(), Some(b"3".to_vec()));
+
+        // Write a separate key to default CF to verify independence
+        engine
+            .put_cf("default", b"default_key".to_vec(), b"val".to_vec())
+            .unwrap();
+        assert_eq!(engine.get(b"default_key").unwrap(), Some(b"val".to_vec()));
     }
 }
