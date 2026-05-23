@@ -1075,6 +1075,30 @@
       "files": [],
       "depends_on": ["T267_1", "T267_2", "T267_3", "T267_4"],
       "notes": "362 lib tests + 32 integration tests pass. cargo clippy -- -D warnings: passes. cargo fmt: passes."
+    },
+    {
+      "id": "T268_1",
+      "description": "Issue #268: Add get_cf/get methods to Transaction with read-your-writes support (check write buffer first, then fall through to engine)",
+      "status": "done",
+      "files": ["src/core/engine/transaction.rs"],
+      "depends_on": [],
+      "notes": "Added Transaction::get_cf() and Transaction::get() methods with write buffer lookup before engine query."
+    },
+    {
+      "id": "T268_2",
+      "description": "Issue #268: Add 5 read-your-writes tests (basic read, overwrite, delete, after commit, after rollback)",
+      "status": "done",
+      "files": ["src/core/engine/transaction.rs"],
+      "depends_on": ["T268_1"],
+      "notes": "Added test_tx_read_your_writes, test_tx_read_your_writes_overwrite, test_tx_read_your_writes_delete, test_tx_read_your_writes_after_commit, test_tx_read_your_writes_after_rollback"
+    },
+    {
+      "id": "T268_3",
+      "description": "Issue #268: Run cargo fmt, cargo clippy, cargo test to verify",
+      "status": "done",
+      "files": [],
+      "depends_on": ["T268_1", "T268_2"],
+      "notes": "cargo test --all-features -- core::engine::transaction: 15 passed, 0 failed. cargo clippy --all-targets --all-features -- -D warnings: passes. cargo fmt --all: passes."
     }
   ]
 }
