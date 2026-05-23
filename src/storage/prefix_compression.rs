@@ -30,7 +30,7 @@
 //! assert_eq!(keys, decoded);
 //! ```
 
-use crate::infra::error::Result;
+use crate::infra::error::{LsmError, Result};
 
 /// Maximum shared prefix length supported by the u8 encoding (255 bytes).
 /// Per-key suffix length is stored as u16, allowing suffixes up to 65535 bytes.
@@ -52,9 +52,9 @@ impl PrefixCompressor {
     /// # Panics
     ///
     /// Panics if any two consecutive keys share more than 255 prefix bytes.
-    pub fn encode_keys(keys: &[Vec<u8>]) -> Vec<u8> {
+    pub fn encode_keys(keys: &[Vec<u8>]) -> Result<Vec<u8>> {
         if keys.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
 
         let mut output = Vec::new();
@@ -62,12 +62,12 @@ impl PrefixCompressor {
 
         for key in keys {
             let shared = Self::shared_prefix_len(prev_key, key);
-            debug_assert!(
-                shared <= MAX_SHARED_PREFIX,
-                "shared prefix length {} exceeds maximum {}",
-                shared,
-                MAX_SHARED_PREFIX
-            );
+            if shared > MAX_SHARED_PREFIX {
+                return Err(LsmError::InvalidArgument(format!(
+                    "shared prefix length {} exceeds maximum {}",
+                    shared, MAX_SHARED_PREFIX,
+                )));
+            }
 
             let suffix = &key[shared..];
             let suffix_len = suffix.len();
@@ -79,7 +79,7 @@ impl PrefixCompressor {
             prev_key = key;
         }
 
-        output
+        Ok(output)
     }
 
     /// Decode a prefix-compressed key sequence back into full keys.
@@ -94,11 +94,11 @@ impl PrefixCompressor {
     /// # Panics
     ///
     /// Panics if `data` is malformed (truncated, invalid lengths, etc.).
-    pub fn decode_keys(data: &[u8], first_key: &[u8]) -> Vec<Vec<u8>> {
+    pub fn decode_keys(data: &[u8], first_key: &[u8]) -> Result<Vec<Vec<u8>>> {
         if data.is_empty() {
             // When there are no encoded keys, just the first_key is the only key.
             // This is the case when we have a block with a single entry.
-            return Vec::new();
+            return Ok(Vec::new());
         }
 
         let mut keys: Vec<Vec<u8>> = Vec::new();
@@ -110,13 +110,17 @@ impl PrefixCompressor {
             pos += 1;
 
             if pos + 2 > data.len() {
-                panic!("Truncated prefix compression data: cannot read suffix_len");
+                return Err(LsmError::CorruptedData(
+                    "Truncated prefix compression data: cannot read suffix_len".to_string(),
+                ));
             }
             let suffix_len = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
             pos += 2;
 
             if pos + suffix_len > data.len() {
-                panic!("Truncated prefix compression data: suffix extends past end");
+                return Err(LsmError::CorruptedData(
+                    "Truncated prefix compression data: suffix extends past end".to_string(),
+                ));
             }
             let suffix = &data[pos..pos + suffix_len];
             pos += suffix_len;
@@ -130,7 +134,7 @@ impl PrefixCompressor {
             prev_key = keys.last().expect("just pushed").clone();
         }
 
-        keys
+        Ok(keys)
     }
 
     /// Compress the keys of a block's entries in-place (builds new data + offsets).
@@ -146,9 +150,9 @@ impl PrefixCompressor {
     /// For entries 1..N, keys are stored as:
     /// `[shared_prefix_len(u8)][suffix_len(u16)][suffix]`
     /// Values are stored as-is: `[val_len(u16)][value_bytes]`
-    pub fn compress_block_data(data: &[u8], offsets: &[u32]) -> (Vec<u8>, Vec<u32>) {
+    pub fn compress_block_data(data: &[u8], offsets: &[u32]) -> Result<(Vec<u8>, Vec<u32>)> {
         if offsets.is_empty() {
-            return (Vec::new(), Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
 
         let mut new_data = Vec::new();
@@ -175,7 +179,12 @@ impl PrefixCompressor {
             } else {
                 // Subsequent entries: prefix-compressed key
                 let shared = Self::shared_prefix_len(prev_key, key);
-                debug_assert!(shared <= MAX_SHARED_PREFIX);
+                if shared > MAX_SHARED_PREFIX {
+                    return Err(LsmError::InvalidArgument(format!(
+                        "shared prefix length {} exceeds maximum {}",
+                        shared, MAX_SHARED_PREFIX,
+                    )));
+                }
                 let suffix = &key[shared..];
                 new_data.push(shared as u8);
                 new_data.extend_from_slice(&(suffix.len() as u16).to_le_bytes());
@@ -189,7 +198,7 @@ impl PrefixCompressor {
             prev_key = key;
         }
 
-        (new_data, new_offsets)
+        Ok((new_data, new_offsets))
     }
 
     /// Decompress prefix-compressed block data back to the standard format.
@@ -301,18 +310,18 @@ mod tests {
     #[test]
     fn test_encode_decode_empty() {
         let keys: Vec<Vec<u8>> = vec![];
-        let compressed = PrefixCompressor::encode_keys(&keys);
+        let compressed = PrefixCompressor::encode_keys(&keys).unwrap();
         assert!(compressed.is_empty());
 
-        let decoded = PrefixCompressor::decode_keys(&compressed, b"first_key");
+        let decoded = PrefixCompressor::decode_keys(&compressed, b"first_key").unwrap();
         assert!(decoded.is_empty());
     }
 
     #[test]
     fn test_encode_decode_single_key() {
         let keys = vec![b"hello".to_vec()];
-        let compressed = PrefixCompressor::encode_keys(&keys);
-        let decoded = PrefixCompressor::decode_keys(&compressed, &keys[0]);
+        let compressed = PrefixCompressor::encode_keys(&keys).unwrap();
+        let decoded = PrefixCompressor::decode_keys(&compressed, &keys[0]).unwrap();
         assert_eq!(keys, decoded);
     }
 
@@ -324,16 +333,16 @@ mod tests {
             b"user:carol:age".to_vec(),
             b"user:dave:score".to_vec(),
         ];
-        let compressed = PrefixCompressor::encode_keys(&keys);
-        let decoded = PrefixCompressor::decode_keys(&compressed, &keys[0]);
+        let compressed = PrefixCompressor::encode_keys(&keys).unwrap();
+        let decoded = PrefixCompressor::decode_keys(&compressed, &keys[0]).unwrap();
         assert_eq!(keys, decoded);
     }
 
     #[test]
     fn test_encode_decode_no_shared_prefix() {
         let keys = vec![b"aaaa".to_vec(), b"bbbb".to_vec(), b"cccc".to_vec()];
-        let compressed = PrefixCompressor::encode_keys(&keys);
-        let decoded = PrefixCompressor::decode_keys(&compressed, &keys[0]);
+        let compressed = PrefixCompressor::encode_keys(&keys).unwrap();
+        let decoded = PrefixCompressor::decode_keys(&compressed, &keys[0]).unwrap();
         assert_eq!(keys, decoded);
     }
 
@@ -344,8 +353,8 @@ mod tests {
             b"samekey".to_vec(),
             b"samekey".to_vec(),
         ];
-        let compressed = PrefixCompressor::encode_keys(&keys);
-        let decoded = PrefixCompressor::decode_keys(&compressed, &keys[0]);
+        let compressed = PrefixCompressor::encode_keys(&keys).unwrap();
+        let decoded = PrefixCompressor::decode_keys(&compressed, &keys[0]).unwrap();
         assert_eq!(keys, decoded);
     }
 
@@ -358,8 +367,8 @@ mod tests {
             k.push(b'a' + i);
             keys.push(k);
         }
-        let compressed = PrefixCompressor::encode_keys(&keys);
-        let decoded = PrefixCompressor::decode_keys(&compressed, &keys[0]);
+        let compressed = PrefixCompressor::encode_keys(&keys).unwrap();
+        let decoded = PrefixCompressor::decode_keys(&compressed, &keys[0]).unwrap();
         assert_eq!(keys, decoded);
     }
 
@@ -390,7 +399,8 @@ mod tests {
         data.extend_from_slice(&(2u16).to_le_bytes()); // val_len
         data.extend_from_slice(b"v3");
 
-        let (compressed_data, new_offsets) = PrefixCompressor::compress_block_data(&data, &offsets);
+        let (compressed_data, new_offsets) =
+            PrefixCompressor::compress_block_data(&data, &offsets).unwrap();
 
         // First entry should be full key "aaa"
         let key0_len = u16::from_le_bytes([compressed_data[0], compressed_data[1]]) as usize;
@@ -447,7 +457,7 @@ mod tests {
         }
 
         let (compressed_data, compressed_offsets) =
-            PrefixCompressor::compress_block_data(&data, &offsets);
+            PrefixCompressor::compress_block_data(&data, &offsets).unwrap();
 
         let (decompressed_data, decompressed_offsets) =
             PrefixCompressor::decompress_block_data(&compressed_data, &compressed_offsets).unwrap();
@@ -466,7 +476,7 @@ mod tests {
         data.extend_from_slice(b"val");
 
         let (compressed_data, compressed_offsets) =
-            PrefixCompressor::compress_block_data(&data, &offsets);
+            PrefixCompressor::compress_block_data(&data, &offsets).unwrap();
         let (decompressed_data, decompressed_offsets) =
             PrefixCompressor::decompress_block_data(&compressed_data, &compressed_offsets).unwrap();
 

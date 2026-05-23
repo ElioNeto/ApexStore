@@ -52,7 +52,8 @@ impl Block {
             return;
         }
         let (new_data, new_offsets) =
-            PrefixCompressor::compress_block_data(&self.data, &self.offsets);
+            PrefixCompressor::compress_block_data(&self.data, &self.offsets)
+                .expect("compress_block_data should not fail with valid input");
         self.data = new_data;
         self.offsets = new_offsets;
         self.flags |= PREFIX_COMPRESSION_FLAG;
