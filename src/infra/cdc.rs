@@ -100,6 +100,14 @@ impl CdcCollector {
     }
 }
 
+impl Clone for CdcCollector {
+    fn clone(&self) -> Self {
+        Self {
+            events: std::sync::Mutex::new(self.events.lock().unwrap().clone()),
+        }
+    }
+}
+
 impl Default for CdcCollector {
     fn default() -> Self {
         Self::new()

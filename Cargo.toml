@@ -41,9 +41,10 @@ default = ["api"]
 api = []
 benchmark = []
 chaos = []
-wasm = []
+wasm = ["dep:wasmtime"]
 
 [dependencies]
+wasmtime = { version = "14", optional = true }
 bloomfilter = "3.0"
 crc32fast = "1.4"
 postcard = { version = "1.0", features = ["alloc"] }
