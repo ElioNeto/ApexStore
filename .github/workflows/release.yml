@@ -1,7 +1,8 @@
 name: Auto Release
 
-# Triggers on push to 'main' (i.e., when a PR is merged)
+# Triggers on push to 'main' (i.e., when a PR is merged), or manually via workflow_dispatch
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
