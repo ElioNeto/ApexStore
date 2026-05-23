@@ -1019,6 +1019,86 @@
       "files": [],
       "depends_on": ["T194_6"],
       "notes": "cargo check: passes. cargo clippy: no new warnings (pre-existing issues in bulk_io.rs, blob_store.rs, etc). cargo test --lib: 340 passed, 8 pre-existing failures (unrelated)"
+    },
+    {
+      "id": "T262",
+      "description": "Issue #262: Rate limiter não suporta proxy reverso — X-Forwarded-For ignorado",
+      "status": "done",
+      "files": ["src/api/rate_limiter.rs"],
+      "depends_on": [],
+      "notes": "Added get_client_ip() to extract IP from X-Forwarded-For header (first IP) with fallback to peer_addr(). Changed internal tracking from SocketAddr to IpAddr. Added parse_x_forwarded_for() pure function. 10 tests pass."
+    },
+    {
+      "id": "T260",
+      "description": "Issue #260: Token store in-memory — tokens são perdidos no restart do servidor",
+      "status": "done",
+      "files": ["src/api/auth/manager.rs", "src/api/mod.rs"],
+      "depends_on": [],
+      "notes": "Added engine field to TokenManager, new_with_engine(engine) constructor, load_tokens_from_engine on startup, persist_token/delete_persisted_token helpers. create_token() and delete_token() now persist to engine with __token:{id} key. start_server() passes engine to new_with_engine()."
+    },
+    {
+      "id": "T267_1",
+      "description": "Issue #267: Persist TTL metadata (expires_at) in flush_memtable_impl via __ttl:{key} side-table entries in SSTable and in-memory Table",
+      "status": "done",
+      "files": ["src/core/engine/mod.rs", "src/core/engine/version_set.rs", "src/core/table.rs"],
+      "depends_on": [],
+      "notes": "In flush_memtable_impl, for each key with expires_at, write a __ttl:{key} -> expires_at entry to both the SstableBuilder and the in-memory Table.data BTreeMap. This preserves TTL metadata across flushes and restarts."
+    },
+    {
+      "id": "T267_2",
+      "description": "Issue #267: Check is_expired() in VersionSet::get() when reading from SSTable via SstableReader",
+      "status": "done",
+      "files": ["src/core/engine/version_set.rs"],
+      "depends_on": [],
+      "notes": "In VersionSet::get(), after reading a LogRecord from SstableReader, check record.is_expired() and treat expired keys as not-found (continue to next table)."
+    },
+    {
+      "id": "T267_3",
+      "description": "Issue #267: Check TTL expiry in get_cf() after version_set lookup",
+      "status": "done",
+      "files": ["src/core/engine/mod.rs"],
+      "depends_on": [],
+      "notes": "In get_cf(), after version_set().get() returns a value, look up __ttl:{key} in the version_set and check if the expires_at timestamp is in the past. If expired, return None."
+    },
+    {
+      "id": "T267_4",
+      "description": "Issue #267: Filter expired TTL keys and internal __ttl: prefix in scan_cf",
+      "status": "done",
+      "files": ["src/core/engine/mod.rs"],
+      "depends_on": [],
+      "notes": "In scan_cf(), filter out keys starting with __ttl: prefix (internal metadata). For keys from SSTables (not found in memtables), check the __ttl:{key} side-table and skip expired ones."
+    },
+    {
+      "id": "T267_5",
+      "description": "Issue #267: Run cargo test, cargo clippy, cargo fmt to verify",
+      "status": "done",
+      "files": [],
+      "depends_on": ["T267_1", "T267_2", "T267_3", "T267_4"],
+      "notes": "362 lib tests + 32 integration tests pass. cargo clippy -- -D warnings: passes. cargo fmt: passes."
+    },
+    {
+      "id": "T268_1",
+      "description": "Issue #268: Add get_cf/get methods to Transaction with read-your-writes support (check write buffer first, then fall through to engine)",
+      "status": "done",
+      "files": ["src/core/engine/transaction.rs"],
+      "depends_on": [],
+      "notes": "Added Transaction::get_cf() and Transaction::get() methods with write buffer lookup before engine query."
+    },
+    {
+      "id": "T268_2",
+      "description": "Issue #268: Add 5 read-your-writes tests (basic read, overwrite, delete, after commit, after rollback)",
+      "status": "done",
+      "files": ["src/core/engine/transaction.rs"],
+      "depends_on": ["T268_1"],
+      "notes": "Added test_tx_read_your_writes, test_tx_read_your_writes_overwrite, test_tx_read_your_writes_delete, test_tx_read_your_writes_after_commit, test_tx_read_your_writes_after_rollback"
+    },
+    {
+      "id": "T268_3",
+      "description": "Issue #268: Run cargo fmt, cargo clippy, cargo test to verify",
+      "status": "done",
+      "files": [],
+      "depends_on": ["T268_1", "T268_2"],
+      "notes": "cargo test --all-features -- core::engine::transaction: 15 passed, 0 failed. cargo clippy --all-targets --all-features -- -D warnings: passes. cargo fmt --all: passes."
     }
   ]
 }

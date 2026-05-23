@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 use tracing;
@@ -114,6 +115,204 @@ impl<C: Cache> Transaction<C> {
         K: AsRef<[u8]>,
     {
         self.delete_cf("default", key)
+    }
+
+    /// Get the value for a key in the specified column family within this
+    /// transaction.  The write buffer is consulted first, providing
+    /// read-your-writes isolation: uncommitted writes from the same
+    /// transaction are visible.  If the key is not in the buffer, the
+    /// underlying engine is queried.
+    pub fn get_cf<K>(&self, cf: &str, key: K) -> Result<Option<Vec<u8>>>
+    where
+        K: AsRef<[u8]>,
+    {
+        let key = key.as_ref();
+        let key_str = String::from_utf8_lossy(key).into_owned();
+
+        // 1. Check write buffer first (read-your-writes support)
+        if let Some((value, is_deleted)) = self.writes.get(&(cf.to_string(), key.to_vec())) {
+            if *is_deleted {
+                tracing::debug!(
+                    target: "apexstore::engine",
+                    operation = "transaction.get_cf",
+                    txn_id = self.txn_id,
+                    cf = cf,
+                    key = %key_str,
+                    found = false,
+                    source = "write_buffer_tombstone",
+                );
+                return Ok(None);
+            }
+            tracing::debug!(
+                target: "apexstore::engine",
+                operation = "transaction.get_cf",
+                txn_id = self.txn_id,
+                cf = cf,
+                key = %key_str,
+                found = true,
+                value_size = value.len(),
+                source = "write_buffer",
+            );
+            return Ok(Some(value.clone()));
+        }
+
+        // 2. Not in buffer — fall through to engine
+        let start = std::time::Instant::now();
+        let core = self.core.lock();
+
+        // 2a. Check memtables (newest first) — point writes take precedence
+        // over range tombstones.
+        if let Some(memtables) = core.memtables().get(cf) {
+            for mem in memtables.iter().rev() {
+                if let Some(v) = mem.data.get(key) {
+                    // Skip tombstones (deleted records)
+                    if v.is_deleted {
+                        let elapsed_us = start.elapsed().as_micros() as u64;
+                        self.metrics.record_get(elapsed_us);
+                        tracing::debug!(
+                            target: "apexstore::engine",
+                            operation = "transaction.get_cf",
+                            txn_id = self.txn_id,
+                            cf = cf,
+                            key = %key_str,
+                            found = false,
+                            duration_us = elapsed_us,
+                            source = "memtable_tombstone",
+                        );
+                        return Ok(None);
+                    }
+                    // Skip expired keys (TTL-based auto-expiry)
+                    if v.is_expired() {
+                        let elapsed_us = start.elapsed().as_micros() as u64;
+                        self.metrics.record_get(elapsed_us);
+                        tracing::debug!(
+                            target: "apexstore::engine",
+                            operation = "transaction.get_cf",
+                            txn_id = self.txn_id,
+                            cf = cf,
+                            key = %key_str,
+                            found = false,
+                            duration_us = elapsed_us,
+                            source = "memtable_expired",
+                        );
+                        return Ok(None);
+                    }
+                    let elapsed_us = start.elapsed().as_micros() as u64;
+                    self.metrics.record_get(elapsed_us);
+                    self.metrics.record_cache_hit();
+                    tracing::debug!(
+                        target: "apexstore::engine",
+                        operation = "transaction.get_cf",
+                        txn_id = self.txn_id,
+                        cf = cf,
+                        key = %key_str,
+                        found = true,
+                        value_size = v.value.len(),
+                        duration_us = elapsed_us,
+                        source = "memtable",
+                    );
+                    return Ok(Some(v.value.clone()));
+                }
+            }
+        }
+
+        // 2b. After memtable lookup, check if key falls within a range
+        // tombstone.  This is done after the memtable check so point writes
+        // take precedence.
+        if Self::key_in_range_tombstone(&core, cf, key) {
+            let elapsed_us = start.elapsed().as_micros() as u64;
+            self.metrics.record_get(elapsed_us);
+            tracing::debug!(
+                target: "apexstore::engine",
+                operation = "transaction.get_cf",
+                txn_id = self.txn_id,
+                cf = cf,
+                key = %key_str,
+                found = false,
+                reason = "range_tombstone",
+                duration_us = elapsed_us,
+            );
+            return Ok(None);
+        }
+
+        // 2c. Check SSTables via version_set
+        let result = core.version_set().get(cf, key);
+
+        // 2d. Check TTL expiry for keys stored in SSTable / in-memory Table.
+        // The version_set.get() above checks LogRecord.is_expired() for
+        // the SSTable read path, but the in-memory Table.data path only
+        // has raw Vec<u8> values (no expires_at).  We store TTL metadata
+        // as __ttl:{key} -> expires_at entries alongside real data, so
+        // we look up that side-table here.
+        let result = if result.is_some() {
+            let ttl_key = format!("__ttl:{}", String::from_utf8_lossy(key)).into_bytes();
+            if let Some(ttl_value) = core.version_set().get(cf, &ttl_key) {
+                if ttl_value.len() == 16 {
+                    let expires_at = u128::from_le_bytes(
+                        ttl_value
+                            .as_slice()
+                            .try_into()
+                            .unwrap_or(u128::MAX.to_le_bytes()),
+                    );
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    if now >= expires_at {
+                        None
+                    } else {
+                        result
+                    }
+                } else {
+                    result
+                }
+            } else {
+                result
+            }
+        } else {
+            result
+        };
+
+        let elapsed_us = start.elapsed().as_micros() as u64;
+        self.metrics.record_get(elapsed_us);
+        match &result {
+            Some(v) => {
+                self.metrics.record_cache_hit();
+                tracing::debug!(
+                    target: "apexstore::engine",
+                    operation = "transaction.get_cf",
+                    txn_id = self.txn_id,
+                    cf = cf,
+                    key = %key_str,
+                    found = true,
+                    value_size = v.len(),
+                    duration_us = elapsed_us,
+                    source = "sstable",
+                );
+            }
+            None => {
+                self.metrics.record_cache_miss();
+                tracing::debug!(
+                    target: "apexstore::engine",
+                    operation = "transaction.get_cf",
+                    txn_id = self.txn_id,
+                    cf = cf,
+                    key = %key_str,
+                    found = false,
+                    duration_us = elapsed_us,
+                );
+            }
+        }
+        Ok(result)
+    }
+
+    /// Get the value for a key in the default column family within this
+    /// transaction.
+    pub fn get<K>(&self, key: K) -> Result<Option<Vec<u8>>>
+    where
+        K: AsRef<[u8]>,
+    {
+        self.get_cf("default", key)
     }
 
     /// Atomically commit all buffered writes to the engine.
@@ -266,6 +465,26 @@ impl<C: Cache> Transaction<C> {
             }
         }
         Ok(false)
+    }
+
+    /// Check whether `key` falls within any active range tombstone
+    /// (both engine-level and memtable-level).
+    fn key_in_range_tombstone(core: &EngineCore<C>, cf: &str, key: &[u8]) -> bool {
+        // Check engine-level range tombstones
+        if let Some(tombstones) = core.range_tombstones().get(cf) {
+            if tombstones.iter().any(|rt| rt.covers(key)) {
+                return true;
+            }
+        }
+        // Check memtable-level range tombstones
+        if let Some(memtables) = core.memtables().get(cf) {
+            for mem in memtables.iter() {
+                if mem.contains_range_tombstone(key) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -458,5 +677,80 @@ mod tests {
             engine2.get_cf("txn_cf", b"txn_k2").unwrap(),
             Some(b"txn_v2".to_vec())
         );
+    }
+
+    // ── Read-your-writes tests ────────────────────────────────────────
+
+    #[test]
+    fn test_tx_read_your_writes() {
+        let (engine, _dir) = test_engine();
+
+        let mut txn = engine.begin_transaction();
+        txn.put(b"k1", b"v1").unwrap();
+
+        // Must see the uncommitted write within the transaction
+        assert_eq!(txn.get(b"k1").unwrap(), Some(b"v1".to_vec()));
+
+        // Not yet visible to the engine
+        assert_eq!(engine.get(b"k1").unwrap(), None);
+    }
+
+    #[test]
+    fn test_tx_read_your_writes_overwrite() {
+        let (engine, _dir) = test_engine();
+
+        engine.set(b"k1", b"original").unwrap();
+
+        let mut txn = engine.begin_transaction();
+        txn.put(b"k1", b"overwritten").unwrap();
+
+        // Must see the overwritten value within the transaction
+        assert_eq!(txn.get(b"k1").unwrap(), Some(b"overwritten".to_vec()));
+
+        // Engine still has the original value
+        assert_eq!(engine.get(b"k1").unwrap(), Some(b"original".to_vec()));
+    }
+
+    #[test]
+    fn test_tx_read_your_writes_delete() {
+        let (engine, _dir) = test_engine();
+
+        engine.set(b"k1", b"v1").unwrap();
+
+        let mut txn = engine.begin_transaction();
+        txn.delete(b"k1").unwrap();
+
+        // Must see the key as deleted (tombstone) within the transaction
+        assert_eq!(txn.get(b"k1").unwrap(), None);
+
+        // Engine still has the value
+        assert_eq!(engine.get(b"k1").unwrap(), Some(b"v1".to_vec()));
+    }
+
+    #[test]
+    fn test_tx_read_your_writes_after_commit() {
+        let (engine, _dir) = test_engine();
+
+        let mut txn = engine.begin_transaction();
+        txn.put(b"k1", b"v1").unwrap();
+        assert_eq!(txn.get(b"k1").unwrap(), Some(b"v1".to_vec()));
+        txn.commit().unwrap();
+
+        // After commit, engine must have the value
+        assert_eq!(engine.get(b"k1").unwrap(), Some(b"v1".to_vec()));
+    }
+
+    #[test]
+    fn test_tx_read_your_writes_after_rollback() {
+        let (engine, _dir) = test_engine();
+
+        let mut txn = engine.begin_transaction();
+        txn.put(b"k1", b"v1").unwrap();
+        assert_eq!(txn.get(b"k1").unwrap(), Some(b"v1".to_vec()));
+
+        txn.rollback();
+
+        // After rollback, engine must not have the value
+        assert_eq!(engine.get(b"k1").unwrap(), None);
     }
 }

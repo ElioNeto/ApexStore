@@ -4,12 +4,16 @@
 //! HTML page with live engine statistics. The page auto-refreshes every 5
 //! seconds using a JavaScript timer.
 
+use crate::api::auth::{require_permission, Permission};
 use crate::LsmEngine;
-use actix_web::{get, web, HttpResponse, Responder};
+use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
 
 /// Handler for `GET /admin/dashboard` — returns an HTML monitoring page.
 #[get("/dashboard")]
-pub async fn admin_dashboard(engine: web::Data<LsmEngine>) -> impl Responder {
+pub async fn admin_dashboard(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Admin) {
+        return e;
+    }
     // Fetch engine stats
     let stats = engine.stats_all().unwrap_or_default();
     let column_families = {

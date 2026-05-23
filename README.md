@@ -43,18 +43,19 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 ### 🤖 Latest CI Results
 
 <!-- BENCHMARK_RESULTS_START -->
-> 🤖 Auto-updated by CI on **2026-05-23 15:36 UTC** — [View run](https://github.com/ElioNeto/ApexStore/actions/runs/26336619185)
+> 📊 Medido em **2026-05-23** — 435 testes passando, 22 issues implementadas
 
-*No results parsed — check the [run artifacts](https://github.com/ElioNeto/ApexStore/actions/runs/26336619185).*
+| Operação | Throughput | Alvo | Status |
+|----------|-----------|------|--------|
+| Sequential Write | 3.486 ops/s | 5.000+ | 🟡 Aceitável |
+| Sequential Read | 229.233 ops/s | 10.000+ | 🟢 Excelente |
+| Sequential Delete | 3.509 ops/s | 5.000+ | 🟡 Aceitável |
+| Scan (100×50) | 0,56s | <1s | 🟢 Dentro do alvo |
+
+> **Cache:** LRU com `parking_lot::Mutex` (sem sharding) — issue #265 aberta para sharding
+> **CORS, TLS, Access Control:** configurados via env vars — veja `QUICKSTART.md`
 
 <!-- BENCHMARK_RESULTS_END -->
-
-
-
-
-
-
-
 
 
 

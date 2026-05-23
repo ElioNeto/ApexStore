@@ -24,6 +24,14 @@ pub struct ServerConfig {
     /// CDC endpoint URL for streaming data changes.
     /// When set, CDC is enabled and data mutations are posted as JSON to this endpoint.
     pub cdc_endpoint: Option<String>,
+
+    /// Enable/disable CORS middleware (default: true)
+    pub cors_enabled: bool,
+    /// Comma-separated allowed origins for CORS (empty = allow all)
+    pub cors_origins: Option<Vec<String>>,
+
+    /// Enable/disable access control middleware (default: false)
+    pub access_control_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +57,9 @@ impl Default for ServerConfig {
             rate_limit_enabled: true,
             rate_limit_requests_per_minute: 100,
             cdc_endpoint: None,
+            cors_enabled: true,
+            cors_origins: None,
+            access_control_enabled: false,
         }
     }
 }
@@ -121,6 +132,21 @@ impl ServerConfig {
 
         let cdc_endpoint = env::var("CDC_ENDPOINT").ok();
 
+        let cors_enabled = env::var("CORS_ENABLED")
+            .unwrap_or_else(|_| "true".to_string())
+            .parse::<bool>()
+            .unwrap_or(true);
+
+        let cors_origins_str = env::var("CORS_ORIGINS").ok();
+        let cors_origins = cors_origins_str
+            .filter(|s| !s.is_empty())
+            .map(|s| s.split(',').map(|o| o.trim().to_string()).collect());
+
+        let access_control_enabled = env::var("ACCESS_CONTROL_ENABLED")
+            .unwrap_or_else(|_| "false".to_string())
+            .parse::<bool>()
+            .unwrap_or(false);
+
         Self {
             host,
             port,
@@ -137,6 +163,9 @@ impl ServerConfig {
             rate_limit_enabled,
             rate_limit_requests_per_minute,
             cdc_endpoint,
+            cors_enabled,
+            cors_origins,
+            access_control_enabled,
         }
     }
 
@@ -188,6 +217,25 @@ impl ServerConfig {
             match &self.cdc_endpoint {
                 Some(url) => format!("Enabled ({})", url),
                 None => "Disabled".to_string(),
+            }
+        );
+        println!(
+            "   CORS: {}",
+            if self.cors_enabled {
+                match &self.cors_origins {
+                    Some(origins) => format!("Enabled (origins: {})", origins.join(", ")),
+                    None => "Enabled (all origins allowed)".to_string(),
+                }
+            } else {
+                "Disabled".to_string()
+            }
+        );
+        println!(
+            "   Access Control: {}",
+            if self.access_control_enabled {
+                "Enabled"
+            } else {
+                "Disabled"
             }
         );
         println!();

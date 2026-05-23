@@ -1,6 +1,7 @@
 use lru::LruCache;
+use parking_lot::Mutex;
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 pub trait Cache: Clone + Send + Sync + 'static {}
 
@@ -46,17 +47,17 @@ impl GlobalBlockCache {
     }
 
     pub fn get(&self, table_id: u64, block_idx: usize) -> Option<Vec<u8>> {
-        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = self.cache.lock();
         cache.get(&(table_id, block_idx)).cloned()
     }
 
     pub fn put(&self, table_id: u64, block_idx: usize, data: Vec<u8>) {
-        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = self.cache.lock();
         cache.put((table_id, block_idx), data);
     }
 
     pub fn stats(&self) -> CacheStats {
-        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        let cache = self.cache.lock();
         CacheStats {
             len: cache.len(),
             cap: cache.cap().get(),

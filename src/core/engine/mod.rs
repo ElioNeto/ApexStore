@@ -1052,6 +1052,41 @@ impl<C: Cache> Engine<C> {
         }
 
         let result = core.version_set().get(cf, key);
+        // Check TTL expiry for keys stored in SSTable / in-memory Table.
+        // The version_set.get() above checks LogRecord.is_expired() for
+        // the SSTable read path, but the in-memory Table.data path only
+        // has raw Vec<u8> values (no expires_at).  We store TTL metadata
+        // as __ttl:{key} -> expires_at entries alongside real data, so
+        // we look up that side-table here.
+        let result = if result.is_some() {
+            let ttl_key = format!("__ttl:{}", String::from_utf8_lossy(key)).into_bytes();
+            if let Some(ttl_value) = core.version_set().get(cf, &ttl_key) {
+                if ttl_value.len() == 16 {
+                    let expires_at = u128::from_le_bytes(
+                        ttl_value
+                            .as_slice()
+                            .try_into()
+                            .unwrap_or(u128::MAX.to_le_bytes()),
+                    );
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    if now >= expires_at {
+                        None
+                    } else {
+                        result
+                    }
+                } else {
+                    result
+                }
+            } else {
+                result
+            }
+        } else {
+            result
+        };
+
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_get(elapsed_us);
         match &result {
@@ -1152,32 +1187,44 @@ impl<C: Cache> Engine<C> {
             merge_iter.next();
         }
 
-        // Filter out expired entries that are still in a memtable.
-        // Keys from SSTables cannot be checked for TTL because the
-        // LogRecord metadata (including expires_at) is lost during
-        // flush (see flush_memtable_impl / Table::build).
-        //
-        // NOTE: flush_memtable_impl already skips expired keys, so
-        // the only expired keys that can appear are those written
-        // recently (still in memtable, not yet flushed).  We look
-        // them up here and remove them from results.
-        if let Some(memtables) = core.memtables().get(cf) {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos();
-            results.retain(|(k, _)| {
-                // Check memtables in reverse (newest first)
+        // Filter out expired entries using TTL metadata, and also skip
+        // internal metadata keys (__ttl:*) that should not be visible to users.
+        // Memtable entries have full LogRecord metadata (checked below),
+        // while SSTable/Table entries use the __ttl:{key} side-table.
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        results.retain(|(k, _)| {
+            // Skip internal metadata keys (__ttl:* prefix)
+            if k.starts_with(b"__ttl:") {
+                return false;
+            }
+            // 1. Check memtables (newest first) — full LogRecord with expires_at
+            if let Some(memtables) = core.memtables().get(cf) {
                 for mem in memtables.iter().rev() {
                     if let Some(record) = mem.data.get(k) {
                         // Found in a memtable — keep only if not expired
                         return !record.is_expired_at(now);
                     }
                 }
-                // Not found in any memtable (from SSTable) — keep as-is
-                true
-            });
-        }
+            }
+            // 2. Not in any memtable (from SSTable/Table) — check __ttl: side-table
+            let ttl_key = format!("__ttl:{}", String::from_utf8_lossy(k)).into_bytes();
+            if let Some(ttl_value) = core.version_set().get(cf, &ttl_key) {
+                if ttl_value.len() == 16 {
+                    let expires_at = u128::from_le_bytes(
+                        ttl_value
+                            .as_slice()
+                            .try_into()
+                            .unwrap_or(u128::MAX.to_le_bytes()),
+                    );
+                    return now < expires_at;
+                }
+            }
+            // No TTL metadata → keep as-is
+            true
+        });
 
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_scan(elapsed_us);
@@ -1365,9 +1412,10 @@ impl<C: Cache> Engine<C> {
         if let Some(memtables) = core.memtables_mut().get_mut(cf) {
             if let Some(mem) = memtables.pop() {
                 let records = mem.data.len();
-                // NOTE: TTL / expires_at metadata is stripped when converting
-                // LogRecord to raw Vec<u8> for Table::build.  Expired keys
-                // are filtered out here so they never reach the SSTable.
+                // TTL / expires_at metadata is preserved via __ttl:{key} entries
+                // in both the SSTable file and the in-memory Table.data so that
+                // expiry information survives flushes and restarts.
+                // Expired keys are filtered out here so they never reach the SSTable.
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -1394,6 +1442,7 @@ impl<C: Cache> Engine<C> {
                 // Write SSTable using SstableBuilder (preserves LogRecord
                 // metadata including is_deleted for correct tombstone vs
                 // empty-value distinction when read back via SstableReader).
+                let mut ttl_entries: Vec<(Vec<u8>, u128)> = Vec::new();
                 {
                     let mut builder = SstableBuilder::new_with_encryption(
                         output_path.clone(),
@@ -1406,6 +1455,22 @@ impl<C: Cache> Engine<C> {
                             continue;
                         }
                         builder.add(key, record)?;
+                        // Track TTL entries so we can persist them as
+                        // __ttl:{key} -> expires_at in the SSTable and
+                        // also in the in-memory Table for crash-safe reads.
+                        if let Some(expires_at) = record.expires_at {
+                            ttl_entries.push((key.clone(), expires_at));
+                        }
+                    }
+                    // Write TTL metadata entries into the SSTable so that
+                    // after a restart the engine can detect expired keys
+                    // that were flushed.
+                    for (key, expires_at) in &ttl_entries {
+                        let ttl_key =
+                            format!("__ttl:{}", String::from_utf8_lossy(key)).into_bytes();
+                        let ttl_value = expires_at.to_le_bytes().to_vec();
+                        let ttl_record = LogRecord::new(ttl_key, ttl_value);
+                        builder.add(&ttl_record.key, &ttl_record)?;
                     }
                     builder.finish()?;
                 }
@@ -1414,12 +1479,19 @@ impl<C: Cache> Engine<C> {
                 // Keep the raw BTreeMap for the in-memory fast path, but also
                 // set the path so that VersionSet::get() can fall through to
                 // the SSTable reader for correct tombstone detection.
-                let raw_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> = mem
+                let mut raw_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> = mem
                     .data
                     .into_iter()
                     .filter(|(_, r)| !r.is_expired_at(now))
                     .map(|(k, r)| (k, r.value))
                     .collect();
+                // Add TTL metadata to the in-memory Table so that fast
+                // reads from table.data can correctly detect expiry.
+                for (key, expires_at) in &ttl_entries {
+                    let ttl_key = format!("__ttl:{}", String::from_utf8_lossy(key)).into_bytes();
+                    let ttl_value = expires_at.to_le_bytes().to_vec();
+                    raw_data.insert(ttl_key, ttl_value);
+                }
 
                 let mut table =
                     Table::from_sstable_path(&output_path, Some(&self.options.encryption))?;
