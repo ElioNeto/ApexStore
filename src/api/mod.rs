@@ -328,7 +328,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     let engine_data = web::Data::from(engine.clone());
     let rate_limiter_state =
         web::Data::new(RateLimiterState::new(config.rate_limit_requests_per_minute));
-    let token_manager = web::Data::new(TokenManager::new());
+    let token_manager = web::Data::new(TokenManager::new_with_engine(engine.clone()));
     let auth_enabled = web::Data::new(config.auth.enabled);
     let graphql_schema = web::Data::new(graphql::build_schema(engine.clone()));
 

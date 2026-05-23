@@ -2,24 +2,108 @@
 
 use super::token::{generate_token, ApiToken, Permission};
 use super::AuthError;
+use crate::LsmEngine;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+/// Prefix used for storing API tokens in the engine
+const TOKEN_PREFIX: &str = "__token:";
+
 /// Token manager for storing and retrieving tokens
+///
+/// Tokens are cached in a memory HashMap for fast access and optionally
+/// persisted in the LSM engine under the `__token:*` prefix for durability
+/// across server restarts.
 #[derive(Clone)]
 pub struct TokenManager {
     tokens: Arc<RwLock<HashMap<String, ApiToken>>>,
+    engine: Option<Arc<LsmEngine>>,
 }
 
 impl TokenManager {
-    /// Create new token manager
+    /// Create new token manager (in-memory only, no persistence)
     pub fn new() -> Self {
         Self {
             tokens: Arc::new(RwLock::new(HashMap::new())),
+            engine: None,
         }
     }
 
-    /// Create a new token
+    /// Create new token manager with engine persistence.
+    ///
+    /// All existing tokens stored under the `__token:*` prefix are loaded
+    /// into memory on construction. Subsequent `create_token` and
+    /// `delete_token` calls are automatically persisted to the engine.
+    pub fn new_with_engine(engine: Arc<LsmEngine>) -> Self {
+        let manager = Self {
+            tokens: Arc::new(RwLock::new(HashMap::new())),
+            engine: Some(engine),
+        };
+        if let Err(e) = manager.load_tokens_from_engine() {
+            tracing::warn!(target: "apexstore::auth", "Failed to load tokens from engine: {}", e);
+        }
+        manager
+    }
+
+    /// Load all `__token:*` entries from the engine into the in-memory cache.
+    fn load_tokens_from_engine(&self) -> Result<(), AuthError> {
+        if let Some(ref engine) = self.engine {
+            use crate::core::engine::MAX_SCAN_LIMIT;
+            let (results, _cursor) = engine
+                .search_prefix(TOKEN_PREFIX, None, MAX_SCAN_LIMIT)
+                .map_err(|e| AuthError::Internal(format!("Engine scan error: {}", e)))?;
+
+            let mut tokens = self
+                .tokens
+                .write()
+                .map_err(|e| AuthError::Internal(format!("Lock poisoned: {}", e)))?;
+
+            for (_key, value) in &results {
+                match serde_json::from_slice::<ApiToken>(value) {
+                    Ok(token) => {
+                        tokens.insert(token.id.clone(), token);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "apexstore::auth",
+                            "Failed to deserialize token from engine: {}",
+                            e
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Persist a single token to the engine (if engine is configured).
+    fn persist_token(&self, token: &ApiToken) -> Result<(), AuthError> {
+        if let Some(ref engine) = self.engine {
+            let key = format!("{}{}", TOKEN_PREFIX, token.id);
+            let value = serde_json::to_vec(token)
+                .map_err(|e| AuthError::Internal(format!("Serialization error: {}", e)))?;
+            engine
+                .put_cf("default", key.as_bytes().to_vec(), value)
+                .map_err(|e| AuthError::Internal(format!("Engine write error: {}", e)))?;
+        }
+        Ok(())
+    }
+
+    /// Remove a single token from the engine (if engine is configured).
+    fn delete_persisted_token(&self, id: &str) -> Result<(), AuthError> {
+        if let Some(ref engine) = self.engine {
+            let key = format!("{}{}", TOKEN_PREFIX, id);
+            engine
+                .delete_cf("default", key.as_bytes())
+                .map_err(|e| AuthError::Internal(format!("Engine delete error: {}", e)))?;
+        }
+        Ok(())
+    }
+
+    /// Create a new token.
+    ///
+    /// The token is persisted to the engine before being added to the
+    /// in-memory cache. If persistence fails the create is aborted.
     pub fn create_token(
         &self,
         name: String,
@@ -28,6 +112,9 @@ impl TokenManager {
     ) -> Result<(String, ApiToken), AuthError> {
         let raw_token = generate_token();
         let token = ApiToken::new(name, &raw_token, expires_at, permissions)?;
+
+        // Persist to engine first (crash-safe: on restart the token is reloaded)
+        self.persist_token(&token)?;
 
         let mut tokens = self
             .tokens
@@ -79,7 +166,15 @@ impl TokenManager {
     }
 
     /// Delete token by ID
+    ///
+    /// The token is removed from the engine first, then from the in-memory
+    /// cache. If the engine delete fails the operation is aborted to keep
+    /// persistence consistent.
     pub fn delete_token(&self, id: &str) -> Result<(), AuthError> {
+        // Delete from engine first (crash-safe: on restart the token is
+        // still gone from the engine, stale cache is discarded on next load)
+        self.delete_persisted_token(id)?;
+
         let mut tokens = self
             .tokens
             .write()

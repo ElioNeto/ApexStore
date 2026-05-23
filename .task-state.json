@@ -1027,6 +1027,14 @@
       "files": ["src/api/rate_limiter.rs"],
       "depends_on": [],
       "notes": "Added get_client_ip() to extract IP from X-Forwarded-For header (first IP) with fallback to peer_addr(). Changed internal tracking from SocketAddr to IpAddr. Added parse_x_forwarded_for() pure function. 10 tests pass."
+    },
+    {
+      "id": "T260",
+      "description": "Issue #260: Token store in-memory — tokens são perdidos no restart do servidor",
+      "status": "done",
+      "files": ["src/api/auth/manager.rs", "src/api/mod.rs"],
+      "depends_on": [],
+      "notes": "Added engine field to TokenManager, new_with_engine(engine) constructor, load_tokens_from_engine on startup, persist_token/delete_persisted_token helpers. create_token() and delete_token() now persist to engine with __token:{id} key. start_server() passes engine to new_with_engine()."
     }
   ]
 }
