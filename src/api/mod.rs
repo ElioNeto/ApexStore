@@ -273,6 +273,39 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .route("/graphql/playground", web::get().to(graphql_playground));
 }
 
+/// Build CORS middleware from configuration.
+/// When disabled, returns a restrictive CORS policy that blocks all cross-origin
+/// requests (default-deny). When enabled, either allows specific origins or all
+/// origins depending on the `origins` parameter.
+fn build_cors(origins: &Option<Vec<String>>, enabled: bool) -> actix_cors::Cors {
+    if !enabled {
+        return actix_cors::Cors::default()
+            .max_age(0)
+            .allowed_origin_fn(|_, _| false);
+    }
+    let mut cors = match origins {
+        Some(origin_list) => {
+            let mut c = actix_cors::Cors::default()
+                .supports_credentials()
+                .max_age(3600);
+            for origin in origin_list {
+                c = c.allowed_origin(origin);
+            }
+            c
+        }
+        None => actix_cors::Cors::permissive(),
+    };
+    cors = cors
+        .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+        .allowed_headers(vec![
+            actix_web::http::header::AUTHORIZATION,
+            actix_web::http::header::CONTENT_TYPE,
+            actix_web::http::header::ACCEPT,
+        ])
+        .expose_headers(vec!["x-request-id"]);
+    cors
+}
+
 /// Start the REST API server.
 ///
 /// Registers SIGINT and SIGTERM handlers so that `engine.close()` is called
@@ -299,13 +332,18 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     let auth_enabled = web::Data::new(config.auth.enabled);
     let graphql_schema = web::Data::new(graphql::build_schema(engine.clone()));
 
+    let cors_enabled = config.cors_enabled;
+    let cors_origins = config.cors_origins.clone();
+
     let mut server_builder = HttpServer::new(move || {
-        App::new()
+        let app = App::new()
             .wrap(self::timeout_middleware::RequestTimeout)
             .wrap(RateLimiter)
             .wrap(actix_web::middleware::Logger::default())
-            .wrap(HttpAuthentication::bearer(self::auth::bearer_validator))
-            .app_data(engine_data.clone())
+            .wrap(build_cors(&cors_origins, cors_enabled))
+            .wrap(HttpAuthentication::bearer(self::auth::bearer_validator));
+
+        app.app_data(engine_data.clone())
             .app_data(rate_limiter_state.clone())
             .app_data(token_manager.clone())
             .app_data(auth_enabled.clone())
@@ -359,4 +397,39 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     });
 
     server.await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_cors_disabled() {
+        // Should not panic
+        let _cors = build_cors(&None, false);
+    }
+
+    #[test]
+    fn test_build_cors_permissive() {
+        let _cors = build_cors(&None, true);
+    }
+
+    #[test]
+    fn test_build_cors_with_specific_origins() {
+        let origins = Some(vec![
+            "https://myapp.com".to_string(),
+            "https://admin.myapp.com".to_string(),
+        ]);
+        let _cors = build_cors(&origins, true);
+    }
+
+    #[test]
+    fn test_config_cors_defaults() {
+        let config = ServerConfig::default();
+        assert!(config.cors_enabled, "CORS should be enabled by default");
+        assert!(
+            config.cors_origins.is_none(),
+            "CORS origins should be None by default"
+        );
+    }
 }
