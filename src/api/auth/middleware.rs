@@ -2,11 +2,14 @@
 
 use super::error::AuthError;
 use super::manager::TokenManager;
-use super::token::ApiToken;
+use super::token::{ApiToken, Permission};
 use actix_web::dev::ServiceRequest;
 use actix_web::web;
 use actix_web::Error;
 use actix_web::HttpMessage;
+use actix_web::HttpRequest;
+use actix_web::HttpResponse;
+use actix_web::ResponseError;
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 
 /// Bearer token validator for HTTP authentication middleware.
@@ -57,4 +60,40 @@ pub async fn bearer_validator(
 /// Extract token from request extensions
 pub fn extract_token(req: &actix_web::HttpRequest) -> Option<ApiToken> {
     req.extensions().get::<ApiToken>().cloned()
+}
+
+/// Require a specific permission for the current request.
+///
+/// When authentication is disabled, all requests pass through.
+/// When enabled, checks that the authenticated token has the required
+/// permission. Returns `AuthError::InsufficientPermissions` as an HTTP
+/// response if the token does not have the required permission.
+///
+/// Call this at the top of any handler that needs permission control:
+/// ```ignore
+/// if let Err(resp) = require_permission(&req, Permission::Read) {
+///     return resp;
+/// }
+/// ```
+pub fn require_permission(req: &HttpRequest, expected: Permission) -> Result<(), HttpResponse> {
+    // Check if auth is enabled via the flag stored in app_data by start_server
+    let auth_enabled = req
+        .app_data::<web::Data<bool>>()
+        .map(|flag| *flag.as_ref())
+        .unwrap_or(false);
+
+    if !auth_enabled {
+        return Ok(());
+    }
+
+    match req.extensions().get::<ApiToken>() {
+        Some(token) => {
+            if token.has_permission(expected) {
+                Ok(())
+            } else {
+                Err(AuthError::InsufficientPermissions.error_response())
+            }
+        }
+        None => Err(AuthError::InsufficientPermissions.error_response()),
+    }
 }

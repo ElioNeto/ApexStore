@@ -6,12 +6,14 @@ pub mod health;
 pub mod rate_limiter;
 pub mod timeout_middleware;
 
-pub use self::auth::TokenManager;
+pub use self::auth::{require_permission, Permission, TokenManager};
 pub use self::config::ServerConfig;
 pub use self::graphql::AppSchema;
 use self::rate_limiter::{RateLimiter, RateLimiterState};
 use crate::LsmEngine;
-use actix_web::{delete, get, post, put, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{
+    delete, get, post, put, web, App, HttpRequest, HttpResponse, HttpServer, Responder,
+};
 use actix_web_httpauth::middleware::HttpAuthentication;
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use async_graphql_actix_web::{GraphQLRequest, GraphQLResponse};
@@ -36,7 +38,14 @@ pub struct SetBody {
 
 /// Handler for `GET /keys/{key}` — get a single key.
 #[get("/keys/{key}")]
-async fn get_key(engine: web::Data<LsmEngine>, path: web::Path<String>) -> impl Responder {
+async fn get_key(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    path: web::Path<String>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Read) {
+        return e;
+    }
     let key = path.into_inner();
     match engine.get_cf("default", key.as_bytes()) {
         Ok(Some(value)) => HttpResponse::Ok()
@@ -57,10 +66,14 @@ async fn get_key(engine: web::Data<LsmEngine>, path: web::Path<String>) -> impl 
 /// Handler for `PUT /keys/{key}` — upsert a key.
 #[put("/keys/{key}")]
 async fn put_key(
+    req: HttpRequest,
     engine: web::Data<LsmEngine>,
     path: web::Path<String>,
     body: web::Json<SetBody>,
 ) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Write) {
+        return e;
+    }
     let key = path.into_inner();
     match engine.put_cf(
         "default",
@@ -81,7 +94,14 @@ async fn put_key(
 
 /// Handler for `DELETE /keys/{key}` — delete a key.
 #[delete("/keys/{key}")]
-async fn delete_key(engine: web::Data<LsmEngine>, path: web::Path<String>) -> impl Responder {
+async fn delete_key(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    path: web::Path<String>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Delete) {
+        return e;
+    }
     let key = path.into_inner();
     match engine.delete_cf("default", key.as_bytes()) {
         Ok(_) => HttpResponse::Ok()
@@ -98,7 +118,14 @@ async fn delete_key(engine: web::Data<LsmEngine>, path: web::Path<String>) -> im
 
 /// Handler for `GET /keys` — list keys with optional prefix and limit.
 #[get("/keys")]
-async fn get_keys(engine: web::Data<LsmEngine>, query: web::Query<KeysQuery>) -> impl Responder {
+async fn get_keys(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    query: web::Query<KeysQuery>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Read) {
+        return e;
+    }
     let limit = query
         .limit
         .unwrap_or(100)
@@ -146,7 +173,10 @@ async fn get_keys(engine: web::Data<LsmEngine>, query: web::Query<KeysQuery>) ->
 /// Handler for `GET /metrics`.
 /// Returns Prometheus-formatted engine metrics.
 #[get("/metrics")]
-async fn get_metrics(engine: web::Data<LsmEngine>) -> impl Responder {
+async fn get_metrics(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Read) {
+        return e;
+    }
     let metrics = engine.metrics();
     HttpResponse::Ok()
         .content_type("text/plain; charset=utf-8")
@@ -155,7 +185,10 @@ async fn get_metrics(engine: web::Data<LsmEngine>) -> impl Responder {
 
 /// Handler for `GET /stats` — engine statistics.
 #[get("/stats")]
-async fn get_stats(engine: web::Data<LsmEngine>) -> impl Responder {
+async fn get_stats(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Read) {
+        return e;
+    }
     match engine.stats("default") {
         Ok(stats) => HttpResponse::Ok()
             .content_type("application/json")
@@ -179,7 +212,13 @@ async fn get_stats(engine: web::Data<LsmEngine>) -> impl Responder {
 
 /// Handler for `GET /admin/rate_limits` — view current rate limit state.
 #[get("/admin/rate_limits")]
-async fn admin_rate_limits(rate_limiter: web::Data<RateLimiterState>) -> impl Responder {
+async fn admin_rate_limits(
+    req: HttpRequest,
+    rate_limiter: web::Data<RateLimiterState>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Admin) {
+        return e;
+    }
     let summary = rate_limiter.get_state();
     HttpResponse::Ok()
         .content_type("application/json")
@@ -188,7 +227,10 @@ async fn admin_rate_limits(rate_limiter: web::Data<RateLimiterState>) -> impl Re
 
 /// Handler for `POST /admin/flush` — force memtable flush.
 #[post("/admin/flush")]
-async fn admin_flush(engine: web::Data<LsmEngine>) -> impl Responder {
+async fn admin_flush(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Admin) {
+        return e;
+    }
     match engine.flush_memtable() {
         Ok(_) => HttpResponse::Ok()
             .content_type("application/json")
@@ -204,7 +246,10 @@ async fn admin_flush(engine: web::Data<LsmEngine>) -> impl Responder {
 
 /// Handler for `POST /admin/compact` — force compaction.
 #[post("/admin/compact")]
-async fn admin_compact(engine: web::Data<LsmEngine>) -> impl Responder {
+async fn admin_compact(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Admin) {
+        return e;
+    }
     match engine.compact() {
         Ok(results) => {
             let summaries: Vec<serde_json::Value> = results
