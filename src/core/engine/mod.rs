@@ -1658,9 +1658,11 @@ impl<C: Cache> Engine<C> {
                         );
                     } else {
                         for (cf, group_indices, new_tables) in results {
-                            let removed_paths =
-                                core.version_set_mut()
-                                    .atomic_replace(&cf, &group_indices, new_tables);
+                            let removed_paths = core.version_set_mut().atomic_replace(
+                                &cf,
+                                &group_indices,
+                                new_tables,
+                            );
                             // Delete orphaned SSTable files from disk
                             for path in &removed_paths {
                                 if path.exists() {
