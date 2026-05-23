@@ -1,3 +1,4 @@
+pub mod access_control;
 pub mod admin;
 pub mod auth;
 pub mod config;
@@ -6,10 +7,12 @@ pub mod health;
 pub mod rate_limiter;
 pub mod timeout_middleware;
 
+use self::access_control::AccessControl;
 pub use self::auth::{require_permission, Permission, TokenManager};
 pub use self::config::ServerConfig;
 pub use self::graphql::AppSchema;
 use self::rate_limiter::{RateLimiter, RateLimiterState};
+use crate::infra::access_control::AccessController;
 use crate::LsmEngine;
 use actix_web::{
     delete, get, post, put, web, App, HttpRequest, HttpResponse, HttpServer, Responder,
@@ -380,10 +383,15 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     let cors_enabled = config.cors_enabled;
     let cors_origins = config.cors_origins.clone();
 
+    // Shared access control state
+    let access_controller = web::Data::new(AccessController::new());
+    let access_control_enabled = web::Data::new(config.access_control_enabled);
+
     let mut server_builder = HttpServer::new(move || {
         let app = App::new()
             .wrap(self::timeout_middleware::RequestTimeout)
             .wrap(RateLimiter)
+            .wrap(AccessControl)
             .wrap(actix_web::middleware::Logger::default())
             .wrap(build_cors(&cors_origins, cors_enabled))
             .wrap(HttpAuthentication::bearer(self::auth::bearer_validator));
@@ -393,6 +401,8 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
             .app_data(token_manager.clone())
             .app_data(auth_enabled.clone())
             .app_data(graphql_schema.clone())
+            .app_data(access_controller.clone())
+            .app_data(access_control_enabled.clone())
             .configure(configure)
     })
     .max_connections(config.max_connections)

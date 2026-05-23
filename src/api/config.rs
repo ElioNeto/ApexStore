@@ -29,6 +29,9 @@ pub struct ServerConfig {
     pub cors_enabled: bool,
     /// Comma-separated allowed origins for CORS (empty = allow all)
     pub cors_origins: Option<Vec<String>>,
+
+    /// Enable/disable access control middleware (default: false)
+    pub access_control_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +59,7 @@ impl Default for ServerConfig {
             cdc_endpoint: None,
             cors_enabled: true,
             cors_origins: None,
+            access_control_enabled: false,
         }
     }
 }
@@ -138,6 +142,11 @@ impl ServerConfig {
             .filter(|s| !s.is_empty())
             .map(|s| s.split(',').map(|o| o.trim().to_string()).collect());
 
+        let access_control_enabled = env::var("ACCESS_CONTROL_ENABLED")
+            .unwrap_or_else(|_| "false".to_string())
+            .parse::<bool>()
+            .unwrap_or(false);
+
         Self {
             host,
             port,
@@ -156,6 +165,7 @@ impl ServerConfig {
             cdc_endpoint,
             cors_enabled,
             cors_origins,
+            access_control_enabled,
         }
     }
 
@@ -218,6 +228,14 @@ impl ServerConfig {
                 }
             } else {
                 "Disabled".to_string()
+            }
+        );
+        println!(
+            "   Access Control: {}",
+            if self.access_control_enabled {
+                "Enabled"
+            } else {
+                "Disabled"
             }
         );
         println!();
