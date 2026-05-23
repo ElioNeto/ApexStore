@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🐛 Critical Bug Fixes
 
+- **#238** — CI: formatting check failed: applied `cargo fmt --all` across the codebase
+- **#239** — CI: clippy warning in `version_set.rs`: replaced verbose `if table.path.is_none() { return None; }` with concise `table.path.as_ref()?`
+- **#240** — CI: test failures in randomized competitive suite:
+  - **Data loss after compaction**: compaction results now carry in-memory data so re-compaction sees all records. Added `compaction_generation` counter to `VersionSet` to detect stale background plans. `Engine::compact()` holds the lock continuously to prevent race with `maybe_compact()`.
+  - **Empty-value inconsistency**: `test_random_ops_linearizability` no longer generates empty values (which the engine treats as tombstones)
 - **#191** — WAL recovery returns stale value after restart: deduplicate records by key during recovery, keeping only the last occurrence per (column_family, key) pair
 - **#190** — Compaction panics with index out of bounds in `pick_compaction()`: added bounds checks in `Compaction::compact()` and `LazyLevelingCompaction::pick_tables()`
 - **#189** — `VersionSet::get()` does not check `is_deleted`: treat empty values as tombstones (return None)
