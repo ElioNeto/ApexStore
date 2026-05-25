@@ -133,7 +133,8 @@ impl NoteGraph {
             }
 
             // Get forward links (notes this note points TO)
-            let forward_links = crate::notes::index::NoteIndex::get_forward_links(engine, cf, &current_note)?;
+            let forward_links =
+                crate::notes::index::NoteIndex::get_forward_links(engine, cf, &current_note)?;
             for target in &forward_links {
                 if nodes.len() >= config.max_nodes {
                     break;
@@ -147,9 +148,11 @@ impl NoteGraph {
                 });
 
                 // Update node connection count
-                nodes.entry(current_note.clone())
+                nodes
+                    .entry(current_note.clone())
                     .and_modify(|n| n.size = n.size.saturating_add(1));
-                nodes.entry(target.clone())
+                nodes
+                    .entry(target.clone())
                     .and_modify(|n| n.size = n.size.saturating_add(1));
 
                 if !visited.contains(target) {
@@ -171,7 +174,8 @@ impl NoteGraph {
             }
 
             // Get backlinks (notes that point TO this note)
-            let backlinks = crate::notes::index::NoteIndex::get_backlinks(engine, cf, &current_note)?;
+            let backlinks =
+                crate::notes::index::NoteIndex::get_backlinks(engine, cf, &current_note)?;
             for source in &backlinks {
                 if nodes.len() >= config.max_nodes {
                     break;
@@ -185,9 +189,11 @@ impl NoteGraph {
                 });
 
                 // Update node connection count
-                nodes.entry(current_note.clone())
+                nodes
+                    .entry(current_note.clone())
                     .and_modify(|n| n.size = n.size.saturating_add(1));
-                nodes.entry(source.clone())
+                nodes
+                    .entry(source.clone())
                     .and_modify(|n| n.size = n.size.saturating_add(1));
 
                 if !visited.contains(source) {
@@ -254,12 +260,8 @@ impl NoteGraph {
     /// Generate a human-readable label for a note path.
     fn note_label(path: &str) -> String {
         // Get the last component of the path (filename without extension)
-        let name = path
-            .split('/')
-            .next_back()
-            .unwrap_or(path);
-        name.trim_end_matches(".md")
-            .replace(['-', '_'], " ")
+        let name = path.split('/').next_back().unwrap_or(path);
+        name.trim_end_matches(".md").replace(['-', '_'], " ")
     }
 
     /// Check if a note has a specific tag (uses prefix scan on tag index).
@@ -320,11 +322,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
-        crate::core::engine::Engine::new_from_config(
-            &config,
-            GlobalBlockCache::new(10, 4096),
-        )
-        .unwrap()
+        crate::core::engine::Engine::new_from_config(&config, GlobalBlockCache::new(10, 4096))
+            .unwrap()
     }
 
     #[test]

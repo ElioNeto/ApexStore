@@ -4,6 +4,7 @@ pub mod auth;
 pub mod config;
 pub mod graphql;
 pub mod health;
+pub mod notes;
 pub mod rate_limiter;
 pub mod timeout_middleware;
 
@@ -315,6 +316,8 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .service(health::liveness)
         .service(health::readiness)
         .service(health::startup)
+        // Notes & Tags endpoints
+        .configure(notes::configure)
         // GraphQL endpoints
         .route("/graphql", web::post().to(graphql_handler))
         .route("/graphql", web::get().to(graphql_handler))
@@ -379,6 +382,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     let token_manager = web::Data::new(TokenManager::new_with_engine(engine.clone()));
     let auth_enabled = web::Data::new(config.auth.enabled);
     let graphql_schema = web::Data::new(graphql::build_schema(engine.clone()));
+    let note_engine = web::Data::new(crate::notes::NoteEngine::new(engine.clone()));
 
     let cors_enabled = config.cors_enabled;
     let cors_origins = config.cors_origins.clone();
@@ -401,6 +405,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
             .app_data(token_manager.clone())
             .app_data(auth_enabled.clone())
             .app_data(graphql_schema.clone())
+            .app_data(note_engine.clone())
             .app_data(access_controller.clone())
             .app_data(access_control_enabled.clone())
             .configure(configure)

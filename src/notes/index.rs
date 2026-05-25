@@ -168,8 +168,7 @@ impl NoteIndex {
         let mut sources: Vec<String> = match engine.get_cf(cf, key.as_bytes())? {
             Some(bytes) => {
                 let val = String::from_utf8_lossy(&bytes);
-                serde_json::from_str(&val)
-                    .unwrap_or_default()
+                serde_json::from_str(&val).unwrap_or_default()
             }
             None => Vec::new(),
         };
@@ -195,8 +194,7 @@ impl NoteIndex {
         let mut sources: Vec<String> = match engine.get_cf(cf, key.as_bytes())? {
             Some(bytes) => {
                 let val = String::from_utf8_lossy(&bytes);
-                serde_json::from_str(&val)
-                    .unwrap_or_default()
+                serde_json::from_str(&val).unwrap_or_default()
             }
             None => return Ok(()),
         };
@@ -216,17 +214,9 @@ impl NoteIndex {
 
     /// Compute the diff between old and new link targets.
     fn compute_link_diff(old: &[String], new: &[String]) -> LinkDiff {
-        let added: Vec<String> = new
-            .iter()
-            .filter(|t| !old.contains(t))
-            .cloned()
-            .collect();
+        let added: Vec<String> = new.iter().filter(|t| !old.contains(t)).cloned().collect();
 
-        let removed: Vec<String> = old
-            .iter()
-            .filter(|t| !new.contains(t))
-            .cloned()
-            .collect();
+        let removed: Vec<String> = old.iter().filter(|t| !new.contains(t)).cloned().collect();
 
         LinkDiff { added, removed }
     }
@@ -243,11 +233,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
-        crate::core::engine::Engine::new_from_config(
-            &config,
-            GlobalBlockCache::new(10, 4096),
-        )
-        .unwrap()
+        crate::core::engine::Engine::new_from_config(&config, GlobalBlockCache::new(10, 4096))
+            .unwrap()
     }
 
     #[test]
@@ -255,8 +242,7 @@ mod tests {
         let engine = create_test_engine();
         let new_targets: Vec<String> = vec!["note-a".to_string(), "note-b".to_string()];
 
-        let diff = NoteIndex::index_links(&engine, "default", "source-note", &new_targets)
-            .unwrap();
+        let diff = NoteIndex::index_links(&engine, "default", "source-note", &new_targets).unwrap();
 
         assert_eq!(diff.added.len(), 2);
         assert!(diff.removed.is_empty());
@@ -375,8 +361,7 @@ mod tests {
     fn test_empty_targets() {
         let engine = create_test_engine();
 
-        let diff = NoteIndex::index_links(&engine, "default", "empty-note", &[])
-            .unwrap();
+        let diff = NoteIndex::index_links(&engine, "default", "empty-note", &[]).unwrap();
         assert!(diff.added.is_empty());
         assert!(diff.removed.is_empty());
 

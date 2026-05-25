@@ -12,6 +12,7 @@
 //! - `#tag` — inline tag
 //! - `#tag/subtag` — nested tag
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// The type of a parsed link.
@@ -43,7 +44,7 @@ pub struct Wikilink {
 }
 
 /// Parsed YAML frontmatter from a note.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Frontmatter {
     /// Note title from `title:` field.
     pub title: Option<String>,
@@ -90,7 +91,8 @@ pub fn parse_wikilinks(content: &str) -> Vec<Wikilink> {
     while i < len {
         // Check for `![[` (embed) or `[[` (link)
         if i + 1 < len {
-            let is_embed = bytes[i] == b'!' && i + 2 < len && bytes[i + 1] == b'[' && bytes[i + 2] == b'[';
+            let is_embed =
+                bytes[i] == b'!' && i + 2 < len && bytes[i + 1] == b'[' && bytes[i + 2] == b'[';
             let is_link = bytes[i] == b'[' && i + 1 < len && bytes[i + 1] == b'[';
 
             if is_embed || is_link {
@@ -121,7 +123,14 @@ pub fn parse_wikilinks(content: &str) -> Vec<Wikilink> {
                     let (target, display_text) = if let Some(pipe_pos) = inner.find('|') {
                         let target = inner[..pipe_pos].trim().to_string();
                         let display = inner[pipe_pos + 1..].trim().to_string();
-                        (target, if display.is_empty() { None } else { Some(display) })
+                        (
+                            target,
+                            if display.is_empty() {
+                                None
+                            } else {
+                                Some(display)
+                            },
+                        )
                     } else {
                         (inner.trim().to_string(), None)
                     };
@@ -176,7 +185,7 @@ pub fn parse_tags(content: &str) -> Vec<String> {
 
     while i < len {
         // Track code blocks (```)
-        if i + 2 < len && &bytes[i..i+3] == b"```" {
+        if i + 2 < len && &bytes[i..i + 3] == b"```" {
             in_code_block = !in_code_block;
             i += 3;
             continue;
@@ -190,12 +199,12 @@ pub fn parse_tags(content: &str) -> Vec<String> {
         }
 
         // Track HTML comments (<!-- -->)
-        if i + 3 < len && &bytes[i..i+4] == b"<!--" {
+        if i + 3 < len && &bytes[i..i + 4] == b"<!--" {
             in_html_comment = true;
             i += 4;
             continue;
         }
-        if in_html_comment && i + 2 < len && &bytes[i..i+3] == b"-->" {
+        if in_html_comment && i + 2 < len && &bytes[i..i + 3] == b"-->" {
             in_html_comment = false;
             i += 3;
             continue;
@@ -284,7 +293,8 @@ fn parse_yaml_block(block: &str) -> Frontmatter {
                 if value.starts_with('[') && value.ends_with(']') {
                     // Parse `[item1, item2, ...]` inline list
                     let inner = value.trim_start_matches('[').trim_end_matches(']');
-                    list_values = inner.split(',')
+                    list_values = inner
+                        .split(',')
                         .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
                         .filter(|s| !s.is_empty())
                         .collect();
@@ -316,7 +326,9 @@ fn parse_yaml_block(block: &str) -> Frontmatter {
                 }
             } else {
                 match key.as_str() {
-                    "title" => fm.title = Some(value.trim_matches('"').trim_matches('\'').to_string()),
+                    "title" => {
+                        fm.title = Some(value.trim_matches('"').trim_matches('\'').to_string())
+                    }
                     "created" => fm.created = Some(value.to_string()),
                     "updated" => fm.updated = Some(value.to_string()),
                     "tags" => {
@@ -327,7 +339,8 @@ fn parse_yaml_block(block: &str) -> Frontmatter {
                         }
                     }
                     _ => {
-                        fm.custom.insert(key, value.trim_matches('"').trim_matches('\'').to_string());
+                        fm.custom
+                            .insert(key, value.trim_matches('"').trim_matches('\'').to_string());
                     }
                 }
             }
@@ -465,7 +478,10 @@ mod tests {
     fn test_wikilink_alias_with_pipe() {
         let links = parse_wikilinks("[[note|display with spaces]]");
         assert_eq!(links[0].target, "note");
-        assert_eq!(links[0].display_text, Some("display with spaces".to_string()));
+        assert_eq!(
+            links[0].display_text,
+            Some("display with spaces".to_string())
+        );
     }
 
     // ── Tag tests ───────────────────────────────────────────────────────

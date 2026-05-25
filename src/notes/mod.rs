@@ -52,6 +52,9 @@ pub use parser::{
     Wikilink,
 };
 
+/// Type alias for the note engine using the default LSM engine with `GlobalBlockCache`.
+pub type NotesEngine = NoteEngine<std::sync::Arc<crate::storage::cache::GlobalBlockCache>>;
+
 /// The high-level note engine that wraps the LSM storage engine and provides
 /// Obsidian-like note operations.
 ///
@@ -110,7 +113,12 @@ impl<C: Cache> NoteEngine<C> {
         let link_targets: Vec<String> = parsed
             .links
             .iter()
-            .filter(|l| matches!(l.link_type, parser::LinkType::WikiLink | parser::LinkType::BlockRef))
+            .filter(|l| {
+                matches!(
+                    l.link_type,
+                    parser::LinkType::WikiLink | parser::LinkType::BlockRef
+                )
+            })
             .map(|l| l.target.clone())
             .collect();
 
@@ -146,8 +154,7 @@ impl<C: Cache> NoteEngine<C> {
         self.remove_note_tags(path)?;
 
         // Delete the note content
-        self.engine
-            .delete_cf(&self.cf, note_key.into_bytes())?;
+        self.engine.delete_cf(&self.cf, note_key.into_bytes())?;
 
         Ok(())
     }
@@ -171,7 +178,12 @@ impl<C: Cache> NoteEngine<C> {
         let link_targets: Vec<String> = parsed
             .links
             .iter()
-            .filter(|l| matches!(l.link_type, parser::LinkType::WikiLink | parser::LinkType::BlockRef))
+            .filter(|l| {
+                matches!(
+                    l.link_type,
+                    parser::LinkType::WikiLink | parser::LinkType::BlockRef
+                )
+            })
             .map(|l| l.target.clone())
             .collect();
 
@@ -180,13 +192,15 @@ impl<C: Cache> NoteEngine<C> {
 
         // Store content under new path
         let new_note_key = format!("note:{}", new_path);
-        self.engine
-            .put_cf(&self.cf, new_note_key.into_bytes(), content.as_bytes().to_vec())?;
+        self.engine.put_cf(
+            &self.cf,
+            new_note_key.into_bytes(),
+            content.as_bytes().to_vec(),
+        )?;
 
         // Delete old note content
         let old_note_key = format!("note:{}", old_path);
-        self.engine
-            .delete_cf(&self.cf, old_note_key.into_bytes())?;
+        self.engine.delete_cf(&self.cf, old_note_key.into_bytes())?;
 
         Ok(())
     }
@@ -198,17 +212,15 @@ impl<C: Cache> NoteEngine<C> {
             None => "note:".to_string(),
         };
 
-        let (results, _cursor) = self
-            .engine
-            .search_prefix(&search_prefix, None, crate::core::engine::MAX_SCAN_LIMIT)?;
+        let (results, _cursor) =
+            self.engine
+                .search_prefix(&search_prefix, None, crate::core::engine::MAX_SCAN_LIMIT)?;
 
         let paths: Vec<String> = results
             .into_iter()
             .map(|(k, _)| {
                 let key = String::from_utf8_lossy(&k).to_string();
-                key.strip_prefix("note:")
-                    .unwrap_or(&key)
-                    .to_string()
+                key.strip_prefix("note:").unwrap_or(&key).to_string()
             })
             .collect();
 
@@ -223,8 +235,7 @@ impl<C: Cache> NoteEngine<C> {
             let tag_key = format!("tag:{}", tag);
 
             // Get existing notes with this tag
-            let mut notes: Vec<String> = match self.engine.get_cf(&self.cf, tag_key.as_bytes())?
-            {
+            let mut notes: Vec<String> = match self.engine.get_cf(&self.cf, tag_key.as_bytes())? {
                 Some(bytes) => {
                     let value = String::from_utf8_lossy(&bytes);
                     serde_json::from_str(&value).unwrap_or_default()
@@ -236,10 +247,7 @@ impl<C: Cache> NoteEngine<C> {
             if !notes.contains(&note_path.to_string()) {
                 notes.push(note_path.to_string());
                 let value = serde_json::to_string(&notes).map_err(|e| {
-                    crate::infra::error::LsmError::InvalidArgument(format!(
-                        "JSON error: {}",
-                        e
-                    ))
+                    crate::infra::error::LsmError::InvalidArgument(format!("JSON error: {}", e))
                 })?;
                 self.engine
                     .put_cf(&self.cf, tag_key.into_bytes(), value.into_bytes())?;
@@ -253,9 +261,9 @@ impl<C: Cache> NoteEngine<C> {
         // Scan for tags containing this note
         // Since we don't have a reverse tag index, we look up known tags
         // via prefix scan
-        let (results, _cursor) = self
-            .engine
-            .search_prefix("tag:", None, crate::core::engine::MAX_SCAN_LIMIT)?;
+        let (results, _cursor) =
+            self.engine
+                .search_prefix("tag:", None, crate::core::engine::MAX_SCAN_LIMIT)?;
 
         for (key, value) in &results {
             let mut notes: Vec<String> =
@@ -268,10 +276,7 @@ impl<C: Cache> NoteEngine<C> {
                     self.engine.delete_cf(&self.cf, key.clone())?;
                 } else {
                     let new_value = serde_json::to_string(&notes).map_err(|e| {
-                        crate::infra::error::LsmError::InvalidArgument(format!(
-                            "JSON error: {}",
-                            e
-                        ))
+                        crate::infra::error::LsmError::InvalidArgument(format!("JSON error: {}", e))
                     })?;
                     self.engine
                         .put_cf(&self.cf, key.clone(), new_value.into_bytes())?;
@@ -297,9 +302,9 @@ impl<C: Cache> NoteEngine<C> {
 
     /// List all tags with note counts.
     pub fn list_tags(&self) -> Result<Vec<(String, usize)>> {
-        let (results, _cursor) = self
-            .engine
-            .search_prefix("tag:", None, crate::core::engine::MAX_SCAN_LIMIT)?;
+        let (results, _cursor) =
+            self.engine
+                .search_prefix("tag:", None, crate::core::engine::MAX_SCAN_LIMIT)?;
 
         let mut tags = Vec::new();
         for (key, value) in &results {
@@ -312,6 +317,53 @@ impl<C: Cache> NoteEngine<C> {
         }
 
         Ok(tags)
+    }
+
+    /// Search notes by tag with cursor-based pagination.
+    ///
+    /// Returns a list of note paths and an optional cursor for the next page.
+    pub fn search_by_tag(
+        &self,
+        tag: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<(Vec<String>, Option<String>)> {
+        let (results, next_cursor) =
+            self.engine
+                .search_prefix(&format!("tag:{}", tag), cursor, limit)?;
+
+        let note_paths: Vec<String> = results
+            .into_iter()
+            .filter_map(|(k, v)| {
+                let key_str = String::from_utf8_lossy(&k).to_string();
+                if key_str == format!("tag:{}", tag) {
+                    // The direct tag entry — parse its value array
+                    let notes: Vec<String> =
+                        serde_json::from_str(&String::from_utf8_lossy(&v)).unwrap_or_default();
+                    Some(notes)
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect();
+
+        Ok((
+            note_paths,
+            next_cursor.map(|c| String::from_utf8_lossy(c.as_ref()).to_string()),
+        ))
+    }
+
+    // ── Link index queries ──────────────────────────────────────────────
+
+    /// Get all notes that link TO the given note (incoming links).
+    pub fn get_backlinks(&self, note_path: &str) -> Result<Vec<String>> {
+        NoteIndex::get_backlinks(&self.engine, &self.cf, note_path)
+    }
+
+    /// Get all notes that the given note links TO (outgoing links).
+    pub fn get_forward_links(&self, note_path: &str) -> Result<Vec<String>> {
+        NoteIndex::get_forward_links(&self.engine, &self.cf, note_path)
     }
 
     // ── Graph ──────────────────────────────────────────────────────────
@@ -356,11 +408,8 @@ mod tests {
         let mut config = LsmConfig::default();
         config.core.dir_path = dir.path().to_path_buf();
         let engine = Arc::new(
-            crate::core::engine::Engine::new_from_config(
-                &config,
-                GlobalBlockCache::new(10, 4096),
-            )
-            .unwrap(),
+            crate::core::engine::Engine::new_from_config(&config, GlobalBlockCache::new(10, 4096))
+                .unwrap(),
         );
         NoteEngine::new(engine)
     }
@@ -425,12 +474,14 @@ mod tests {
         engine.put_note("source-note", content).unwrap();
 
         // Check forward links
-        let forward = NoteIndex::get_forward_links(engine.engine(), "default", "source-note").unwrap();
+        let forward =
+            NoteIndex::get_forward_links(engine.engine(), "default", "source-note").unwrap();
         assert!(forward.contains(&"target-note".to_string()));
         assert!(forward.contains(&"another".to_string()));
 
         // Check backlinks from target perspective
-        let backlinks = NoteIndex::get_backlinks(engine.engine(), "default", "target-note").unwrap();
+        let backlinks =
+            NoteIndex::get_backlinks(engine.engine(), "default", "target-note").unwrap();
         assert!(backlinks.contains(&"source-note".to_string()));
     }
 
@@ -475,11 +526,15 @@ mod tests {
     #[test]
     fn test_graph_from_engine() {
         let engine = create_note_engine();
-        engine.put_note("note-a", "Links to [[note-b]] and [[note-c]]").unwrap();
+        engine
+            .put_note("note-a", "Links to [[note-b]] and [[note-c]]")
+            .unwrap();
         engine.put_note("note-b", "Links to [[note-c]]").unwrap();
         engine.put_note("note-c", "Orphan").unwrap();
 
-        let graph = engine.build_graph("note-a", &GraphConfig::default()).unwrap();
+        let graph = engine
+            .build_graph("note-a", &GraphConfig::default())
+            .unwrap();
         assert!(graph.nodes.len() >= 2);
         assert_eq!(graph.root, "note-a");
     }
@@ -515,7 +570,8 @@ mod tests {
         engine.rename_note("note-x", "note-x-renamed").unwrap();
 
         // Note-Z should now link to Note-X-renamed
-        let backlinks = NoteIndex::get_backlinks(engine.engine(), "default", "note-x-renamed").unwrap();
+        let backlinks =
+            NoteIndex::get_backlinks(engine.engine(), "default", "note-x-renamed").unwrap();
         assert!(backlinks.contains(&"note-z".to_string()));
 
         // Old Note-X should have no backlinks
