@@ -6,6 +6,7 @@ pub mod graphql;
 pub mod health;
 pub mod notes;
 pub mod rate_limiter;
+pub mod sync;
 pub mod timeout_middleware;
 
 use self::access_control::AccessControl;
@@ -489,7 +490,9 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         // GraphQL endpoints
         .route("/graphql", web::post().to(graphql_handler))
         .route("/graphql", web::get().to(graphql_handler))
-        .route("/graphql/playground", web::get().to(graphql_playground));
+        .route("/graphql/playground", web::get().to(graphql_playground))
+        // WebSocket sync endpoint
+        .service(sync::sync_handler);
 }
 
 /// Build CORS middleware from configuration.
@@ -554,6 +557,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     let time_travel_engine = web::Data::new(Mutex::new(
         crate::infra::time_travel::TimeTravelEngine::new(100),
     ));
+    let sync_manager = web::Data::new(sync::SyncManager::new());
 
     let cors_enabled = config.cors_enabled;
     let cors_origins = config.cors_origins.clone();
@@ -578,6 +582,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
             .app_data(graphql_schema.clone())
             .app_data(note_engine.clone())
             .app_data(time_travel_engine.clone())
+            .app_data(sync_manager.clone())
             .app_data(access_controller.clone())
             .app_data(access_control_enabled.clone())
             .configure(configure)
