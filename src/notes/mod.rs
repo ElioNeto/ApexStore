@@ -40,6 +40,7 @@
 pub mod graph;
 pub mod index;
 pub mod parser;
+pub mod search;
 
 use crate::infra::error::Result;
 use crate::storage::cache::Cache;
@@ -51,6 +52,7 @@ pub use parser::{
     parse_frontmatter, parse_note, parse_tags, parse_wikilinks, Frontmatter, LinkType, ParsedNote,
     Wikilink,
 };
+pub use search::SearchHit;
 
 /// Type alias for the note engine using the default LSM engine with `GlobalBlockCache`.
 pub type NotesEngine = NoteEngine<std::sync::Arc<crate::storage::cache::GlobalBlockCache>>;
@@ -127,6 +129,9 @@ impl<C: Cache> NoteEngine<C> {
 
         // Update tag indexes
         self.index_tags(path, &parsed.inline_tags)?;
+
+        // Update full-text search index
+        let _ = search::FullTextSearch::index_note(&self.engine, &self.cf, path, content);
 
         Ok(())
     }
@@ -298,6 +303,9 @@ impl<C: Cache> NoteEngine<C> {
 
         // Remove tag indexes
         self.remove_note_tags(path)?;
+
+        // Remove full-text search index
+        let _ = search::FullTextSearch::remove_note(&self.engine, &self.cf, path);
 
         // Delete the note content
         self.engine.delete_cf(&self.cf, note_key.into_bytes())?;
@@ -510,6 +518,21 @@ impl<C: Cache> NoteEngine<C> {
     /// Get all notes that the given note links TO (outgoing links).
     pub fn get_forward_links(&self, note_path: &str) -> Result<Vec<String>> {
         NoteIndex::get_forward_links(&self.engine, &self.cf, note_path)
+    }
+
+    // ── Full-text search ────────────────────────────────────────────────
+
+    /// Search notes by content using full-text search.
+    pub fn search_notes(&self, query: &str, max_results: usize) -> Result<Vec<SearchHit>> {
+        search::FullTextSearch::search(&self.engine, &self.cf, query, max_results)
+    }
+
+    /// Re-index a specific note in the full-text search index.
+    pub fn reindex_note(&self, path: &str) -> Result<()> {
+        if let Some(content) = self.get_note(path)? {
+            search::FullTextSearch::index_note(&self.engine, &self.cf, path, &content)?;
+        }
+        Ok(())
     }
 
     // ── Graph ──────────────────────────────────────────────────────────

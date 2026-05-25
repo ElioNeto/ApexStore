@@ -59,6 +59,13 @@ pub struct RestoreQuery {
     timestamp: u128,
 }
 
+/// Query parameters for `GET /search`
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    q: String,
+    limit: Option<usize>,
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 /// `GET /notes` — list all notes with optional prefix filter.
@@ -501,6 +508,30 @@ async fn get_notes_by_tag(
 
 // ── Route configuration ─────────────────────────────────────────────────────
 
+/// `GET /search?q=...` — full-text search across all notes.
+#[get("/search")]
+async fn search_notes(
+    req: HttpRequest,
+    engine: web::Data<NotesEngine>,
+    query: web::Query<SearchQuery>,
+) -> impl Responder {
+    if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
+        return e;
+    }
+    let max_results = query.limit.unwrap_or(20).min(100);
+    match engine.search_notes(&query.q, max_results) {
+        Ok(results) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "results": results, "query": query.q })),
+        Err(e) => {
+            tracing::error!(target: "apexstore::api::notes", "Search failed: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "search failed" }))
+        }
+    }
+}
+
 /// Register all notes API routes under `/notes` and `/tags`.
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
@@ -519,6 +550,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .service(restore_version)
             .service(create_snapshot),
     )
+    .service(search_notes)
     .service(list_tags)
     .service(get_notes_by_tag);
 }
