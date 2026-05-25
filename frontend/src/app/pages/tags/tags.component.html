@@ -1,0 +1,76 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Tags</h1>
+      <p class="page-subtitle">Browse notes by tag</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadTags()" [disabled]="loadingTags()">
+      @if (loadingTags()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <div class="tags-layout">
+    <!-- Tags list -->
+    <aside class="tags-sidebar">
+      <div class="sidebar-label">All Tags</div>
+      @if (loadingTags() && tags().length === 0) {
+        <div class="loading-inline">
+          <span class="spinner" style="width:20px;height:20px;border-width:2px"></span>
+        </div>
+      } @else if (tags().length === 0) {
+        <div class="empty-state">No tags found</div>
+      } @else {
+        <div class="tags-list">
+          @for (tag of tags(); track tag) {
+            <div
+              class="tag-item"
+              [class.active]="selectedTag() === tag"
+              (click)="selectTag(tag)"
+            >
+              <hugeicons-icon [icon]="Tag01Icon" [size]="14" [strokeWidth]="1.5" />
+              <span>{{ tag }}</span>
+            </div>
+          }
+        </div>
+      }
+    </aside>
+
+    <!-- Notes for selected tag -->
+    <main class="tag-notes">
+      @if (!selectedTag()) {
+        <div class="empty-state">Select a tag to see its notes</div>
+      } @else if (loadingNotes()) {
+        <div class="loading-state">
+          <span class="spinner" style="width:28px;height:28px;border-width:3px"></span>
+          <p>Loading notes...</p>
+        </div>
+      } @else if (tagNotes().length === 0) {
+        <div class="empty-state">No notes with tag "{{ selectedTag() }}"</div>
+      } @else {
+        <div class="notes-header">
+          <h2>Notes tagged "{{ selectedTag() }}"</h2>
+          <span class="badge badge-info">{{ tagNotes().length }} note(s)</span>
+        </div>
+        <div class="notes-list">
+          @for (note of tagNotes(); track note.path) {
+            <div class="note-card">
+              <div class="note-card-header">
+                <hugeicons-icon [icon]="Tag01Icon" [size]="14" [strokeWidth]="1.5" />
+                <span class="note-card-path">{{ note.path }}</span>
+              </div>
+              @if (note.updated_at) {
+                <p class="note-card-meta">Updated {{ note.updated_at | date:'medium' }}</p>
+              }
+              <p class="note-card-preview">{{ note.content | slice:0:200 }}{{ note.content.length > 200 ? '...' : '' }}</p>
+            </div>
+          }
+        </div>
+      }
+    </main>
+  </div>
+</div>

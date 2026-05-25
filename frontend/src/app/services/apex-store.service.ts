@@ -18,6 +18,29 @@ export interface ApiToken {
 }
 export type Permission = 'Read' | 'Write' | 'Delete' | 'Admin';
 
+export interface Note {
+  path: string;
+  content: string;
+  updated_at?: number;
+}
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type?: string;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  label?: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
 interface ApiResponse<T> {
   success: boolean;
   message: string;
@@ -73,6 +96,51 @@ export class ApexStoreService {
     return this.http
       .get<ApiResponse<{ records: SearchResult[] }>>(`${this.baseUrl}/scan`, this.opts())
       .pipe(map(r => r.data?.records ?? []));
+  }
+
+  // ── Notes ─────────────────────────────────────────────────────────────────
+
+  getNotes(prefix?: string): Observable<Note[]> {
+    const params = prefix ? `?prefix=${encodeURIComponent(prefix)}` : '';
+    return this.http
+      .get<ApiResponse<{ notes: Note[] }>>(`${this.baseUrl}/notes${params}`, this.opts())
+      .pipe(map(r => r.data?.notes ?? []));
+  }
+
+  getNote(path: string): Observable<Note> {
+    return this.http
+      .get<ApiResponse<Note>>(`${this.baseUrl}/notes/${encodeURIComponent(path)}`, this.opts())
+      .pipe(map(r => r.data!));
+  }
+
+  putNote(path: string, content: string): Observable<ApiResponse<null>> {
+    return this.http.put<ApiResponse<null>>(`${this.baseUrl}/notes/${encodeURIComponent(path)}`, { content }, this.opts());
+  }
+
+  deleteNote(path: string): Observable<ApiResponse<null>> {
+    return this.http.delete<ApiResponse<null>>(`${this.baseUrl}/notes/${encodeURIComponent(path)}`, this.opts());
+  }
+
+  // ── Notes Graph ───────────────────────────────────────────────────────────
+
+  getGraphData(path: string, depth: number = 1): Observable<GraphData> {
+    return this.http
+      .get<ApiResponse<GraphData>>(`${this.baseUrl}/notes/${encodeURIComponent(path)}/graph?depth=${depth}`, this.opts())
+      .pipe(map(r => r.data ?? { nodes: [], edges: [] }));
+  }
+
+  // ── Tags ──────────────────────────────────────────────────────────────────
+
+  getTags(): Observable<string[]> {
+    return this.http
+      .get<ApiResponse<{ tags: string[] }>>(`${this.baseUrl}/tags`, this.opts())
+      .pipe(map(r => r.data?.tags ?? []));
+  }
+
+  getTagNotes(tag: string): Observable<Note[]> {
+    return this.http
+      .get<ApiResponse<{ notes: Note[] }>>(`${this.baseUrl}/tags/${encodeURIComponent(tag)}/notes`, this.opts())
+      .pipe(map(r => r.data?.notes ?? []));
   }
 
   // ── Stats ─────────────────────────────────────────────────────────────────

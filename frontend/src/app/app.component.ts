@@ -10,6 +10,9 @@ import {
   Github01Icon,
   ZapIcon,
   BookOpenIcon,
+  NoteEditIcon,
+  Share08Icon,
+  Tag01Icon,
 } from '@hugeicons/core-free-icons';
 import { ToastComponent } from './components/toast/toast.component';
 import type { IconSvgObject } from '@hugeicons/angular';
@@ -44,6 +47,14 @@ export class AppComponent {
       items: [
         { path: '/keys', icon: Key01Icon, label: 'Key Explorer' },
         { path: '/features', icon: Flag01Icon, label: 'Feature Flags' },
+      ]
+    },
+    {
+      label: 'Content',
+      items: [
+        { path: '/notes', icon: NoteEditIcon, label: 'Notes' },
+        { path: '/graph', icon: Share08Icon, label: 'Graph View' },
+        { path: '/tags', icon: Tag01Icon, label: 'Tags' },
       ]
     },
     {
