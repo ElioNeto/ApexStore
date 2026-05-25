@@ -1,0 +1,114 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">SQL Runner</h1>
+      <p class="page-subtitle">Execute SQL queries against the ApexStore backend</p>
+    </div>
+  </div>
+
+  <div class="runner-layout">
+    <!-- Query editor -->
+    <div class="editor-section">
+      <div class="card">
+        <div class="card-header" style="justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:10px">
+            <hugeicons-icon [icon]="ZapIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+            <span class="card-title">Query</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" (click)="clearResult()" [disabled]="!result() && !error()">
+            <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Clear
+          </button>
+        </div>
+        <div class="card-body">
+          <textarea
+            [(ngModel)]="query"
+            placeholder="SELECT * FROM keys LIMIT 10;"
+            class="query-editor"
+            (keydown.control.enter)="executeQuery()"
+            (keydown.meta.enter)="executeQuery()"
+          ></textarea>
+          <div class="editor-footer">
+            <span class="hint">Ctrl+Enter to execute</span>
+            <button class="btn btn-primary" [disabled]="!query.trim() || loading()" (click)="executeQuery()">
+              @if (loading()) {
+                <span class="spinner"></span>
+              } @else {
+                <hugeicons-icon [icon]="Search01Icon" [size]="15" [strokeWidth]="1.5" />
+              }
+              {{ loading() ? 'Running...' : 'Execute' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error display -->
+      @if (error(); as err) {
+        <div class="error-box">
+          <hugeicons-icon [icon]="CancelCircleIcon" [size]="18" [strokeWidth]="1.5" />
+          <div>
+            <strong>Query Error</strong>
+            <p>{{ err }}</p>
+          </div>
+        </div>
+      }
+
+      <!-- Results table -->
+      @if (result(); as res) {
+        <div class="card" style="margin-top:16px">
+          <div class="card-header" style="justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span class="card-title">Results</span>
+              <span class="badge badge-info">{{ res.row_count }} rows</span>
+              <span class="badge badge-warning">{{ res.elapsed_ms }}ms</span>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="result-table">
+              <thead>
+                <tr>
+                  @for (col of res.columns; track col) {
+                    <th>{{ col }}</th>
+                  }
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of res.rows; track $index) {
+                  <tr>
+                    @for (col of res.columns; track col) {
+                      <td class="mono">{{ row[col] ?? '—' }}</td>
+                    }
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          @if (res.rows.length === 0) {
+            <div class="empty-state">Query executed successfully but returned no rows.</div>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- History sidebar -->
+    <aside class="history-section">
+      <div class="card">
+        <div class="card-header" style="justify-content:space-between">
+          <span class="card-title">History</span>
+          <button class="btn btn-secondary btn-sm" (click)="clearHistory()" [disabled]="history().length === 0">
+            <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" />
+          </button>
+        </div>
+        <div class="history-list">
+          @if (history().length === 0) {
+            <div class="empty-state-sm">No queries yet.</div>
+          }
+          @for (q of history(); track $index) {
+            <div class="history-item" (click)="loadFromHistory(q)">
+              <code>{{ q.length > 80 ? q.substring(0, 80) + '...' : q }}</code>
+            </div>
+          }
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>

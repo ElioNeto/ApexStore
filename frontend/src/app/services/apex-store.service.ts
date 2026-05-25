@@ -182,4 +182,138 @@ export class ApexStoreService {
   deleteToken(id: string): Observable<ApiResponse<null>> {
     return this.http.delete<ApiResponse<null>>(`${this.baseUrl}/admin/tokens/${id}`, this.opts());
   }
+
+  // ── Compaction ──────────────────────────────────────────────────────────
+
+  flush(): Observable<ApiResponse<null>> {
+    return this.http.post<ApiResponse<null>>(`${this.baseUrl}/admin/flush`, {}, this.opts());
+  }
+
+  compact(): Observable<ApiResponse<null>> {
+    return this.http.post<ApiResponse<null>>(`${this.baseUrl}/admin/compact`, {}, this.opts());
+  }
+
+  // ── Rate Limits ─────────────────────────────────────────────────────────
+
+  getRateLimits(): Observable<Record<string, unknown>> {
+    return this.http
+      .get<ApiResponse<Record<string, unknown>>>(`${this.baseUrl}/admin/rate_limits`, this.opts())
+      .pipe(map(r => r.data ?? {}));
+  }
+
+  // ── Backups ──────────────────────────────────────────────────────────────
+
+  listBackups(): Observable<any[]> {
+    return this.http
+      .get<ApiResponse<{ backups: any[] }>>(`${this.baseUrl}/admin/backups`, this.opts())
+      .pipe(map(r => r.data?.backups ?? []));
+  }
+
+  createBackup(name: string): Observable<ApiResponse<null>> {
+    return this.http.post<ApiResponse<null>>(`${this.baseUrl}/admin/backups`, { name }, this.opts());
+  }
+
+  restoreBackup(id: string): Observable<ApiResponse<null>> {
+    return this.http.post<ApiResponse<null>>(`${this.baseUrl}/admin/backups/${id}/restore`, {}, this.opts());
+  }
+
+  deleteBackup(id: string): Observable<ApiResponse<null>> {
+    return this.http.delete<ApiResponse<null>>(`${this.baseUrl}/admin/backups/${id}`, this.opts());
+  }
+
+  // ── Snapshots (Time Travel) ─────────────────────────────────────────────
+
+  listSnapshots(): Observable<any[]> {
+    return this.http
+      .get<ApiResponse<{ snapshots: any[] }>>(`${this.baseUrl}/notes/snapshots`, this.opts())
+      .pipe(map(r => r.data?.snapshots ?? []));
+  }
+
+  createSnapshot(name: string): Observable<ApiResponse<null>> {
+    return this.http.post<ApiResponse<null>>(`${this.baseUrl}/notes/snapshots`, { name }, this.opts());
+  }
+
+  getSnapshotNotes(id: string): Observable<any[]> {
+    return this.http
+      .get<ApiResponse<{ notes: any[] }>>(`${this.baseUrl}/notes/snapshots/${id}`, this.opts())
+      .pipe(map(r => r.data?.notes ?? []));
+  }
+
+  restoreSnapshot(id: string): Observable<ApiResponse<null>> {
+    return this.http.post<ApiResponse<null>>(`${this.baseUrl}/notes/snapshots/${id}/restore`, {}, this.opts());
+  }
+
+  deleteSnapshot(id: string): Observable<ApiResponse<null>> {
+    return this.http.delete<ApiResponse<null>>(`${this.baseUrl}/notes/snapshots/${id}`, this.opts());
+  }
+
+  // ── Webhooks ────────────────────────────────────────────────────────────
+
+  listWebhooks(): Observable<any[]> {
+    return this.http
+      .get<ApiResponse<{ webhooks: any[] }>>(`${this.baseUrl}/admin/webhooks`, this.opts())
+      .pipe(map(r => r.data?.webhooks ?? []));
+  }
+
+  createWebhook(url: string, events: string[]): Observable<ApiResponse<null>> {
+    return this.http.post<ApiResponse<null>>(`${this.baseUrl}/admin/webhooks`, { url, events }, this.opts());
+  }
+
+  deleteWebhook(id: string): Observable<ApiResponse<null>> {
+    return this.http.delete<ApiResponse<null>>(`${this.baseUrl}/admin/webhooks/${id}`, this.opts());
+  }
+
+  testWebhook(id: string): Observable<ApiResponse<null>> {
+    return this.http.post<ApiResponse<null>>(`${this.baseUrl}/admin/webhooks/${id}/test`, {}, this.opts());
+  }
+
+  // ── Pub/Sub ─────────────────────────────────────────────────────────────
+
+  listTopics(): Observable<any[]> {
+    return this.http
+      .get<ApiResponse<{ topics: any[] }>>(`${this.baseUrl}/pubsub/topics`, this.opts())
+      .pipe(map(r => r.data?.topics ?? []));
+  }
+
+  publishMessage(topic: string, message: string): Observable<ApiResponse<null>> {
+    return this.http.post<ApiResponse<null>>(`${this.baseUrl}/pubsub/topics/${encodeURIComponent(topic)}`, { message }, this.opts());
+  }
+
+  listSubscriptions(topic: string): Observable<any[]> {
+    return this.http
+      .get<ApiResponse<{ subscriptions: any[] }>>(`${this.baseUrl}/pubsub/topics/${encodeURIComponent(topic)}/subscriptions`, this.opts())
+      .pipe(map(r => r.data?.subscriptions ?? []));
+  }
+
+  // ── SQL Runner ──────────────────────────────────────────────────────────
+
+  executeQuery(query: string): Observable<any> {
+    return this.http
+      .post<ApiResponse<any>>(`${this.baseUrl}/query`, { query }, this.opts())
+      .pipe(map(r => r.data ?? { columns: [], rows: [], row_count: 0, elapsed_ms: 0 }));
+  }
+
+  // ── Resilience / Circuit Breakers ───────────────────────────────────────
+
+  getCircuitBreakers(): Observable<any[]> {
+    return this.http
+      .get<ApiResponse<{ circuit_breakers: any[] }>>(`${this.baseUrl}/admin/circuit_breakers`, this.opts())
+      .pipe(map(r => r.data?.circuit_breakers ?? []));
+  }
+
+  // ── Access Control / Policies ───────────────────────────────────────────
+
+  listPolicies(): Observable<any[]> {
+    return this.http
+      .get<ApiResponse<{ policies: any[] }>>(`${this.baseUrl}/admin/policies`, this.opts())
+      .pipe(map(r => r.data?.policies ?? []));
+  }
+
+  createPolicy(name: string, resource: string, actions: string[], effect: string, priority: number): Observable<ApiResponse<null>> {
+    return this.http.post<ApiResponse<null>>(`${this.baseUrl}/admin/policies`, { name, resource, actions, effect, priority }, this.opts());
+  }
+
+  deletePolicy(id: string): Observable<ApiResponse<null>> {
+    return this.http.delete<ApiResponse<null>>(`${this.baseUrl}/admin/policies/${id}`, this.opts());
+  }
 }

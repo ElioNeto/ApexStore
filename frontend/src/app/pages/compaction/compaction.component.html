@@ -1,0 +1,114 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Compaction</h1>
+      <p class="page-subtitle">LSM-Tree level compaction and memtable flush management</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      @if (lastRefresh(); as dt) {
+        <span class="badge badge-info">Last: {{ dt | date:'HH:mm:ss' }}</span>
+      }
+      <button class="btn btn-secondary" (click)="loadStats()" [disabled]="loading()">
+        @if (loading()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+        }
+        Refresh
+      </button>
+    </div>
+  </div>
+
+  <!-- Action cards -->
+  <div class="actions-grid">
+    <div class="card">
+      <div class="card-header">
+        <hugeicons-icon [icon]="DatabaseIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Memtable</span>
+        <span class="badge badge-info">{{ memRecords() }} records</span>
+      </div>
+      <div class="card-body">
+        <div class="stat-row">
+          <span class="stat-key">WAL Size</span>
+          <span class="stat-val">{{ walKb() }} KB</span>
+        </div>
+        <p style="font-size:0.85rem;color:var(--text-secondary);margin:12px 0;">
+          Force a flush of the current memtable to an SSTable on disk.
+        </p>
+        <button class="btn btn-primary" [disabled]="flushing() || memRecords() === 0" (click)="flushMemtable()">
+          @if (flushing()) {
+            <span class="spinner"></span>
+          } @else {
+            <hugeicons-icon [icon]="FileEditIcon" [size]="15" [strokeWidth]="1.5" />
+          }
+          {{ flushing() ? 'Flushing...' : 'Flush Memtable' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <hugeicons-icon [icon]="SparklesIcon" [size]="17" [strokeWidth]="1.5" color="var(--green)" />
+        <span class="card-title">Compaction</span>
+        <span class="badge badge-info">{{ levels().length }} levels</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:12px;">
+          Trigger a full compaction cycle across all levels to merge and rewrite SSTables.
+        </p>
+        <button class="btn btn-primary" [disabled]="compacting()" (click)="triggerCompaction()">
+          @if (compacting()) {
+            <span class="spinner"></span>
+          } @else {
+            <hugeicons-icon [icon]="HardDriveIcon" [size]="15" [strokeWidth]="1.5" />
+          }
+          {{ compacting() ? 'Compacting...' : 'Trigger Compaction' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Levels table -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="card-title">LSM-Tree Levels</span>
+        <span class="badge badge-info">{{ levels().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && levels().length === 0) {
+      <div class="loading-state">
+        <span class="spinner" style="width:28px;height:28px;border-width:3px"></span>
+      </div>
+    } @else if (levels().length === 0) {
+      <div class="empty-state">No level data available. Ensure the backend is running.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="levels-table">
+          <thead>
+            <tr><th>Level</th><th>SSTables</th><th>Size</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            @for (level of levels(); track level.level) {
+              <tr>
+                <td class="level-cell"><span class="badge badge-warning">L{{ level.level }}</span></td>
+                <td>{{ level.sst_count }}</td>
+                <td class="mono">{{ formatSize(level.size_kb) }}</td>
+                <td>
+                  @if (level.running) {
+                    <span class="badge badge-success">Running</span>
+                  } @else if (level.pending) {
+                    <span class="badge badge-warning">Pending</span>
+                  } @else {
+                    <span class="badge badge-info">Idle</span>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>

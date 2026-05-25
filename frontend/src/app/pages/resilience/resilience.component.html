@@ -1,0 +1,79 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Resilience</h1>
+      <p class="page-subtitle">Circuit breaker and system health dashboard</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      @if (lastCheck(); as dt) {
+        <span class="badge badge-info">Last: {{ dt | date:'HH:mm:ss' }}</span>
+      }
+      <button class="btn btn-primary" (click)="checkAll()" [disabled]="loading()">
+        @if (loading()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+        }
+        Check All
+      </button>
+    </div>
+  </div>
+
+  <!-- Health Summary -->
+  <h2 class="section-title">System Health</h2>
+  <div class="summary-grid">
+    @for (item of healthSummary(); track item.label) {
+      <div class="summary-card" [class.healthy]="item.status === 'healthy'" [class.degraded]="item.status === 'degraded'" [class.unhealthy]="item.status === 'unhealthy'">
+        <hugeicons-icon [icon]="item.icon" [size]="24" [strokeWidth]="1.5" />
+        <div class="summary-info">
+          <strong>{{ item.label }}</strong>
+          <span>{{ item.message }}</span>
+        </div>
+        <span class="badge" [class.badge-success]="item.status === 'healthy'" [class.badge-warning]="item.status === 'degraded'" [class.badge-danger]="item.status === 'unhealthy'">
+          {{ item.status | uppercase }}
+        </span>
+      </div>
+    }
+  </div>
+
+  <!-- Circuit Breakers -->
+  <h2 class="section-title" style="margin-top:24px">Circuit Breakers</h2>
+  @if (loading() && circuitBreakers().length === 0) {
+    <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+  } @else if (circuitBreakers().length === 0) {
+    <div class="empty-state">No circuit breakers configured or endpoint unavailable.</div>
+  } @else {
+    <div class="breakers-grid">
+      @for (cb of circuitBreakers(); track cb.name) {
+        <div class="breaker-card" [class.open]="cb.state === 'open'" [class.half-open]="cb.state === 'half_open'" [class.closed]="cb.state === 'closed'">
+          <div class="breaker-header">
+            <hugeicons-icon [icon]="ZapIcon" [size]="18" [strokeWidth]="1.5" />
+            <span class="breaker-name">{{ cb.name }}</span>
+            <span class="badge" [class.badge-success]="cb.state === 'closed'" [class.badge-danger]="cb.state === 'open'" [class.badge-warning]="cb.state === 'half_open'">
+              {{ stateLabel(cb.state) }}
+            </span>
+          </div>
+          <div class="breaker-stats">
+            <div class="breaker-stat">
+              <span class="stat-label">Success</span>
+              <span class="stat-value success">{{ cb.success_count }}</span>
+            </div>
+            <div class="breaker-stat">
+              <span class="stat-label">Failures</span>
+              <span class="stat-value failure">{{ cb.failure_count }}</span>
+            </div>
+            <div class="breaker-stat">
+              <span class="stat-label">Threshold</span>
+              <span class="stat-value">{{ cb.threshold }}</span>
+            </div>
+          </div>
+          @if (cb.last_failure_at) {
+            <div class="breaker-footer">
+              <span class="failure-time">Last failure: {{ nsToDate(cb.last_failure_at) | date:'dd/MM HH:mm:ss' }}</span>
+            </div>
+          }
+        </div>
+      }
+    </div>
+  }
+</div>

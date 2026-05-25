@@ -1,0 +1,124 @@
+.page {
+  padding: 32px;
+  max-width: 1000px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 28px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.page-subtitle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-top: 4px;
+}
+
+.overall-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px;
+  border-radius: var(--radius-lg);
+  margin-bottom: 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+
+  strong {
+    display: block;
+    font-size: 1.1rem;
+    margin-bottom: 2px;
+  }
+
+  p {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  &.healthy {
+    border-left: 4px solid var(--green);
+    color: var(--green);
+  }
+
+  &.degraded {
+    border-left: 4px solid var(--accent);
+    color: var(--accent);
+  }
+
+  &.unhealthy {
+    border-left: 4px solid var(--red);
+    color: var(--red);
+  }
+}
+
+.probes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.probe-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color 0.15s;
+
+  &.healthy {
+    border-left: 3px solid var(--green);
+  }
+
+  &.unhealthy {
+    border-left: 3px solid var(--red);
+  }
+
+  &.unknown {
+    border-left: 3px solid var(--text-muted);
+  }
+}
+
+.probe-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.probe-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  flex: 1;
+}
+
+.probe-message {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.probe-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.probe-endpoint {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}

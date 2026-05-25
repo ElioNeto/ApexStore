@@ -1,0 +1,110 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Pub/Sub</h1>
+      <p class="page-subtitle">Topic inspector and message publisher</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadData()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <!-- Publish message -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <hugeicons-icon [icon]="ArrowRight01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+      <span class="card-title">Publish Message</span>
+    </div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="input-group" style="grid-column:1/-1">
+          <label>Topic</label>
+          <input [(ngModel)]="publishTopic" placeholder="my.topic" />
+        </div>
+        <div class="input-group" style="grid-column:1/-1">
+          <label>Message</label>
+          <textarea [(ngModel)]="publishMessage" placeholder="Message payload..."></textarea>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:14px" [disabled]="!publishTopic.trim() || !publishMessage.trim() || publishing()" (click)="publishMessage()">
+        @if (publishing()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="ArrowRight01Icon" [size]="15" [strokeWidth]="1.5" />
+        }
+        Publish
+      </button>
+    </div>
+  </div>
+
+  <!-- Topics grid -->
+  <div class="topics-section">
+    <h2 class="section-title">Topics</h2>
+    @if (loading() && topics().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (topics().length === 0) {
+      <div class="empty-state">No topics yet. Publish a message to create one.</div>
+    } @else {
+      <div class="topics-grid">
+        @for (topic of topics(); track topic.name) {
+          <div class="topic-card" [class.selected]="selectedTopic() === topic.name" (click)="loadSubscriptions(topic.name)">
+            <div class="topic-header">
+              <hugeicons-icon [icon]="Share08Icon" [size]="18" [strokeWidth]="1.5" />
+              <span class="topic-name">{{ topic.name }}</span>
+            </div>
+            <div class="topic-stats">
+              <span class="badge badge-info">{{ topic.message_count }} messages</span>
+              @if (topic.last_message_at) {
+                <span class="topic-time">{{ nsToDate(topic.last_message_at) | date:'HH:mm:ss' }}</span>
+              }
+            </div>
+          </div>
+        }
+      </div>
+    }
+  </div>
+
+  <!-- Subscriptions for selected topic -->
+  @if (selectedTopic(); as topic) {
+    <div class="card" style="margin-top:24px">
+      <div class="card-header" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:10px">
+          <hugeicons-icon [icon]="PackageIcon" [size]="17" [strokeWidth]="1.5" />
+          <span class="card-title">Subscriptions: {{ topic }}</span>
+          <span class="badge badge-info">{{ subscriptions().length }}</span>
+        </div>
+      </div>
+      @if (subscriptions().length === 0) {
+        <div class="empty-state">No subscriptions for this topic.</div>
+      } @else {
+        <div class="table-wrapper">
+          <table class="subs-table">
+            <thead>
+              <tr><th>ID</th><th>Endpoint</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              @for (sub of subscriptions(); track sub.id) {
+                <tr>
+                  <td class="mono">{{ sub.id.substring(0, 12) }}...</td>
+                  <td class="mono">{{ sub.endpoint }}</td>
+                  <td>
+                    @if (sub.active) {
+                      <span class="badge badge-success">Active</span>
+                    } @else {
+                      <span class="badge badge-danger">Inactive</span>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </div>
+  }
+</div>

@@ -7,6 +7,16 @@ import { AdminComponent } from './pages/admin/admin.component';
 import { NotesComponent } from './pages/notes/notes.component';
 import { GraphComponent } from './pages/graph/graph.component';
 import { TagsComponent } from './pages/tags/tags.component';
+import { CompactionComponent } from './pages/compaction/compaction.component';
+import { HealthComponent } from './pages/health/health.component';
+import { RateLimitsComponent } from './pages/rate-limits/rate-limits.component';
+import { BackupComponent } from './pages/backup/backup.component';
+import { TimeTravelComponent } from './pages/time-travel/time-travel.component';
+import { WebhooksComponent } from './pages/webhooks/webhooks.component';
+import { PubsubComponent } from './pages/pubsub/pubsub.component';
+import { SqlRunnerComponent } from './pages/sql-runner/sql-runner.component';
+import { ResilienceComponent } from './pages/resilience/resilience.component';
+import { AccessControlComponent } from './pages/access-control/access-control.component';
 
 export const routes: Routes = [
   { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
@@ -18,4 +28,14 @@ export const routes: Routes = [
   { path: 'notes', component: NotesComponent },
   { path: 'graph', component: GraphComponent },
   { path: 'tags', component: TagsComponent },
+  { path: 'compaction', component: CompactionComponent },
+  { path: 'health', component: HealthComponent },
+  { path: 'rate-limits', component: RateLimitsComponent },
+  { path: 'backup', component: BackupComponent },
+  { path: 'time-travel', component: TimeTravelComponent },
+  { path: 'webhooks', component: WebhooksComponent },
+  { path: 'pubsub', component: PubsubComponent },
+  { path: 'sql-runner', component: SqlRunnerComponent },
+  { path: 'resilience', component: ResilienceComponent },
+  { path: 'access-control', component: AccessControlComponent },
 ];

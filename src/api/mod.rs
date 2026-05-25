@@ -30,6 +30,7 @@ use std::sync::{Arc, Mutex};
 pub struct KeysQuery {
     prefix: Option<String>,
     limit: Option<usize>,
+    q: Option<String>,
 }
 
 /// Request body for `PUT /keys/{key}`
@@ -298,6 +299,168 @@ async fn graphql_playground() -> HttpResponse {
         .body(html)
 }
 
+// ── Frontend-compatibility endpoints ─────────────────────────────────────
+
+/// Request body for `POST /keys` (frontend-compatible key-value pair).
+#[derive(Deserialize)]
+pub struct FrontendSetBody {
+    key: String,
+    value: String,
+}
+
+/// Request body for `POST /keys/batch`.
+#[derive(Deserialize)]
+pub struct BatchBody {
+    records: Vec<FrontendSetBody>,
+}
+
+/// Handler for `GET /stats/all` — frontend-compatible full stats endpoint.
+#[get("/stats/all")]
+async fn get_stats_all(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Read) {
+        return e;
+    }
+    match engine.stats("default") {
+        Ok(stats) => HttpResponse::Ok().content_type("application/json").json(
+            json!({ "success": true, "data": {
+                "mem_records": stats.mem_records,
+                "mem_kb": stats.mem_kb,
+                "sst_kb": stats.sst_kb,
+                "sst_files": stats.sst_files,
+                "wal_kb": stats.wal_kb,
+                "total_records": stats.total_records,
+            }}),
+        ),
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to get stats/all: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "success": false, "message": "internal server error" }))
+        }
+    }
+}
+
+/// Handler for `POST /keys` — frontend-compatible key insert (like PUT but with body key).
+#[post("/keys")]
+async fn post_key(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    body: web::Json<FrontendSetBody>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Write) {
+        return e;
+    }
+    match engine.put_cf(
+        "default",
+        body.key.as_bytes().to_vec(),
+        body.value.as_bytes().to_vec(),
+    ) {
+        Ok(_) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "success": true, "data": { "key": body.key } })),
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to set key: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "success": false, "message": "internal server error" }))
+        }
+    }
+}
+
+/// Handler for `GET /keys/search` — search keys by prefix or query.
+#[get("/keys/search")]
+async fn search_keys(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    query: web::Query<KeysQuery>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Read) {
+        return e;
+    }
+    let limit = query
+        .limit
+        .unwrap_or(100)
+        .min(crate::core::engine::MAX_SCAN_LIMIT);
+    // Use `q` if provided (frontend compatibility), otherwise fall back to `prefix`
+    let prefix = query.q.as_deref().or(query.prefix.as_deref()).unwrap_or("");
+    let (results, _cursor) = match engine.search_prefix(prefix, None, limit) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to search keys: {:?}", e);
+            return HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "success": false, "message": "internal server error" }));
+        }
+    };
+    let records: Vec<serde_json::Value> = results
+        .into_iter()
+        .map(|(k, v)| json!({ "key": String::from_utf8_lossy(&k), "value": String::from_utf8_lossy(&v) }))
+        .collect();
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .json(json!({ "success": true, "data": { "records": records } }))
+}
+
+/// Handler for `POST /keys/batch` — batch insert.
+#[post("/keys/batch")]
+async fn batch_keys(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    body: web::Json<BatchBody>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Write) {
+        return e;
+    }
+    let mut count = 0;
+    for record in &body.records {
+        if engine
+            .put_cf(
+                "default",
+                record.key.as_bytes().to_vec(),
+                record.value.as_bytes().to_vec(),
+            )
+            .is_ok()
+        {
+            count += 1;
+        }
+    }
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .json(json!({ "success": true, "data": { "count": count } }))
+}
+
+/// Handler for `GET /scan` — full scan of all keys.
+#[get("/scan")]
+async fn scan_keys(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Read) {
+        return e;
+    }
+    match engine.keys() {
+        Ok(keys) => {
+            let records: Vec<serde_json::Value> = keys
+                .into_iter()
+                .filter_map(|k| {
+                    let key_str = String::from_utf8_lossy(&k).to_string();
+                    engine
+                        .get_cf("default", key_str.as_bytes())
+                        .ok()
+                        .flatten()
+                        .map(|v| json!({ "key": key_str, "value": String::from_utf8_lossy(&v) }))
+                })
+                .collect();
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({ "success": true, "data": { "records": records } }))
+        }
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to scan keys: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "success": false, "message": "internal server error" }))
+        }
+    }
+}
+
 // ── Route configuration ───────────────────────────────────────────────────
 
 /// Register API routes.
@@ -306,8 +469,13 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .service(get_key)
         .service(put_key)
         .service(delete_key)
+        .service(post_key)
+        .service(search_keys)
+        .service(batch_keys)
+        .service(scan_keys)
         .service(get_metrics)
         .service(get_stats)
+        .service(get_stats_all)
         .service(admin_flush)
         .service(admin_compact)
         .service(admin_rate_limits)
