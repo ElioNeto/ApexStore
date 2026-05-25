@@ -16,6 +16,7 @@ import { WebhooksComponent } from './pages/webhooks/webhooks.component';
 import { PubsubComponent } from './pages/pubsub/pubsub.component';
 import { SqlRunnerComponent } from './pages/sql-runner/sql-runner.component';
 import { ResilienceComponent } from './pages/resilience/resilience.component';
+import { GraphQLComponent } from './pages/graphql/graphql.component';
 import { AccessControlComponent } from './pages/access-control/access-control.component';
 import { ReplicationComponent } from './pages/replication/replication.component';
 import { VectorSearchComponent } from './pages/vector-search/vector-search.component';
@@ -49,6 +50,7 @@ export const routes: Routes = [
   { path: 'webhooks', component: WebhooksComponent },
   { path: 'pubsub', component: PubsubComponent },
   { path: 'sql-runner', component: SqlRunnerComponent },
+  { path: 'graphql', component: GraphQLComponent },
   { path: 'resilience', component: ResilienceComponent },
   { path: 'access-control', component: AccessControlComponent },
   { path: 'replication', component: ReplicationComponent },

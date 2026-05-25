@@ -26,6 +26,8 @@ import {
   PlayIcon,
   PauseIcon,
   Edit01Icon,
+  Sun01Icon,
+  Moon01Icon,
 } from '@hugeicons/core-free-icons';
 import { ToastComponent } from './components/toast/toast.component';
 import type { IconSvgObject } from '@hugeicons/angular';
@@ -46,6 +48,26 @@ export class AppComponent {
   readonly ZapIcon = ZapIcon;
   readonly GithubIcon = Github01Icon;
   readonly BookOpenIcon = BookOpenIcon;
+  readonly SunIcon = Sun01Icon;
+  readonly MoonIcon = Moon01Icon;
+
+  theme = signal<'dark' | 'light'>(
+    (localStorage.getItem('apex_theme') as 'dark' | 'light') || 'dark'
+  );
+
+  constructor() {
+    this.applyTheme();
+  }
+
+  toggleTheme(): void {
+    this.theme.update(t => (t === 'dark' ? 'light' : 'dark'));
+    this.applyTheme();
+  }
+
+  private applyTheme(): void {
+    document.documentElement.classList.toggle('light-mode', this.theme() === 'light');
+    localStorage.setItem('apex_theme', this.theme());
+  }
 
   navGroups = signal<NavGroup[]>([
     {
@@ -63,6 +85,7 @@ export class AppComponent {
         { path: '/keys', icon: Key01Icon, label: 'Key Explorer' },
         { path: '/features', icon: Flag01Icon, label: 'Feature Flags' },
         { path: '/sql-runner', icon: Search01Icon, label: 'SQL Runner' },
+        { path: '/graphql', icon: PlayIcon, label: 'GraphQL Playground' },
         { path: '/vector-search', icon: Search01Icon, label: 'Vector Search' },
         { path: '/bulk-import', icon: Upload01Icon, label: 'Bulk Import' },
       ]

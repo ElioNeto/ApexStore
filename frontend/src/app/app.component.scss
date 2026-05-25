@@ -85,6 +85,14 @@
   margin-top: 12px;
 }
 
+.theme-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  font-family: var(--font-sans);
+}
+
 .main-content {
   flex: 1;
   overflow-y: auto;

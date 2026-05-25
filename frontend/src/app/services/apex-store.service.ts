@@ -533,6 +533,13 @@ export class ApexStoreService {
       .pipe(map(r => r.data ?? { records_generated: 0, elapsed_ms: 0 }));
   }
 
+  // ── GraphQL ────────────────────────────────────────────────────────────
+
+  executeGraphQL(query: string): Observable<any> {
+    return this.http
+      .post<any>(`${this.baseUrl}/graphql`, { query }, this.opts());
+  }
+
   // ── SQL Runner ──────────────────────────────────────────────────────────
 
   executeQuery(query: string): Observable<any> {
