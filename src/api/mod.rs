@@ -23,7 +23,7 @@ use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use async_graphql_actix_web::{GraphQLRequest, GraphQLResponse};
 use serde::Deserialize;
 use serde_json::json;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Query parameters for `GET /keys`
 #[derive(Deserialize)]
@@ -383,6 +383,9 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     let auth_enabled = web::Data::new(config.auth.enabled);
     let graphql_schema = web::Data::new(graphql::build_schema(engine.clone()));
     let note_engine = web::Data::new(crate::notes::NoteEngine::new(engine.clone()));
+    let time_travel_engine = web::Data::new(Mutex::new(
+        crate::infra::time_travel::TimeTravelEngine::new(100),
+    ));
 
     let cors_enabled = config.cors_enabled;
     let cors_origins = config.cors_origins.clone();
@@ -406,6 +409,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
             .app_data(auth_enabled.clone())
             .app_data(graphql_schema.clone())
             .app_data(note_engine.clone())
+            .app_data(time_travel_engine.clone())
             .app_data(access_controller.clone())
             .app_data(access_control_enabled.clone())
             .configure(configure)

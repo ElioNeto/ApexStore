@@ -131,6 +131,152 @@ impl<C: Cache> NoteEngine<C> {
         Ok(())
     }
 
+    /// Create or update a note and save a version snapshot.
+    /// Same as `put_note` but also records a version entry for history.
+    pub fn put_note_with_version(&self, path: &str, content: &str) -> Result<()> {
+        self.put_note(path, content)?;
+        self.save_version(path)
+    }
+
+    /// Save the current note content as a version entry.
+    fn save_version(&self, path: &str) -> Result<()> {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros();
+
+        let version_key = format!("__version:{}", path);
+        let version_entry_key = format!("__version_content:{}:{}", path, ts);
+
+        // Get current content
+        let content = self.get_note(path)?;
+        if let Some(content) = content {
+            // Store the versioned content
+            self.engine.put_cf(
+                &self.cf,
+                version_entry_key.into_bytes(),
+                content.into_bytes(),
+            )?;
+
+            // Update version metadata
+            let mut timestamps: Vec<u128> =
+                match self.engine.get_cf(&self.cf, version_key.as_bytes())? {
+                    Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+                    None => Vec::new(),
+                };
+            timestamps.push(ts);
+
+            // Trim to max 100 versions
+            while timestamps.len() > 100 {
+                let removed = timestamps.remove(0);
+                let old_key = format!("__version_content:{}:{}", path, removed);
+                let _ = self.engine.delete_cf(&self.cf, old_key.into_bytes());
+            }
+
+            let value = serde_json::to_vec(&timestamps).map_err(|e| {
+                crate::infra::error::LsmError::InvalidArgument(format!("JSON error: {}", e))
+            })?;
+            self.engine
+                .put_cf(&self.cf, version_key.into_bytes(), value)?;
+        }
+
+        Ok(())
+    }
+
+    /// Get the version history for a note (list of timestamps).
+    pub fn get_version_history(&self, path: &str) -> Result<Vec<u128>> {
+        let version_key = format!("__version:{}", path);
+        match self.engine.get_cf(&self.cf, version_key.as_bytes())? {
+            Some(bytes) => {
+                let timestamps: Vec<u128> = serde_json::from_slice(&bytes).unwrap_or_default();
+                Ok(timestamps)
+            }
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Get the content of a note at a specific version timestamp.
+    pub fn get_note_at_version(&self, path: &str, timestamp: u128) -> Result<Option<String>> {
+        let version_entry_key = format!("__version_content:{}:{}", path, timestamp);
+        match self.engine.get_cf(&self.cf, version_entry_key.as_bytes())? {
+            Some(bytes) => {
+                let content = String::from_utf8_lossy(&bytes).to_string();
+                Ok(Some(content))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Remove a specific version from history.
+    pub fn remove_version(&self, path: &str, timestamp: u128) -> Result<bool> {
+        let version_key = format!("__version:{}", path);
+        let version_entry_key = format!("__version_content:{}:{}", path, timestamp);
+
+        // Remove the version content
+        self.engine
+            .delete_cf(&self.cf, version_entry_key.into_bytes())?;
+
+        // Update the version metadata
+        let mut timestamps: Vec<u128> =
+            match self.engine.get_cf(&self.cf, version_key.as_bytes())? {
+                Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+                None => return Ok(false),
+            };
+
+        let before = timestamps.len();
+        timestamps.retain(|t| *t != timestamp);
+
+        if timestamps.is_empty() {
+            self.engine.delete_cf(&self.cf, version_key.into_bytes())?;
+            Ok(before != 0)
+        } else {
+            let value = serde_json::to_vec(&timestamps).map_err(|e| {
+                crate::infra::error::LsmError::InvalidArgument(format!("JSON error: {}", e))
+            })?;
+            self.engine
+                .put_cf(&self.cf, version_key.into_bytes(), value)?;
+            Ok(true)
+        }
+    }
+
+    /// Restore a note to a previous version. Saves current version first, then
+    /// overwrites with the old version's content.
+    pub fn restore_version(&self, path: &str, timestamp: u128) -> Result<bool> {
+        // Get the old content
+        let content = self.get_note_at_version(path, timestamp)?;
+        match content {
+            Some(old_content) => {
+                // Save current as a version first
+                self.save_version(path)?;
+                // Write the old content as current
+                self.put_note(path, &old_content)?;
+                // Save another version entry for the restore
+                self.save_version(path)?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Get all notes that were active at the given timestamp using TimeTravelEngine.
+    pub fn get_notes_at_timestamp(
+        &self,
+        time_travel: &crate::infra::time_travel::TimeTravelEngine,
+        timestamp: u128,
+    ) -> Result<Vec<(String, String)>> {
+        // Query all note: prefixed keys at the given timestamp
+        // Since TimeTravelEngine doesn't have prefix scan, we iterate known notes
+        let current_notes = self.list_notes(None)?;
+        let mut result = Vec::new();
+        for path in &current_notes {
+            let key = format!("note:{}", path);
+            if let Some(content) = time_travel.query_as_of(key.as_bytes(), timestamp) {
+                result.push((path.clone(), String::from_utf8_lossy(&content).to_string()));
+            }
+        }
+        Ok(result)
+    }
+
     /// Get a note's content by path.
     pub fn get_note(&self, path: &str) -> Result<Option<String>> {
         let note_key = format!("note:{}", path);

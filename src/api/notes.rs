@@ -18,6 +18,7 @@ use crate::notes::{GraphConfig, GraphDepth, NotesEngine};
 use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse, Responder};
 use serde::Deserialize;
 use serde_json::json;
+use std::sync::Mutex;
 
 /// Query parameters for `GET /notes`
 #[derive(Deserialize)]
@@ -50,6 +51,12 @@ pub struct TagNotesQuery {
 #[derive(Deserialize)]
 pub struct RenameBody {
     new_path: String,
+}
+
+/// Query parameters for `POST /notes/{path}/restore`
+#[derive(Deserialize)]
+pub struct RestoreQuery {
+    timestamp: u128,
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
@@ -130,7 +137,7 @@ async fn put_note(
         return e;
     }
     let note_path = path.into_inner();
-    match engine.put_note(&note_path, &body.content) {
+    match engine.put_note_with_version(&note_path, &body.content) {
         Ok(_) => HttpResponse::Ok()
             .content_type("application/json")
             .json(json!({ "status": "ok", "path": note_path })),
@@ -289,6 +296,153 @@ async fn get_graph(
     }
 }
 
+/// `GET /notes/{path}/history` — list version history for a note.
+#[get("/{path}/history")]
+async fn get_version_history(
+    req: HttpRequest,
+    engine: web::Data<NotesEngine>,
+    path: web::Path<String>,
+) -> impl Responder {
+    if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
+        return e;
+    }
+    let note_path = path.into_inner();
+    match engine.get_version_history(&note_path) {
+        Ok(timestamps) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "path": note_path, "versions": timestamps })),
+        Err(e) => {
+            tracing::error!(target: "apexstore::api::notes", "Failed to get version history: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// `GET /notes/{path}/history/{timestamp}` — get note at a specific version.
+#[get("/{path}/history/{timestamp}")]
+async fn get_note_at_version(
+    req: HttpRequest,
+    engine: web::Data<NotesEngine>,
+    path: web::Path<(String, u128)>,
+) -> impl Responder {
+    if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
+        return e;
+    }
+    let (note_path, timestamp) = path.into_inner();
+    match engine.get_note_at_version(&note_path, timestamp) {
+        Ok(Some(content)) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "path": note_path, "timestamp": timestamp, "content": content })),
+        Ok(None) => HttpResponse::NotFound()
+            .content_type("application/json")
+            .json(json!({ "error": "version not found" })),
+        Err(e) => {
+            tracing::error!(target: "apexstore::api::notes", "Failed to get note at version: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// `DELETE /notes/{path}/history/{timestamp}` — remove a specific version.
+#[delete("/{path}/history/{timestamp}")]
+async fn delete_version(
+    req: HttpRequest,
+    engine: web::Data<NotesEngine>,
+    path: web::Path<(String, u128)>,
+) -> impl Responder {
+    if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Delete) {
+        return e;
+    }
+    let (note_path, timestamp) = path.into_inner();
+    match engine.remove_version(&note_path, timestamp) {
+        Ok(true) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "status": "ok" })),
+        Ok(false) => HttpResponse::NotFound()
+            .content_type("application/json")
+            .json(json!({ "error": "version not found" })),
+        Err(e) => {
+            tracing::error!(target: "apexstore::api::notes", "Failed to remove version: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// `POST /notes/{path}/restore?timestamp=...` — restore note from a version.
+#[post("/{path}/restore")]
+async fn restore_version(
+    req: HttpRequest,
+    engine: web::Data<NotesEngine>,
+    path: web::Path<String>,
+    query: web::Query<RestoreQuery>,
+) -> impl Responder {
+    if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Write) {
+        return e;
+    }
+    let note_path = path.into_inner();
+    match engine.restore_version(&note_path, query.timestamp) {
+        Ok(true) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "status": "ok", "path": note_path, "restored_from": query.timestamp })),
+        Ok(false) => HttpResponse::NotFound()
+            .content_type("application/json")
+            .json(json!({ "error": "version not found" })),
+        Err(e) => {
+            tracing::error!(target: "apexstore::api::notes", "Failed to restore version: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// `POST /notes/{path}/snapshot` — create a manual TimeTravel snapshot.
+#[post("/{path}/snapshot")]
+async fn create_snapshot(
+    req: HttpRequest,
+    engine: web::Data<NotesEngine>,
+    path: web::Path<String>,
+    time_travel: web::Data<Mutex<crate::infra::time_travel::TimeTravelEngine>>,
+) -> impl Responder {
+    if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Admin) {
+        return e;
+    }
+    let note_path = path.into_inner();
+    let content = match engine.get_note(&note_path) {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .content_type("application/json")
+                .json(json!({ "error": "note not found" }))
+        }
+        Err(e) => {
+            tracing::error!(target: "apexstore::api::notes", "Failed to get note: {:?}", e);
+            return HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }));
+        }
+    };
+
+    let mut data = std::collections::HashMap::new();
+    data.insert(
+        format!("note:{}", note_path).into_bytes(),
+        content.into_bytes(),
+    );
+
+    let mut tt = time_travel.lock().unwrap();
+    let ts = tt.capture(data, &format!("manual-snapshot-{}", note_path));
+
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .json(json!({ "status": "ok", "timestamp": ts }))
+}
+
 /// `GET /tags` — list all tags.
 #[get("/tags")]
 async fn list_tags(req: HttpRequest, engine: web::Data<NotesEngine>) -> impl Responder {
@@ -358,7 +512,12 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .service(rename_note)
             .service(get_backlinks)
             .service(get_forward_links)
-            .service(get_graph),
+            .service(get_graph)
+            .service(get_version_history)
+            .service(get_note_at_version)
+            .service(delete_version)
+            .service(restore_version)
+            .service(create_snapshot),
     )
     .service(list_tags)
     .service(get_notes_by_tag);
