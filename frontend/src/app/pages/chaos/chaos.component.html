@@ -1,0 +1,108 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Chaos Engineering</h1>
+      <p class="page-subtitle">Fault injection and resilience testing</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadExperiments()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <!-- Create Experiment -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <hugeicons-icon [icon]="Add01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+      <span class="card-title">Create Experiment</span>
+    </div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="input-group" style="grid-column:1/-1">
+          <label>Experiment Name</label>
+          <input [(ngModel)]="newExp.name" placeholder="my-chaos-test" />
+        </div>
+        <div class="input-group">
+          <label>Type</label>
+          <select [(ngModel)]="newExp.type">
+            @for (t of expTypes; track t.value) {
+              <option [value]="t.value">{{ t.label }}</option>
+            }
+          </select>
+        </div>
+        <div class="input-group">
+          <label>Target</label>
+          <input [(ngModel)]="newExp.target" placeholder="service:port" />
+        </div>
+        <div class="input-group" style="grid-column:1/-1">
+          <label>Config (JSON)</label>
+          <textarea [(ngModel)]="newExp.config" rows="3" placeholder='{"delay_ms": 200, "rate": 0.1}'></textarea>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:14px" [disabled]="!newExp.name.trim() || !newExp.target.trim() || creating()" (click)="createExperiment()">
+        @if (creating()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="Add01Icon" [size]="15" [strokeWidth]="1.5" />
+        }
+        Create Experiment
+      </button>
+    </div>
+  </div>
+
+  <!-- Experiments List -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <hugeicons-icon [icon]="CpuIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Experiments</span>
+        <span class="badge badge-info">{{ experiments().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && experiments().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (experiments().length === 0) {
+      <div class="empty-state">No chaos experiments. Create one above.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="chaos-table">
+          <thead>
+            <tr><th>Name</th><th>Type</th><th>Target</th><th>Status</th><th>Created</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (e of experiments(); track e.id) {
+              <tr>
+                <td class="name-cell">{{ e.name }}</td>
+                <td><span class="badge" [ngClass]="typeClass(e.type)">{{ e.type }}</span></td>
+                <td class="mono">{{ e.target }}</td>
+                <td><span class="badge" [ngClass]="statusClass(e.status)">{{ e.status }}</span></td>
+                <td class="time-cell">{{ nsToDate(e.created_at) | date:'dd/MM HH:mm' }}</td>
+                <td>
+                  <div class="action-btns">
+                    <button class="btn btn-sm" [class.btn-success]="e.status === 'stopped'" [class.btn-warning]="e.status === 'running'" (click)="toggleExperiment(e.id)" [disabled]="toggling() === e.id">
+                      @if (toggling() === e.id) {
+                        <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                      } @else if (e.status === 'running') {
+                        <hugeicons-icon [icon]="PauseIcon" [size]="14" [strokeWidth]="1.5" /> Pause
+                      } @else {
+                        <hugeicons-icon [icon]="PlayIcon" [size]="14" [strokeWidth]="1.5" /> Start
+                      }
+                    </button>
+                    <button class="btn btn-danger btn-sm" (click)="deleteExperiment(e.id)">
+                      <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>

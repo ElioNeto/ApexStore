@@ -1,0 +1,83 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Replication</h1>
+      <p class="page-subtitle">Replication topology and status monitoring</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadTopology()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  @if (summary(); as s) {
+    <div class="summary-bar">
+      <div class="summary-item" [class.healthy]="s.status === 'healthy'" [class.degraded]="s.status === 'degraded'" [class.critical]="s.status === 'critical'">
+        <span class="summary-label">Status</span>
+        <span class="summary-value">{{ s.status | uppercase }}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Connected</span>
+        <span class="summary-value">{{ s.connected }}/{{ s.total }}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Avg Lag</span>
+        <span class="summary-value">{{ s.avg_lag_ms }}ms</span>
+      </div>
+    </div>
+  }
+
+  <div class="card" style="margin-top:24px">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <hugeicons-icon [icon]="DatabaseIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Cluster Nodes</span>
+        <span class="badge badge-info">{{ nodes().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && nodes().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (nodes().length === 0) {
+      <div class="empty-state">No nodes found in replication topology.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="replication-table">
+          <thead>
+            <tr><th>Name</th><th>Role</th><th>Status</th><th>Lag</th><th>Address</th><th>Last Heartbeat</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (n of nodes(); track n.id) {
+              <tr>
+                <td class="name-cell">{{ n.name }}</td>
+                <td>
+                  <span class="badge" [class.badge-primary]="n.role === 'primary'" [class.badge-info]="n.role === 'secondary'" [class.badge-default]="n.role === 'observer'">
+                    {{ n.role }}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge" [ngClass]="statusClass(n.status)">{{ n.status }}</span>
+                </td>
+                <td class="mono">{{ n.lag_ms }}ms</td>
+                <td class="mono">{{ n.address }}</td>
+                <td class="time-cell">{{ nsToDate(n.last_heartbeat) | date:'HH:mm:ss' }}</td>
+                <td>
+                  <div class="action-btns">
+                    @if (n.role !== 'primary') {
+                      <button class="btn btn-sm btn-primary" (click)="promoteToPrimary(n.id)">Promote</button>
+                    }
+                    <button class="btn btn-sm btn-danger" (click)="removeNode(n.id)">Remove</button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>

@@ -1,0 +1,76 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Server Configuration</h1>
+      <p class="page-subtitle">View and manage server configuration parameters</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadConfig()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <!-- Filter -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <hugeicons-icon [icon]="Settings01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+      <span class="card-title">Configuration</span>
+      <span class="badge badge-info">{{ filtered().length }}</span>
+    </div>
+    <div class="card-body">
+      <div class="input-group" style="max-width:400px">
+        <label>Filter</label>
+        <input [(ngModel)]="filterText" (ngModelChange)="onFilterChange()" placeholder="Search by key, description, or group..." />
+      </div>
+    </div>
+
+    @if (loading() && config().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (filtered().length === 0) {
+      <div class="empty-state">No configuration entries found.</div>
+    } @else {
+      <div class="table-wrapper">
+        @for (group of getConfigGroups(); track group) {
+          <div class="config-group">
+            <div class="config-group-title">{{ group }}</div>
+            <table class="config-table">
+              <thead>
+                <tr><th>Key</th><th>Value</th><th>Type</th><th>Description</th><th>Mutable</th></tr>
+              </thead>
+              <tbody>
+                @for (entry of filtered().filter(c => c.group === group); track entry.key) {
+                  <tr>
+                    <td class="mono key-cell">{{ entry.key }}</td>
+                    <td class="mono">
+                      @if (entry.mutable) {
+                        <div class="inline-edit">
+                          <input [value]="entry.value" #val (keydown.enter)="updateConfig(entry, val.value)" />
+                          <button class="btn btn-sm btn-primary" (click)="updateConfig(entry, val.value)" [disabled]="saving()">Save</button>
+                        </div>
+                      } @else {
+                        <span class="value-display">{{ entry.value }}</span>
+                      }
+                    </td>
+                    <td><span class="badge badge-info">{{ entry.type }}</span></td>
+                    <td style="color:var(--text-secondary);font-size:0.8rem">{{ entry.description }}</td>
+                    <td>
+                      @if (entry.mutable) {
+                        <span class="badge badge-success">Yes</span>
+                      } @else {
+                        <span class="badge badge-danger">No</span>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </div>
+    }
+  </div>
+</div>

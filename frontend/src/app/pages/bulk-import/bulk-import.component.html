@@ -1,0 +1,111 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Bulk Import / Export</h1>
+      <p class="page-subtitle">Import and export data in bulk</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadJobs()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <div class="grid-2col" style="margin-bottom:24px">
+    <!-- Import -->
+    <div class="card">
+      <div class="card-header">
+        <hugeicons-icon [icon]="Upload01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Import Data</span>
+      </div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="input-group" style="grid-column:1/-1">
+            <label>Format</label>
+            <select [(ngModel)]="newFormat">
+              @for (f of formats; track f.value) {
+                <option [value]="f.value">{{ f.label }}</option>
+              }
+            </select>
+          </div>
+          <div class="input-group" style="grid-column:1/-1">
+            <label>File</label>
+            <input type="file" (change)="onFileSelected($event)" [disabled]="importing()" accept=".json,.csv,.ndjson" />
+          </div>
+        </div>
+        @if (importing()) {
+          <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+            <span class="spinner" style="width:18px;height:18px;border-width:2px"></span>
+            <span>Importing...</span>
+          </div>
+        }
+      </div>
+    </div>
+
+    <!-- Export -->
+    <div class="card">
+      <div class="card-header">
+        <hugeicons-icon [icon]="Download01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Export Data</span>
+      </div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
+        <p style="color:var(--text-secondary);font-size:0.85rem">Download all data as a JSON export file.</p>
+        <button class="btn btn-success" style="align-self:flex-start" (click)="downloadExport()">
+          <hugeicons-icon [icon]="Download01Icon" [size]="15" [strokeWidth]="1.5" />
+          Download Export
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import Jobs -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <hugeicons-icon [icon]="FileEditIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Import Jobs</span>
+        <span class="badge badge-info">{{ jobs().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && jobs().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (jobs().length === 0) {
+      <div class="empty-state">No import jobs yet.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="import-table">
+          <thead>
+            <tr><th>Filename</th><th>Format</th><th>Status</th><th>Progress</th><th>Errors</th><th>Created</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (j of jobs(); track j.id) {
+              <tr>
+                <td class="mono name-cell">{{ j.filename }}</td>
+                <td><span class="badge badge-info">{{ j.format }}</span></td>
+                <td><span class="badge" [ngClass]="statusClass(j.status)">{{ j.status }}</span></td>
+                <td class="mono">{{ j.records_imported }}/{{ j.records_total }}</td>
+                <td class="mono">
+                  @if (j.errors > 0) {
+                    <span style="color:var(--red)">{{ j.errors }}</span>
+                  } @else {
+                    0
+                  }
+                </td>
+                <td class="time-cell">{{ nsToDate(j.created_at) | date:'dd/MM HH:mm' }}</td>
+                <td>
+                  <button class="btn btn-danger btn-sm" (click)="deleteJob(j.id)">
+                    <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>

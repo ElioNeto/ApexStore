@@ -18,6 +18,14 @@ import {
   DatabaseIcon,
   Search01Icon,
   CpuIcon,
+  Settings01Icon,
+  Upload01Icon,
+  Download01Icon,
+  Add01Icon,
+  Delete01Icon,
+  PlayIcon,
+  PauseIcon,
+  Edit01Icon,
 } from '@hugeicons/core-free-icons';
 import { ToastComponent } from './components/toast/toast.component';
 import type { IconSvgObject } from '@hugeicons/angular';
@@ -55,6 +63,8 @@ export class AppComponent {
         { path: '/keys', icon: Key01Icon, label: 'Key Explorer' },
         { path: '/features', icon: Flag01Icon, label: 'Feature Flags' },
         { path: '/sql-runner', icon: Search01Icon, label: 'SQL Runner' },
+        { path: '/vector-search', icon: Search01Icon, label: 'Vector Search' },
+        { path: '/bulk-import', icon: Upload01Icon, label: 'Bulk Import' },
       ]
     },
     {
@@ -72,6 +82,11 @@ export class AppComponent {
         { path: '/compaction', icon: HardDriveIcon, label: 'Compaction' },
         { path: '/rate-limits', icon: BarChartIcon, label: 'Rate Limits' },
         { path: '/backup', icon: DatabaseIcon, label: 'Backup' },
+        { path: '/replication', icon: Share08Icon, label: 'Replication' },
+        { path: '/cdc', icon: DatabaseIcon, label: 'CDC' },
+        { path: '/chaos', icon: CpuIcon, label: 'Chaos' },
+        { path: '/backpressure', icon: CpuIcon, label: 'Backpressure' },
+        { path: '/data-scrubber', icon: Delete01Icon, label: 'Data Scrubber' },
       ]
     },
     {
@@ -79,6 +94,8 @@ export class AppComponent {
       items: [
         { path: '/webhooks', icon: ZapIcon, label: 'Webhooks' },
         { path: '/pubsub', icon: Share08Icon, label: 'Pub/Sub' },
+        { path: '/data-sync', icon: Share08Icon, label: 'Data Sync' },
+        { path: '/wasm-plugins', icon: CpuIcon, label: 'WASM Plugins' },
       ]
     },
     {
@@ -86,6 +103,10 @@ export class AppComponent {
       items: [
         { path: '/admin', icon: LockPasswordIcon, label: 'Tokens' },
         { path: '/access-control', icon: LockPasswordIcon, label: 'Access Control' },
+        { path: '/server-config', icon: Settings01Icon, label: 'Server Config' },
+        { path: '/telemetry', icon: BarChartIcon, label: 'Telemetry' },
+        { path: '/quotas', icon: DatabaseIcon, label: 'Quotas' },
+        { path: '/cicd', icon: PlayIcon, label: 'CI/CD' },
       ]
     },
   ]);

@@ -17,6 +17,19 @@ import { PubsubComponent } from './pages/pubsub/pubsub.component';
 import { SqlRunnerComponent } from './pages/sql-runner/sql-runner.component';
 import { ResilienceComponent } from './pages/resilience/resilience.component';
 import { AccessControlComponent } from './pages/access-control/access-control.component';
+import { ReplicationComponent } from './pages/replication/replication.component';
+import { VectorSearchComponent } from './pages/vector-search/vector-search.component';
+import { DataSyncComponent } from './pages/data-sync/data-sync.component';
+import { CdcComponent } from './pages/cdc/cdc.component';
+import { BulkImportComponent } from './pages/bulk-import/bulk-import.component';
+import { ServerConfigComponent } from './pages/server-config/server-config.component';
+import { ChaosComponent } from './pages/chaos/chaos.component';
+import { TelemetryComponent } from './pages/telemetry/telemetry.component';
+import { QuotasComponent } from './pages/quotas/quotas.component';
+import { DataScrubberComponent } from './pages/data-scrubber/data-scrubber.component';
+import { BackpressureComponent } from './pages/backpressure/backpressure.component';
+import { WasmPluginsComponent } from './pages/wasm-plugins/wasm-plugins.component';
+import { CicdComponent } from './pages/cicd/cicd.component';
 
 export const routes: Routes = [
   { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
@@ -38,4 +51,17 @@ export const routes: Routes = [
   { path: 'sql-runner', component: SqlRunnerComponent },
   { path: 'resilience', component: ResilienceComponent },
   { path: 'access-control', component: AccessControlComponent },
+  { path: 'replication', component: ReplicationComponent },
+  { path: 'vector-search', component: VectorSearchComponent },
+  { path: 'data-sync', component: DataSyncComponent },
+  { path: 'cdc', component: CdcComponent },
+  { path: 'bulk-import', component: BulkImportComponent },
+  { path: 'server-config', component: ServerConfigComponent },
+  { path: 'chaos', component: ChaosComponent },
+  { path: 'telemetry', component: TelemetryComponent },
+  { path: 'quotas', component: QuotasComponent },
+  { path: 'data-scrubber', component: DataScrubberComponent },
+  { path: 'backpressure', component: BackpressureComponent },
+  { path: 'wasm-plugins', component: WasmPluginsComponent },
+  { path: 'cicd', component: CicdComponent },
 ];

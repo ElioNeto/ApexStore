@@ -1,0 +1,104 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Data Sync</h1>
+      <p class="page-subtitle">Multi-model data synchronization management</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadJobs()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <!-- Create Sync Job -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <hugeicons-icon [icon]="Add01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+      <span class="card-title">Create Sync Job</span>
+    </div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="input-group" style="grid-column:1/-1">
+          <label>Job Name</label>
+          <input [(ngModel)]="newName" placeholder="sync-users-to-pg" />
+        </div>
+        <div class="input-group">
+          <label>Source</label>
+          <input [(ngModel)]="newSource" placeholder="apexstore://users" />
+        </div>
+        <div class="input-group">
+          <label>Target</label>
+          <input [(ngModel)]="newTarget" placeholder="postgres://host/db" />
+        </div>
+        <div class="input-group">
+          <label>Mode</label>
+          <select [(ngModel)]="newMode">
+            @for (m of modes; track m.value) {
+              <option [value]="m.value">{{ m.label }}</option>
+            }
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:14px" [disabled]="!newName.trim() || !newSource.trim() || !newTarget.trim() || creating()" (click)="createJob()">
+        @if (creating()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="Add01Icon" [size]="15" [strokeWidth]="1.5" />
+        }
+        Create Job
+      </button>
+    </div>
+  </div>
+
+  <!-- Sync Jobs List -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <hugeicons-icon [icon]="Share08Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Sync Jobs</span>
+        <span class="badge badge-info">{{ jobs().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && jobs().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (jobs().length === 0) {
+      <div class="empty-state">No sync jobs. Create one above.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="sync-table">
+          <thead>
+            <tr><th>Name</th><th>Source</th><th>Target</th><th>Mode</th><th>Status</th><th>Records</th><th>Started</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (j of jobs(); track j.id) {
+              <tr>
+                <td class="name-cell">{{ j.name }}</td>
+                <td class="mono" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;">{{ j.source }}</td>
+                <td class="mono" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;">{{ j.target }}</td>
+                <td><span class="badge badge-info">{{ j.mode }}</span></td>
+                <td><span class="badge" [ngClass]="statusClass(j.status)">{{ j.status }}</span></td>
+                <td class="mono">{{ j.records_synced }}</td>
+                <td class="time-cell">{{ nsToDate(j.started_at) | date:'dd/MM HH:mm' }}</td>
+                <td>
+                  <div class="action-btns">
+                    <button class="btn btn-sm btn-success" (click)="triggerSync(j.id)" [disabled]="j.status === 'running'">
+                      <hugeicons-icon [icon]="PlayIcon" [size]="14" [strokeWidth]="1.5" /> Sync
+                    </button>
+                    <button class="btn btn-sm btn-danger" (click)="deleteJob(j.id)">
+                      <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>
