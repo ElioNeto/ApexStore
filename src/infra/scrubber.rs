@@ -631,7 +631,7 @@ mod tests {
         };
 
         {
-            let mut core = engine.lock_core();
+            let mut core = engine.lock_core_mut();
             core.version_set_mut().add_table("default", orphan_table);
         }
 

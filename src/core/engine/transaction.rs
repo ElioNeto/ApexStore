@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use tracing;
 
 use crate::core::engine::EngineCore;
@@ -38,7 +38,7 @@ type TxnWrite = (Vec<u8>, bool);
 /// ```
 pub struct Transaction<C: Cache> {
     /// Shared reference to the engine's core state.
-    core: Arc<Mutex<EngineCore<C>>>,
+    core: Arc<RwLock<EngineCore<C>>>,
     /// Engine options (cloned at creation time).
     options: EngineOptions,
     /// Engine metrics for observability.
@@ -52,7 +52,7 @@ pub struct Transaction<C: Cache> {
 impl<C: Cache> Transaction<C> {
     /// Create a new transaction bound to the given engine's shared state.
     pub(crate) fn new(
-        core: Arc<Mutex<EngineCore<C>>>,
+        core: Arc<RwLock<EngineCore<C>>>,
         options: EngineOptions,
         metrics: Arc<EngineMetrics>,
     ) -> Self {
@@ -158,7 +158,7 @@ impl<C: Cache> Transaction<C> {
 
         // 2. Not in buffer — fall through to engine
         let start = std::time::Instant::now();
-        let core = self.core.lock();
+        let core = self.core.read();
 
         // 2a. Check memtables (newest first) — point writes take precedence
         // over range tombstones.
@@ -336,7 +336,7 @@ impl<C: Cache> Transaction<C> {
 
         let needs_compact: Vec<(String, bool)>;
         {
-            let mut core = self.core.lock();
+            let mut core = self.core.write();
 
             let mut per_cf_compact = Vec::with_capacity(cf_writes.len());
 

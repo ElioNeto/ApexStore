@@ -11,3 +11,4 @@ dist
 .notes/
 .aider*
 .secrets
+.cargo/config.toml
