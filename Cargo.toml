@@ -97,6 +97,7 @@ actix-ws = "0.3"
 tempfile = "3.24"
 criterion = { version = "0.5", features = ["html_reports"] }
 futures = "0.3"
+proptest = "1.6"
 
 [profile.release]
 opt-level = 3
