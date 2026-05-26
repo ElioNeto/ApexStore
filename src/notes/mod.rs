@@ -41,6 +41,8 @@ pub mod graph;
 pub mod index;
 pub mod parser;
 pub mod search;
+pub mod template;
+pub mod validate;
 
 use crate::infra::error::Result;
 use crate::storage::cache::Cache;
@@ -53,6 +55,8 @@ pub use parser::{
     Wikilink,
 };
 pub use search::SearchHit;
+pub use template::{render_template, NoteTemplate};
+pub use validate::FrontmatterSchema;
 
 /// Type alias for the note engine using the default LSM engine with `GlobalBlockCache`.
 pub type NotesEngine = NoteEngine<std::sync::Arc<crate::storage::cache::GlobalBlockCache>>;

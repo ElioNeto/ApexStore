@@ -680,6 +680,70 @@
         "cargo test, cargo check, cargo clippy pass"
       ],
       "fetched_body": true
+    },
+    {
+      "number": 306,
+      "priority": "medium",
+      "title": "[FEATURE] Frontend WebSocket Sync Service",
+      "status": "completed",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "SyncService with connect/disconnect/pushChange methods created",
+        "SyncStatusComponent page showing connection status, last sync, pending changes",
+        "WebSocket connection with ping/keepalive",
+        "rxjs Observable for receiving sync changes"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 287,
+      "priority": "medium",
+      "title": "[FEATURE] Template Engine for Daily Notes",
+      "status": "completed",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "NoteTemplate struct with name, content, variables fields",
+        "render_template() with {{variable}}, {{date:format}}, {{time:format}} support",
+        "list_templates/save_template/delete_template/get_template functions",
+        "create_daily_note() generating daily/YYYY-MM-DD notes from templates",
+        "REST endpoints: GET /templates, PUT /templates/{name}, DELETE /templates/{name}, POST /notes/daily"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 288,
+      "priority": "medium",
+      "title": "[FEATURE] Frontmatter Validation",
+      "status": "completed",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "FrontmatterSchema struct with required_fields, field_types, allowed_tags, max_tags",
+        "FieldType enum: String, Number, Date, TagList, StringList",
+        "validate_frontmatter() returning list of validation errors",
+        "get_default_schema() with title required and date/tag types",
+        "Default schema registered on server startup",
+        "Schema persistence: save_schema/load_schema/list_schemas/delete_schema"
+      ],
+      "fetched_body": true
+    },
+    {
+      "number": 308,
+      "priority": "low",
+      "title": "[FEATURE] Frontend Testing Infrastructure",
+      "status": "completed",
+      "depends_on": [],
+      "blocks": [],
+      "acceptance_summary": [
+        "karma.conf.js configured with ChromeHeadless, jasmine, coverage",
+        "test.ts entry point for Angular testing environment",
+        "tsconfig.spec.json for test compilation",
+        "Sample specs for ApexStoreService (5 test cases)",
+        "Sample specs for ToastService (12 test cases covering all methods)"
+      ],
+      "fetched_body": true
     }
   ],
   "todos": [
@@ -1099,6 +1163,110 @@
       "files": [],
       "depends_on": ["T268_1", "T268_2"],
       "notes": "cargo test --all-features -- core::engine::transaction: 15 passed, 0 failed. cargo clippy --all-targets --all-features -- -D warnings: passes. cargo fmt --all: passes."
+    },
+    {
+      "id": "T306_1",
+      "description": "Issue #306: Create SyncService with connect/disconnect/pushChange and Observable",
+      "status": "done",
+      "files": ["frontend/src/app/services/sync.service.ts"],
+      "depends_on": [],
+      "notes": "Created SyncService with WebSocket management, ping keepalive, status/change Observables"
+    },
+    {
+      "id": "T306_2",
+      "description": "Issue #306: Create SyncStatusComponent page with status display",
+      "status": "done",
+      "files": ["frontend/src/app/pages/sync-status/sync-status.component.ts"],
+      "depends_on": ["T306_1"],
+      "notes": "Created SyncStatusComponent showing connection status, last sync time, pending changes count"
+    },
+    {
+      "id": "T306_3",
+      "description": "Issue #306: Register sync-status route in app.routes.ts",
+      "status": "done",
+      "files": ["frontend/src/app/app.routes.ts"],
+      "depends_on": ["T306_2"],
+      "notes": "Added route for /sync-status pointing to SyncStatusComponent"
+    },
+    {
+      "id": "T287_1",
+      "description": "Issue #287: Create template.rs with NoteTemplate, render_template, template CRUD, daily notes",
+      "status": "done",
+      "files": ["src/notes/template.rs"],
+      "depends_on": [],
+      "notes": "Created template module with render_template (variable/date/time substitution), list/save/get/delete template, create_daily_note"
+    },
+    {
+      "id": "T287_2",
+      "description": "Issue #287: Add pub mod template; to src/notes/mod.rs and re-exports",
+      "status": "done",
+      "files": ["src/notes/mod.rs"],
+      "depends_on": ["T287_1"],
+      "notes": "Added pub mod template; and pub use template::{render_template, NoteTemplate};"
+    },
+    {
+      "id": "T287_3",
+      "description": "Issue #287: Add REST endpoints for templates and daily notes",
+      "status": "done",
+      "files": ["src/api/notes.rs"],
+      "depends_on": ["T287_2"],
+      "notes": "Added GET /templates, PUT /templates/{name}, DELETE /templates/{name}, POST /notes/daily handlers"
+    },
+    {
+      "id": "T288_1",
+      "description": "Issue #288: Create validate.rs with FrontmatterSchema, validate_frontmatter, schema CRUD",
+      "status": "done",
+      "files": ["src/notes/validate.rs"],
+      "depends_on": [],
+      "notes": "Created validate module with FrontmatterSchema, FieldType enum, validate_frontmatter, get_default_schema, schema persistence"
+    },
+    {
+      "id": "T288_2",
+      "description": "Issue #288: Add pub mod validate; to src/notes/mod.rs",
+      "status": "done",
+      "files": ["src/notes/mod.rs"],
+      "depends_on": ["T288_1"],
+      "notes": "Added pub mod validate; and pub use validate::FrontmatterSchema;"
+    },
+    {
+      "id": "T288_3",
+      "description": "Issue #288: Register default frontmatter schema on server startup",
+      "status": "done",
+      "files": ["src/bin/server.rs"],
+      "depends_on": ["T288_2"],
+      "notes": "Added register_default_schema() call in server.rs after engine initialization"
+    },
+    {
+      "id": "T308_1",
+      "description": "Issue #308: Create karma.conf.js for Angular testing",
+      "status": "done",
+      "files": ["frontend/karma.conf.js"],
+      "depends_on": [],
+      "notes": "Created karma config with ChromeHeadless, jasmine, coverage, kjhtml reporter"
+    },
+    {
+      "id": "T308_2",
+      "description": "Issue #308: Create test.ts entry point and tsconfig.spec.json",
+      "status": "done",
+      "files": ["frontend/src/test.ts", "frontend/tsconfig.spec.json"],
+      "depends_on": ["T308_1"],
+      "notes": "Created test.ts with Angular testing environment init, tsconfig.spec.json with jasmine types"
+    },
+    {
+      "id": "T308_3",
+      "description": "Issue #308: Add test builder to angular.json",
+      "status": "done",
+      "files": ["frontend/angular.json"],
+      "depends_on": ["T308_2"],
+      "notes": "Added karma test builder configuration to angular.json"
+    },
+    {
+      "id": "T308_4",
+      "description": "Issue #308: Create sample specs for ApexStoreService and ToastService",
+      "status": "done",
+      "files": ["frontend/src/app/services/apex-store.service.spec.ts", "frontend/src/app/services/toast.service.spec.ts"],
+      "depends_on": ["T308_1"],
+      "notes": "Created 5 spec cases for ApexStoreService (put, get, delete, listKeys, getStats) and 12 spec cases for ToastService"
     }
   ]
 }

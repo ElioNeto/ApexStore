@@ -1,0 +1,64 @@
+<div class="sync-status-container">
+  <h1>Sync Status</h1>
+
+  <div class="sync-card">
+    <div class="card-header">
+      <h2>Connection</h2>
+      <button class="btn btn-outline" (click)="disconnect()" [disabled]="syncStatus() === 'disconnected'">
+        Disconnect
+      </button>
+    </div>
+
+    <div class="connection-row">
+      <label for="deviceId">Device ID</label>
+      <div class="input-group">
+        <input
+          id="deviceId"
+          type="text"
+          [(ngModel)]="deviceId"
+          placeholder="Enter device identifier"
+          [disabled]="syncStatus() === 'connected' || syncStatus() === 'connecting'"
+        />
+        <button class="btn btn-primary" (click)="connect()" [disabled]="syncStatus() === 'connected' || syncStatus() === 'connecting' || !deviceId().trim()">
+          Connect
+        </button>
+      </div>
+    </div>
+
+    <div class="status-row">
+      <span class="status-label">Status</span>
+      <span class="status-value" [style.color]="statusColor(syncStatus())">
+        <app-hugeicons-icon [icon]="statusIcon(syncStatus())" size="18" />
+        {{ syncStatus() }}
+      </span>
+    </div>
+
+    <div class="status-row">
+      <span class="status-label">Last Sync</span>
+      <span class="status-value">{{ lastSyncedLabel() }}</span>
+    </div>
+
+    <div class="status-row">
+      <span class="status-label">Pending Changes</span>
+      <span class="status-value">{{ pending() }}</span>
+    </div>
+
+    @if (lastError(); as err) {
+      <div class="error-row">
+        <app-hugeicons-icon [icon]="CancelCircleIcon" size="16" />
+        {{ err }}
+      </div>
+    }
+  </div>
+
+  <div class="sync-card">
+    <div class="card-header">
+      <h2>Activity</h2>
+      <label class="toggle-label">
+        <input type="checkbox" [(ngModel)]="autoRefresh" />
+        Auto-refresh
+      </label>
+    </div>
+    <p class="hint">Connected devices will receive real-time changes pushed from the server or other clients.</p>
+  </div>
+</div>

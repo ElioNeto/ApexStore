@@ -31,6 +31,7 @@ import { DataScrubberComponent } from './pages/data-scrubber/data-scrubber.compo
 import { BackpressureComponent } from './pages/backpressure/backpressure.component';
 import { WasmPluginsComponent } from './pages/wasm-plugins/wasm-plugins.component';
 import { CicdComponent } from './pages/cicd/cicd.component';
+import { SyncStatusComponent } from './pages/sync-status/sync-status.component';
 
 export const routes: Routes = [
   { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
@@ -66,4 +67,5 @@ export const routes: Routes = [
   { path: 'backpressure', component: BackpressureComponent },
   { path: 'wasm-plugins', component: WasmPluginsComponent },
   { path: 'cicd', component: CicdComponent },
+  { path: 'sync-status', component: SyncStatusComponent },
 ];

@@ -532,6 +532,114 @@ async fn search_notes(
     }
 }
 
+// ── Template handlers ───────────────────────────────────────────────────────
+
+/// `GET /templates` — list all saved templates.
+#[get("/templates")]
+async fn list_templates_handler(
+    req: HttpRequest,
+    engine: web::Data<NotesEngine>,
+) -> impl Responder {
+    if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
+        return e;
+    }
+    match crate::notes::template::list_templates(&engine) {
+        Ok(templates) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "templates": templates })),
+        Err(e) => {
+            tracing::error!(target: "apexstore::api::notes", "Failed to list templates: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// Request body for `PUT /templates/{name}`.
+#[derive(Deserialize)]
+pub struct PutTemplateBody {
+    content: String,
+}
+
+/// `PUT /templates/{name}` — save a template.
+#[put("/templates/{name}")]
+async fn save_template_handler(
+    req: HttpRequest,
+    engine: web::Data<NotesEngine>,
+    path: web::Path<String>,
+    body: web::Json<PutTemplateBody>,
+) -> impl Responder {
+    if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Write) {
+        return e;
+    }
+    let name = path.into_inner();
+    match crate::notes::template::save_template(&engine, &name, &body.content) {
+        Ok(_) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "status": "ok", "name": name })),
+        Err(e) => {
+            tracing::error!(target: "apexstore::api::notes", "Failed to save template: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// `DELETE /templates/{name}` — delete a template.
+#[delete("/templates/{name}")]
+async fn delete_template_handler(
+    req: HttpRequest,
+    engine: web::Data<NotesEngine>,
+    path: web::Path<String>,
+) -> impl Responder {
+    if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Delete) {
+        return e;
+    }
+    let name = path.into_inner();
+    match crate::notes::template::delete_template(&engine, &name) {
+        Ok(_) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "status": "ok" })),
+        Err(e) => {
+            tracing::error!(target: "apexstore::api::notes", "Failed to delete template: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// Request body for `POST /notes/daily`.
+#[derive(Deserialize)]
+pub struct CreateDailyNoteBody {
+    template: Option<String>,
+}
+
+/// `POST /notes/daily` — create a daily note, optionally from a template.
+#[post("/daily")]
+async fn create_daily_note_handler(
+    req: HttpRequest,
+    engine: web::Data<NotesEngine>,
+    body: web::Json<CreateDailyNoteBody>,
+) -> impl Responder {
+    if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Write) {
+        return e;
+    }
+    match crate::notes::template::create_daily_note(&engine, body.template.as_deref()) {
+        Ok(path) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "status": "ok", "path": path })),
+        Err(e) => {
+            tracing::error!(target: "apexstore::api::notes", "Failed to create daily note: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
 /// Register all notes API routes under `/notes` and `/tags`.
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
@@ -548,9 +656,13 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .service(get_note_at_version)
             .service(delete_version)
             .service(restore_version)
-            .service(create_snapshot),
+            .service(create_snapshot)
+            .service(create_daily_note_handler),
     )
     .service(search_notes)
     .service(list_tags)
-    .service(get_notes_by_tag);
+    .service(get_notes_by_tag)
+    .service(list_templates_handler)
+    .service(save_template_handler)
+    .service(delete_template_handler);
 }
