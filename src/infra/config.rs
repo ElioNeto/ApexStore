@@ -50,6 +50,13 @@ pub struct WalConfig {
     /// Interval in seconds between WAL size checks (default: 60).
     #[serde(default = "default_wal_check_interval_secs")]
     pub check_interval_secs: u64,
+    /// Number of `write_record` calls between fsyncs (default: 4).
+    ///
+    /// A value of 1 means every write fsyncs (maximum durability).
+    /// Higher values improve write throughput at the cost of a wider
+    /// durability window in the event of a crash.
+    #[serde(default = "default_wal_sync_interval")]
+    pub sync_interval: usize,
 }
 
 fn default_wal_max_size() -> u64 {
@@ -60,12 +67,17 @@ fn default_wal_check_interval_secs() -> u64 {
     60
 }
 
+fn default_wal_sync_interval() -> usize {
+    4 // matches WAL_SYNC_INTERVAL in storage::wal
+}
+
 impl Default for WalConfig {
     fn default() -> Self {
         Self {
             max_wal_size: default_wal_max_size(),
             archive_enabled: false,
             check_interval_secs: default_wal_check_interval_secs(),
+            sync_interval: default_wal_sync_interval(),
         }
     }
 }
@@ -362,6 +374,7 @@ pub struct LsmConfigBuilder {
     wal_max_size: Option<u64>,
     wal_archive_enabled: Option<bool>,
     wal_check_interval_secs: Option<u64>,
+    wal_sync_interval: Option<usize>,
 }
 
 impl LsmConfigBuilder {
@@ -467,6 +480,16 @@ impl LsmConfigBuilder {
         self
     }
 
+    /// Set the number of `write_record` calls between fsyncs.
+    ///
+    /// A value of 1 means every write fsyncs (maximum durability).
+    /// Higher values improve write throughput at the cost of a wider
+    /// durability window in the event of a crash.
+    pub fn wal_sync_interval(mut self, interval: usize) -> Self {
+        self.wal_sync_interval = Some(interval);
+        self
+    }
+
     pub fn build(self) -> Result<LsmConfig> {
         let defaults = LsmConfig::default();
 
@@ -525,6 +548,7 @@ impl LsmConfigBuilder {
                 check_interval_secs: self
                     .wal_check_interval_secs
                     .unwrap_or(defaults.wal.check_interval_secs),
+                sync_interval: self.wal_sync_interval.unwrap_or(defaults.wal.sync_interval),
             },
         };
 
