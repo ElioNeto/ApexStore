@@ -133,7 +133,7 @@ impl Default for StorageConfig {
             block_cache_size_mb: 64,
             sparse_index_interval: 16,
             bloom_false_positive_rate: 0.01,
-            encryption_enabled: false,
+            encryption_enabled: true,
             encryption_key_path: None,
             prefix_compression_enabled: false,
         }

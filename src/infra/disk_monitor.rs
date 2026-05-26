@@ -3,6 +3,7 @@
 //! Periodically checks the available disk space on the data directory and
 //! triggers actions (warnings, graceful shutdown) when thresholds are crossed.
 
+use crate::infra::degradation::{DegradationManager, DegradationMode};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -32,6 +33,8 @@ struct Inner {
     /// Callback invoked when disk space is critically low (behind a Mutex to
     /// satisfy Sync for Arc).
     on_critical: Mutex<Option<Box<dyn Fn() + Send>>>,
+    /// Optional degradation manager to set to ReadOnly when disk is critically low.
+    degradation_manager: Mutex<Option<Arc<DegradationManager>>>,
 }
 
 impl DiskMonitor {
@@ -56,6 +59,7 @@ impl DiskMonitor {
                 interval,
                 stopped: AtomicBool::new(false),
                 on_critical: Mutex::new(None),
+                degradation_manager: Mutex::new(None),
             }),
             handle: None,
         }
@@ -80,6 +84,16 @@ impl DiskMonitor {
     {
         let mut cb = self.inner.on_critical.lock().unwrap();
         *cb = Some(Box::new(callback));
+    }
+
+    /// Link a [`DegradationManager`] to this monitor.
+    ///
+    /// When the critical disk-space threshold is crossed, the degradation
+    /// manager is automatically set to [`DegradationMode::ReadOnly`](crate::infra::degradation::DegradationMode::ReadOnly)
+    /// so that write operations are rejected until more space becomes available.
+    pub fn with_degradation_manager(self, mgr: Arc<DegradationManager>) -> Self {
+        *self.inner.degradation_manager.lock().unwrap() = Some(mgr);
+        self
     }
 
     /// Start the background monitoring thread.
@@ -133,10 +147,20 @@ impl Inner {
         if available < self.critical_threshold {
             error!(
                 target: "apexstore::disk_monitor",
-                "CRITICAL: disk space critically low ({} bytes available, threshold {}). Triggering shutdown.",
+                "CRITICAL: disk space critically low ({} bytes available, threshold {}). Setting ReadOnly mode.",
                 available,
                 self.critical_threshold
             );
+
+            // Set degradation mode to ReadOnly if a manager is linked
+            if let Some(ref mgr) = *self.degradation_manager.lock().unwrap() {
+                mgr.set_mode(DegradationMode::ReadOnly);
+                warn!(
+                    target: "apexstore::disk_monitor",
+                    "Degradation mode set to ReadOnly due to critically low disk space"
+                );
+            }
+
             let cb = self.on_critical.lock().unwrap();
             if let Some(ref callback) = *cb {
                 callback();

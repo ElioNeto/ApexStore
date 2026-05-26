@@ -49,15 +49,19 @@ impl RetryConfig {
     /// retries are exhausted.
     ///
     /// The closure receives the current attempt number (0-based).
-    pub fn retry_with_backoff<T, E, F>(&self, mut f: F) -> Result<T, E>
+    ///
+    /// This is an async function that uses [`tokio::time::sleep`] instead of
+    /// [`std::thread::sleep`] to avoid blocking the async runtime.
+    pub async fn retry_with_backoff<T, E, F, Fut>(&self, mut f: F) -> Result<T, E>
     where
-        F: FnMut(u32) -> std::result::Result<T, E>,
+        F: FnMut(u32) -> Fut,
+        Fut: std::future::Future<Output = std::result::Result<T, E>>,
         E: std::fmt::Display,
     {
         let mut last_err: Option<E> = None;
 
         for attempt in 0..=self.max_retries {
-            match f(attempt) {
+            match f(attempt).await {
                 Ok(value) => return Ok(value),
                 Err(e) => {
                     if attempt == self.max_retries {
@@ -99,7 +103,7 @@ impl RetryConfig {
                         delay_ms
                     };
 
-                    std::thread::sleep(Duration::from_millis(actual_delay_ms));
+                    tokio::time::sleep(Duration::from_millis(actual_delay_ms)).await;
                 }
             }
         }
@@ -110,12 +114,15 @@ impl RetryConfig {
 }
 
 /// Convenience function that uses [`RetryConfig::default`].
-pub fn retry_with_backoff<T, E, F>(f: F) -> Result<T, E>
+///
+/// This is an async function; it must be called with `.await`.
+pub async fn retry_with_backoff<T, E, F, Fut>(f: F) -> Result<T, E>
 where
-    F: FnMut(u32) -> std::result::Result<T, E>,
+    F: FnMut(u32) -> Fut,
+    Fut: std::future::Future<Output = std::result::Result<T, E>>,
     E: std::fmt::Display,
 {
-    RetryConfig::default().retry_with_backoff(f)
+    RetryConfig::default().retry_with_backoff(f).await
 }
 
 #[cfg(test)]
@@ -123,49 +130,57 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    #[test]
-    fn test_retry_succeeds_on_first_attempt() {
+    #[tokio::test]
+    async fn test_retry_succeeds_on_first_attempt() {
         let config = RetryConfig::default();
-        let result = config.retry_with_backoff(|_| Ok::<_, &str>(42));
+        let result = config
+            .retry_with_backoff(|_| async { Ok::<_, &str>(42) })
+            .await;
         assert_eq!(result.unwrap(), 42);
     }
 
-    #[test]
-    fn test_retry_succeeds_after_retries() {
+    #[tokio::test]
+    async fn test_retry_succeeds_after_retries() {
         let attempts = AtomicU32::new(0);
         let config = RetryConfig::new(3, 5, 100);
 
-        let result = config.retry_with_backoff(|_| {
-            let prev = attempts.fetch_add(1, Ordering::SeqCst);
-            if prev < 2 {
-                Err::<_, &str>("not yet")
-            } else {
-                Ok("success")
-            }
-        });
+        let result = config
+            .retry_with_backoff(|_| {
+                let prev = attempts.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if prev < 2 {
+                        Err::<_, &str>("not yet")
+                    } else {
+                        Ok("success")
+                    }
+                }
+            })
+            .await;
 
         assert_eq!(result.unwrap(), "success");
         assert_eq!(attempts.load(Ordering::SeqCst), 3);
     }
 
-    #[test]
-    fn test_retry_exhausted() {
+    #[tokio::test]
+    async fn test_retry_exhausted() {
         let attempts = AtomicU32::new(0);
         let config = RetryConfig::new(2, 5, 100);
 
-        let result: Result<(), &str> = config.retry_with_backoff(|_| {
-            attempts.fetch_add(1, Ordering::SeqCst);
-            Err("always fails")
-        });
+        let result: Result<(), &str> = config
+            .retry_with_backoff(|_| {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                async move { Err("always fails") }
+            })
+            .await;
 
         assert!(result.is_err());
         assert_eq!(attempts.load(Ordering::SeqCst), 3); // initial + 2 retries
     }
 
-    #[test]
-    fn test_zero_retries() {
+    #[tokio::test]
+    async fn test_zero_retries() {
         let config = RetryConfig::new(0, 5, 100);
-        let result: Result<(), &str> = config.retry_with_backoff(|_| Err("fail"));
+        let result: Result<(), &str> = config.retry_with_backoff(|_| async { Err("fail") }).await;
         assert!(result.is_err());
     }
 
@@ -178,9 +193,9 @@ mod tests {
         assert!(config.jitter);
     }
 
-    #[test]
-    fn test_retry_with_backoff_convenience() {
-        let result = retry_with_backoff(|_| Ok::<_, &str>("ok"));
+    #[tokio::test]
+    async fn test_retry_with_backoff_convenience() {
+        let result = retry_with_backoff(|_| async { Ok::<_, &str>("ok") }).await;
         assert_eq!(result.unwrap(), "ok");
     }
 }

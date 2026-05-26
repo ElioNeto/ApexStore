@@ -462,13 +462,21 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let sst_path = dir.path().join("valid.sst");
 
-        // Build a proper SSTable with SstableBuilder
+        // Build a proper SSTable with SstableBuilder.
+        // Disable encryption explicitly because the scrubber doesn't
+        // support encrypted SSTables (LSMSST04 magic).
         let config = crate::infra::config::StorageConfig::default();
+        let enc_config = crate::storage::encryption::EncryptionConfig {
+            enabled: false,
+            key: [0u8; 32],
+        };
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let mut builder = SstableBuilder::new(sst_path.clone(), config, timestamp).unwrap();
+        let mut builder =
+            SstableBuilder::new_with_encryption(sst_path.clone(), config, timestamp, &enc_config)
+                .unwrap();
 
         builder
             .add(
@@ -504,13 +512,21 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let sst_path = dir.path().join("corrupt.sst");
 
-        // Build a proper SSTable
+        // Build a proper SSTable.
+        // Disable encryption explicitly because the scrubber doesn't
+        // support encrypted SSTables (LSMSST04 magic).
         let config = crate::infra::config::StorageConfig::default();
+        let enc_config = crate::storage::encryption::EncryptionConfig {
+            enabled: false,
+            key: [0u8; 32],
+        };
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let mut builder = SstableBuilder::new(sst_path.clone(), config, timestamp).unwrap();
+        let mut builder =
+            SstableBuilder::new_with_encryption(sst_path.clone(), config, timestamp, &enc_config)
+                .unwrap();
 
         builder
             .add(

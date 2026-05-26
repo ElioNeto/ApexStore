@@ -2,7 +2,7 @@
 //!
 //! Provides a single `GET /admin/dashboard` endpoint that returns an embedded
 //! HTML page with live engine statistics. The page auto-refreshes every 5
-//! seconds using a JavaScript timer.
+//! seconds using a `fetch()` call to avoid a full page reload.
 
 use crate::api::auth::{require_permission, Permission};
 use crate::LsmEngine;
@@ -93,118 +93,120 @@ pub async fn admin_dashboard(req: HttpRequest, engine: web::Data<LsmEngine>) -> 
   </style>
 </head>
 <body>
-  <h1>⬡ ApexStore Dashboard</h1>
-  <p class="refresh-note">⏱ Auto-refreshing every 5 seconds</p>
+  <div id="dashboard-content">
+    <h1>⬡ ApexStore Dashboard</h1>
+    <p class="refresh-note">⏱ Auto-refreshing every 5 seconds</p>
 
-  <h2>Engine Stats</h2>
-  <div class="grid">
-    <div class="card">
-      <div class="label">Column Families</div>
-      <div class="value blue">{cf_count}</div>
+    <h2>Engine Stats</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="label">Column Families</div>
+        <div class="value blue">{cf_count}</div>
+      </div>
+      <div class="card">
+        <div class="label">SST Files</div>
+        <div class="value">{sst_files}</div>
+      </div>
+      <div class="card">
+        <div class="label">SST Size</div>
+        <div class="value">{sst_kb} KB</div>
+      </div>
+      <div class="card">
+        <div class="label">WAL Size</div>
+        <div class="value">{wal_kb} KB</div>
+      </div>
+      <div class="card">
+        <div class="label">Memtable Records</div>
+        <div class="value">{mem_records}</div>
+      </div>
+      <div class="card">
+        <div class="label">Memtable Size</div>
+        <div class="value">{mem_kb} KB</div>
+      </div>
+      <div class="card">
+        <div class="label">Total Records</div>
+        <div class="value">{total_records}</div>
+      </div>
+      <div class="card">
+        <div class="label">Max Levels Reached</div>
+        <div class="value">{max_levels}</div>
+      </div>
     </div>
-    <div class="card">
-      <div class="label">SST Files</div>
-      <div class="value">{sst_files}</div>
-    </div>
-    <div class="card">
-      <div class="label">SST Size</div>
-      <div class="value">{sst_kb} KB</div>
-    </div>
-    <div class="card">
-      <div class="label">WAL Size</div>
-      <div class="value">{wal_kb} KB</div>
-    </div>
-    <div class="card">
-      <div class="label">Memtable Records</div>
-      <div class="value">{mem_records}</div>
-    </div>
-    <div class="card">
-      <div class="label">Memtable Size</div>
-      <div class="value">{mem_kb} KB</div>
-    </div>
-    <div class="card">
-      <div class="label">Total Records</div>
-      <div class="value">{total_records}</div>
-    </div>
-    <div class="card">
-      <div class="label">Max Levels Reached</div>
-      <div class="value">{max_levels}</div>
-    </div>
-  </div>
 
-  <h2>Compaction</h2>
-  <div class="grid">
-    <div class="card">
-      <div class="label">Status</div>
-      <div class="value"><span class="status {compact_status_class}">{compact_status}</span></div>
+    <h2>Compaction</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="label">Status</div>
+        <div class="value"><span class="status {compact_status_class}">{compact_status}</span></div>
+      </div>
+      <div class="card">
+        <div class="label">Compactions Completed</div>
+        <div class="value">{compactions_completed}</div>
+      </div>
+      <div class="card">
+        <div class="label">Files Merged (last)</div>
+        <div class="value">{files_merged}</div>
+      </div>
+      <div class="card">
+        <div class="label">Bytes Read (last)</div>
+        <div class="value">{bytes_read}</div>
+      </div>
+      <div class="card">
+        <div class="label">Bytes Written (last)</div>
+        <div class="value">{bytes_written}</div>
+      </div>
     </div>
-    <div class="card">
-      <div class="label">Compactions Completed</div>
-      <div class="value">{compactions_completed}</div>
-    </div>
-    <div class="card">
-      <div class="label">Files Merged (last)</div>
-      <div class="value">{files_merged}</div>
-    </div>
-    <div class="card">
-      <div class="label">Bytes Read (last)</div>
-      <div class="value">{bytes_read}</div>
-    </div>
-    <div class="card">
-      <div class="label">Bytes Written (last)</div>
-      <div class="value">{bytes_written}</div>
-    </div>
-  </div>
 
-  <h2>Operations</h2>
-  <div class="grid">
-    <div class="card">
-      <div class="label">Sets</div>
-      <div class="value">{sets}</div>
+    <h2>Operations</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="label">Sets</div>
+        <div class="value">{sets}</div>
+      </div>
+      <div class="card">
+        <div class="label">Gets</div>
+        <div class="value">{gets}</div>
+      </div>
+      <div class="card">
+        <div class="label">Deletes</div>
+        <div class="value">{deletes}</div>
+      </div>
+      <div class="card">
+        <div class="label">Scans</div>
+        <div class="value">{scans}</div>
+      </div>
+      <div class="card">
+        <div class="label">Flushes</div>
+        <div class="value">{flushes}</div>
+      </div>
+      <div class="card">
+        <div class="label">Cache Hits</div>
+        <div class="value green">{cache_hits}</div>
+      </div>
+      <div class="card">
+        <div class="label">Cache Misses</div>
+        <div class="value red">{cache_misses}</div>
+      </div>
+      <div class="card">
+        <div class="label">Bloom Negatives</div>
+        <div class="value">{bloom_negatives}</div>
+      </div>
+      <div class="card">
+        <div class="label">Errors</div>
+        <div class="value red">{errors}</div>
+      </div>
     </div>
-    <div class="card">
-      <div class="label">Gets</div>
-      <div class="value">{gets}</div>
-    </div>
-    <div class="card">
-      <div class="label">Deletes</div>
-      <div class="value">{deletes}</div>
-    </div>
-    <div class="card">
-      <div class="label">Scans</div>
-      <div class="value">{scans}</div>
-    </div>
-    <div class="card">
-      <div class="label">Flushes</div>
-      <div class="value">{flushes}</div>
-    </div>
-    <div class="card">
-      <div class="label">Cache Hits</div>
-      <div class="value green">{cache_hits}</div>
-    </div>
-    <div class="card">
-      <div class="label">Cache Misses</div>
-      <div class="value red">{cache_misses}</div>
-    </div>
-    <div class="card">
-      <div class="label">Bloom Negatives</div>
-      <div class="value">{bloom_negatives}</div>
-    </div>
-    <div class="card">
-      <div class="label">Errors</div>
-      <div class="value red">{errors}</div>
-    </div>
-  </div>
 
-  <h2>Column Families</h2>
-  <div class="card">
-    <ul class="table-list">
-      {cf_list}
-    </ul>
-  </div>
+    <h2>Column Families</h2>
+    <div class="card">
+      <ul class="table-list">
+        {cf_list}
+      </ul>
+    </div>
 
-  <div class="footer">
-    ApexStore v{version} · Updated at <span id="updated-at"></span>
+    <div class="footer">
+      ApexStore v{version} · Updated at <span id="updated-at"></span>
+    </div>
   </div>
 
   <script>
@@ -213,7 +215,23 @@ pub async fn admin_dashboard(req: HttpRequest, engine: web::Data<LsmEngine>) -> 
     }}
     updateTime();
     setInterval(updateTime, 1000);
-    setTimeout(function() {{ location.reload(); }}, 5000);
+
+    function refreshDashboard() {{
+      fetch('/admin/dashboard')
+        .then(function(r) {{ return r.text(); }})
+        .then(function(html) {{
+          var parser = new DOMParser();
+          var doc = parser.parseFromString(html, 'text/html');
+          var newContent = doc.getElementById('dashboard-content');
+          if (newContent) {{
+            document.getElementById('dashboard-content').innerHTML = newContent.innerHTML;
+          }}
+        }})
+        .catch(function(err) {{
+          console.error('Dashboard refresh failed:', err);
+        }});
+    }}
+    setTimeout(refreshDashboard, 5000);
   </script>
 </body>
 </html>"#,

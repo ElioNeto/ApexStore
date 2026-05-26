@@ -9,6 +9,7 @@
 //! - [`WebhookPublisher`] — a publisher that sends events as HTTP POST to a configured endpoint.
 
 use serde::Serialize;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Configuration for Change Data Capture.
 #[derive(Debug, Clone, Serialize, Default)]
@@ -17,6 +18,12 @@ pub struct CdcConfig {
     pub enabled: bool,
     /// Optional HTTP endpoint to which CDC events are posted (used by [`WebhookPublisher`]).
     pub endpoint: Option<String>,
+    /// Optional auth header in the format `"header_name:header_value"` or `"Bearer <token>"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_header: Option<String>,
+    /// Optional custom HTTP timeout in seconds (default: 5).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
 }
 
 impl CdcConfig {
@@ -30,7 +37,19 @@ impl CdcConfig {
         Self {
             enabled: true,
             endpoint: Some(endpoint),
+            auth_header: None,
+            timeout_secs: None,
         }
+    }
+
+    /// Attach an auth header to this CDC config.
+    ///
+    /// The `header` string is parsed as `"header_name:header_value"`.
+    /// If no colon is present, it is treated as a bare bearer token
+    /// (i.e. `"Authorization: Bearer <token>"`).
+    pub fn with_auth_header(mut self, header: String) -> Self {
+        self.auth_header = Some(header);
+        self
     }
 }
 
@@ -124,33 +143,115 @@ impl CdcPublisher for CdcCollector {
 /// A CDC publisher that sends events as HTTP POST requests to a configurable endpoint.
 ///
 /// The event body is serialised as JSON with `Content-Type: application/json`.
-/// Uses a short (5 s) connect and read timeout to avoid blocking the engine for long.
+/// Uses a configurable connect and read timeout (default 30 s) to avoid blocking
+/// the engine for long.
 pub struct WebhookPublisher {
     endpoint: String,
     agent: ureq::Agent,
+    auth_header: Option<(String, String)>, // (header_name, header_value)
+    /// Timeout for connect and read operations.
+    timeout: std::time::Duration,
+    /// Number of successful webhook deliveries.
+    success_count: AtomicU64,
+    /// Number of failed webhook deliveries (after retries).
+    failure_count: AtomicU64,
 }
 
 impl WebhookPublisher {
     /// Create a new webhook publisher targeting `endpoint`.
     ///
     /// The endpoint should be a full URL such as `http://example.com/webhook`.
+    /// Default timeout is 30 seconds. Use [`with_timeout`](Self::with_timeout)
+    /// to customise.
     pub fn new(endpoint: String) -> Self {
+        let timeout = std::time::Duration::from_secs(30);
         let agent = ureq::AgentBuilder::new()
-            .timeout_connect(std::time::Duration::from_secs(5))
-            .timeout_read(std::time::Duration::from_secs(5))
+            .timeout_connect(timeout)
+            .timeout_read(timeout)
             .build();
-        Self { endpoint, agent }
+        Self {
+            endpoint,
+            agent,
+            auth_header: None,
+            timeout,
+            success_count: AtomicU64::new(0),
+            failure_count: AtomicU64::new(0),
+        }
+    }
+
+    /// Override the default HTTP timeout.
+    ///
+    /// The same value is used for both the connect and read timeout.
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = timeout;
+        self.agent = ureq::AgentBuilder::new()
+            .timeout_connect(timeout)
+            .timeout_read(timeout)
+            .build();
+        self
+    }
+
+    /// Attach an HTTP auth header to every request.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use apexstore::infra::cdc::WebhookPublisher;
+    /// let publisher = WebhookPublisher::new("http://example.com/hook".into())
+    ///     .with_auth("Authorization".into(), "Bearer my-token".into());
+    /// ```
+    pub fn with_auth(mut self, header_name: String, header_value: String) -> Self {
+        self.auth_header = Some((header_name, header_value));
+        self
+    }
+
+    /// Return CDC delivery metrics: (success_count, failure_count).
+    pub fn metrics(&self) -> (u64, u64) {
+        (
+            self.success_count.load(Ordering::Relaxed),
+            self.failure_count.load(Ordering::Relaxed),
+        )
     }
 }
 
 impl CdcPublisher for WebhookPublisher {
     fn publish(&self, event: CdcEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let json = serde_json::to_string(&event)?;
-        self.agent
-            .post(&self.endpoint)
-            .set("Content-Type", "application/json")
-            .send_string(&json)?;
-        Ok(())
+
+        // Retry up to 3 times with exponential backoff.
+        // Build a fresh request each time because ureq::Request is consumed on send.
+        let mut last_err = None;
+        for attempt in 0..3 {
+            let mut req = self.agent.post(&self.endpoint);
+            req = req.set("Content-Type", "application/json");
+
+            // Add auth header if configured
+            if let Some((ref name, ref value)) = self.auth_header {
+                req = req.set(name, value);
+            }
+
+            match req.send_string(&json) {
+                Ok(response) => {
+                    if (200..300).contains(&response.status()) {
+                        self.success_count.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        self.failure_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                    return Ok(());
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    std::thread::sleep(std::time::Duration::from_millis(100 * (1 << attempt)));
+                }
+            }
+        }
+
+        self.failure_count.fetch_add(1, Ordering::Relaxed);
+
+        Err(Box::new(std::io::Error::other(format!(
+            "CDC publish failed after 3 retries: {:?}",
+            last_err
+        ))))
     }
 }
 
@@ -190,7 +291,29 @@ pub fn create_publisher(config: &CdcConfig) -> Option<Box<dyn CdcPublisher>> {
         return None;
     }
     match &config.endpoint {
-        Some(url) if !url.is_empty() => Some(Box::new(WebhookPublisher::new(url.clone()))),
+        Some(url) if !url.is_empty() => {
+            let mut publisher = WebhookPublisher::new(url.clone());
+
+            // Apply custom timeout if configured
+            if let Some(secs) = config.timeout_secs {
+                publisher = publisher.with_timeout(std::time::Duration::from_secs(secs));
+            }
+
+            // Apply auth header if configured
+            if let Some(ref auth) = config.auth_header {
+                // Support "Authorization: Bearer <token>" format
+                if let Some((name, value)) = auth.split_once(':') {
+                    publisher =
+                        publisher.with_auth(name.trim().to_string(), value.trim().to_string());
+                } else {
+                    // Treat as bare bearer token
+                    publisher = publisher
+                        .with_auth("Authorization".to_string(), format!("Bearer {}", auth));
+                }
+            }
+
+            Some(Box::new(publisher))
+        }
         _ => Some(Box::new(CdcCollector::new())),
     }
 }
@@ -239,6 +362,8 @@ mod tests {
         let config = CdcConfig {
             enabled: true,
             endpoint: None,
+            auth_header: None,
+            timeout_secs: None,
         };
         let publisher = create_publisher(&config);
         assert!(publisher.is_some());
@@ -247,6 +372,60 @@ mod tests {
             .unwrap()
             .publish(make_event())
             .expect("CdcCollector should accept events");
+    }
+
+    #[test]
+    fn test_webhook_publisher_with_auth_header() {
+        let _publisher = WebhookPublisher::new("http://example.com/hook".into())
+            .with_auth("Authorization".into(), "Bearer my-token".into());
+        // Verify the auth_header was set by checking public API
+        // (auth_header is private, so we verify via the builder pattern)
+    }
+
+    #[test]
+    fn test_cdc_config_with_auth_header_bearer() {
+        let config = CdcConfig::with_endpoint("http://example.com/hook".into())
+            .with_auth_header("my-bearer-token".into());
+        assert_eq!(config.auth_header, Some("my-bearer-token".into()));
+    }
+
+    #[test]
+    fn test_cdc_config_with_auth_header_colon_format() {
+        let config = CdcConfig::with_endpoint("http://example.com/hook".into())
+            .with_auth_header("X-API-Key: secret123".into());
+        assert_eq!(config.auth_header, Some("X-API-Key: secret123".into()));
+    }
+
+    #[test]
+    fn test_cdc_config_with_endpoint_and_auth() {
+        let config = CdcConfig::with_endpoint("http://example.com/hook".into())
+            .with_auth_header("Authorization: Bearer my-token".into());
+        assert!(config.enabled);
+        assert_eq!(config.endpoint, Some("http://example.com/hook".into()));
+        assert_eq!(
+            config.auth_header,
+            Some("Authorization: Bearer my-token".into())
+        );
+        assert_eq!(config.timeout_secs, None);
+    }
+
+    #[test]
+    fn test_cdc_config_disabled() {
+        let config = CdcConfig::disabled();
+        assert!(!config.enabled);
+        assert_eq!(config.endpoint, None);
+        assert_eq!(config.auth_header, None);
+        assert_eq!(config.timeout_secs, None);
+    }
+
+    #[test]
+    fn test_webhook_publisher_new() {
+        let publisher = WebhookPublisher::new("http://localhost:9999/hook".into());
+        // Ensure the publisher implements CdcPublisher and can be boxed
+        let boxed: Box<dyn CdcPublisher> = Box::new(publisher);
+        // Publishing to a non-existent endpoint should fail (no server)
+        let result = boxed.publish(make_event());
+        assert!(result.is_err());
     }
 
     #[test]

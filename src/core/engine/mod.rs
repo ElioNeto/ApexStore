@@ -4,7 +4,9 @@ pub mod version_set;
 
 use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::core::table::Table;
+use crate::infra::backpressure::CompactionBackpressure;
 use crate::infra::cdc::{CdcConfig, CdcEvent, CdcEventType, CdcPublisher};
+use crate::infra::degradation::DegradationManager;
 use crate::infra::error::Result;
 use crate::infra::metrics::EngineMetrics;
 use crate::infra::replication::{ReplicationClient, ReplicationConfig, ReplicationRole};
@@ -32,6 +34,8 @@ use crate::core::memtable::MemTable;
 
 pub const DEFAULT_SCAN_LIMIT: usize = 128;
 pub const MAX_SCAN_LIMIT: usize = 1024;
+pub const MAX_KEY_SIZE: usize = 4096; // 4KB max key size
+pub const MAX_VALUE_SIZE: usize = 16 * 1024 * 1024; // 16MB max value size
 
 #[derive(Debug, Clone, Default)]
 pub struct LsmStats {
@@ -280,6 +284,9 @@ pub struct Engine<C: Cache> {
     /// File lock handle — prevents concurrent access to the same database directory.
     /// Held for the entire engine lifetime; lock is released on drop.
     _lock_file: std::fs::File,
+    /// Compaction backpressure controller.
+    pub backpressure: CompactionBackpressure,
+
     /// Engine metrics (counters and latency accumulators).
     pub metrics: Arc<EngineMetrics>,
 
@@ -292,6 +299,9 @@ pub struct Engine<C: Cache> {
 
     /// CDC state (config + publisher).
     cdc: Mutex<CdcState>,
+
+    /// Manages graceful degradation modes (Normal, ReadOnly, Degraded).
+    pub degradation: DegradationManager,
 }
 
 /// Holds the CDC state behind a single mutex for atomic access.
@@ -358,6 +368,8 @@ impl<C: Cache> Engine<C> {
         cdc.config = CdcConfig {
             enabled: true,
             endpoint: None,
+            auth_header: None,
+            timeout_secs: None,
         };
         cdc.publisher = Some(publisher);
     }
@@ -385,6 +397,18 @@ impl<C: Cache> Engine<C> {
                 tracing::warn!(target: "apexstore::engine", "CDC publish failed: {:?}", e);
             }
         }
+    }
+
+    /// Set the engine to read-only mode.
+    pub fn set_read_only(&self) {
+        self.degradation
+            .set_mode(crate::infra::degradation::DegradationMode::ReadOnly);
+        tracing::warn!(target: "apexstore::engine", "Engine set to READ-ONLY mode");
+    }
+
+    /// Returns the current degradation mode.
+    pub fn degradation_mode(&self) -> crate::infra::degradation::DegradationMode {
+        self.degradation.current_mode()
     }
 }
 
@@ -453,6 +477,15 @@ impl<C: Cache> Engine<C> {
         // Create SSTable directory
         let sst_dir = dir_path.join("sstables");
         std::fs::create_dir_all(&sst_dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(&sst_dir) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o700);
+                let _ = std::fs::set_permissions(&sst_dir, perms);
+            }
+        }
 
         // Acquire an exclusive file lock to prevent concurrent access
         let lock_path = dir_path.join(".apexstore.lock");
@@ -469,6 +502,15 @@ impl<C: Cache> Engine<C> {
                 e.into()
             }
         })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = lock_file.metadata() {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o600);
+                let _ = std::fs::set_permissions(&lock_path, perms);
+            }
+        }
 
         // Create storage config from options (with encryption derived from engine options)
         let encryption_enabled = options.encryption.enabled;
@@ -640,6 +682,7 @@ impl<C: Cache> Engine<C> {
             _manifest: PathBuf::new(),
             _sst_dir: sst_dir,
             _lock_file: lock_file,
+            backpressure: CompactionBackpressure::default(),
             metrics: Arc::new(EngineMetrics::new()),
             replication_client,
             _replication_handle: replication_handle,
@@ -647,6 +690,7 @@ impl<C: Cache> Engine<C> {
                 config: CdcConfig::disabled(),
                 publisher: None,
             }),
+            degradation: DegradationManager::normal(),
         };
 
         Ok(engine)
@@ -744,6 +788,22 @@ impl<C: Cache> Engine<C> {
         value: Vec<u8>,
         ttl: Option<std::time::Duration>,
     ) -> Result<()> {
+        // Validate key and value sizes before any WAL operations
+        if key.len() > MAX_KEY_SIZE {
+            return Err(crate::infra::error::LsmError::InvalidArgument(format!(
+                "key size {} exceeds maximum of {}",
+                key.len(),
+                MAX_KEY_SIZE
+            )));
+        }
+        if value.len() > MAX_VALUE_SIZE {
+            return Err(crate::infra::error::LsmError::InvalidArgument(format!(
+                "value size {} exceeds maximum of {}",
+                value.len(),
+                MAX_VALUE_SIZE
+            )));
+        }
+
         let start = std::time::Instant::now();
         let key_str = String::from_utf8_lossy(&key).into_owned();
         let value_size = value.len();
@@ -784,6 +844,7 @@ impl<C: Cache> Engine<C> {
             mem[last].insert(record);
             *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
                 key.len() + value.len();
+            self.backpressure.record_write(value.len() as u64);
             let write_buffer_limit =
                 self.options.write_buffer_size * self.options.max_write_buffer_number;
             needs_compact =
@@ -1532,6 +1593,10 @@ impl<C: Cache> Engine<C> {
         let start = std::time::Instant::now();
         let mut core = self.core.lock();
         let result = compact_cf_core(&mut core, &self.options, cf);
+        if let Ok(Some(metrics)) = &result {
+            self.backpressure
+                .record_compaction_progress(metrics.bytes_written);
+        }
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_compaction(elapsed_us);
         match &result {

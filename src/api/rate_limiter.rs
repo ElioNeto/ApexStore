@@ -14,6 +14,7 @@ use actix_web::Error;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::future::{ready, Ready};
+use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::pin::Pin;
 use std::sync::Mutex;
@@ -45,9 +46,13 @@ impl IpTrack {
     }
 }
 
+/// Number of shards for the rate limiter's IP tracking map.
+/// Higher values reduce lock contention under high concurrency.
+const NUM_SHARDS: usize = 16;
+
 /// Shared state for rate limiting, tracked across all worker threads.
 pub struct RateLimiterState {
-    requests: Mutex<HashMap<IpAddr, IpTrack>>,
+    shards: Vec<Mutex<HashMap<IpAddr, IpTrack>>>,
     max_requests_per_minute: usize,
     /// Per-endpoint rate limits (requests per minute). Empty = use global default.
     endpoint_limits: HashMap<String, usize>,
@@ -55,11 +60,23 @@ pub struct RateLimiterState {
 
 impl RateLimiterState {
     pub fn new(max_requests_per_minute: usize) -> Self {
+        let mut shards = Vec::with_capacity(NUM_SHARDS);
+        for _ in 0..NUM_SHARDS {
+            shards.push(Mutex::new(HashMap::new()));
+        }
         Self {
-            requests: Mutex::new(HashMap::new()),
+            shards,
             max_requests_per_minute,
             endpoint_limits: HashMap::new(),
         }
+    }
+
+    /// Select the shard for a given peer IP address by hashing the address.
+    fn shard_for(&self, peer: IpAddr) -> &Mutex<HashMap<IpAddr, IpTrack>> {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        peer.hash(&mut hasher);
+        let idx = hasher.finish() as usize % NUM_SHARDS;
+        &self.shards[idx]
     }
 
     /// Set a per-endpoint rate limit.
@@ -90,14 +107,17 @@ impl RateLimiterState {
             return false; // No limit = disabled
         }
 
-        let mut requests = self.requests.lock().expect("rate limiter lock poisoned");
-        // Prune all entries
-        requests.retain(|_, track| {
+        let mut shard = self
+            .shard_for(peer)
+            .lock()
+            .expect("rate limiter shard lock poisoned");
+        // Prune entries in this shard
+        shard.retain(|_, track| {
             track.prune(window);
             !track.timestamps.is_empty()
         });
 
-        let track = requests.entry(peer).or_insert_with(IpTrack::new);
+        let track = shard.entry(peer).or_insert_with(IpTrack::new);
 
         // Per-endpoint limit: use dedicated endpoint counter
         if let Some(ep) = endpoint {
@@ -120,14 +140,16 @@ impl RateLimiterState {
 
     /// Get current state summary for all tracked IPs.
     pub fn get_state(&self) -> RateLimitSummary {
-        let requests = self.requests.lock().expect("rate limiter lock poisoned");
         let mut ips = Vec::new();
-        for (addr, track) in requests.iter() {
-            ips.push(IpSummary {
-                ip: addr.to_string(),
-                request_count: track.timestamps.len(),
-                endpoint_counts: track.endpoint_counts.clone(),
-            });
+        for shard in &self.shards {
+            let requests = shard.lock().expect("rate limiter shard lock poisoned");
+            for (addr, track) in requests.iter() {
+                ips.push(IpSummary {
+                    ip: addr.to_string(),
+                    request_count: track.timestamps.len(),
+                    endpoint_counts: track.endpoint_counts.clone(),
+                });
+            }
         }
         RateLimitSummary {
             global_limit: self.max_requests_per_minute,

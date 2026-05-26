@@ -11,6 +11,11 @@
 use crate::LsmEngine;
 use actix_web::{get, web, HttpResponse, Responder};
 use serde_json::json;
+use std::sync::LazyLock;
+use std::time::Instant;
+
+/// Server start time — used to compute uptime in `/health/check`.
+static START_TIME: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 /// Handler for `GET /health/liveness` — always returns 200.
 ///
@@ -105,6 +110,37 @@ pub async fn startup(engine: web::Data<LsmEngine>) -> impl Responder {
                 "status": "error",
                 "service": "apexstore",
                 "endpoint": "startup",
+                "reason": format!("engine stats unavailable: {}", e)
+            })),
+    }
+}
+
+/// Handler for `GET /health/check` — comprehensive engine status.
+///
+/// Returns engine stats along with server uptime.
+#[get("/health/check")]
+pub async fn health_check(engine: web::Data<LsmEngine>) -> impl Responder {
+    match engine.stats("default") {
+        Ok(stats) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({
+                "status": "ok",
+                "service": "apexstore",
+                "endpoint": "check",
+                "uptime_secs": START_TIME.elapsed().as_secs(),
+                "details": {
+                    "memtable_records": stats.mem_records,
+                    "sstable_files": stats.sst_files,
+                    "wal_size_kb": stats.wal_kb,
+                    "total_records": stats.total_records,
+                }
+            })),
+        Err(e) => HttpResponse::InternalServerError()
+            .content_type("application/json")
+            .json(json!({
+                "status": "error",
+                "service": "apexstore",
+                "endpoint": "check",
                 "reason": format!("engine stats unavailable: {}", e)
             })),
     }
