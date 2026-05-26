@@ -4,6 +4,34 @@ import { KeyExplorerComponent } from './pages/key-explorer/key-explorer.componen
 import { StatsComponent } from './pages/stats/stats.component';
 import { FeaturesComponent } from './pages/features/features.component';
 import { AdminComponent } from './pages/admin/admin.component';
+import { NotesComponent } from './pages/notes/notes.component';
+import { GraphComponent } from './pages/graph/graph.component';
+import { TagsComponent } from './pages/tags/tags.component';
+import { CompactionComponent } from './pages/compaction/compaction.component';
+import { HealthComponent } from './pages/health/health.component';
+import { RateLimitsComponent } from './pages/rate-limits/rate-limits.component';
+import { BackupComponent } from './pages/backup/backup.component';
+import { TimeTravelComponent } from './pages/time-travel/time-travel.component';
+import { WebhooksComponent } from './pages/webhooks/webhooks.component';
+import { PubsubComponent } from './pages/pubsub/pubsub.component';
+import { SqlRunnerComponent } from './pages/sql-runner/sql-runner.component';
+import { ResilienceComponent } from './pages/resilience/resilience.component';
+import { GraphQLComponent } from './pages/graphql/graphql.component';
+import { AccessControlComponent } from './pages/access-control/access-control.component';
+import { ReplicationComponent } from './pages/replication/replication.component';
+import { VectorSearchComponent } from './pages/vector-search/vector-search.component';
+import { DataSyncComponent } from './pages/data-sync/data-sync.component';
+import { CdcComponent } from './pages/cdc/cdc.component';
+import { BulkImportComponent } from './pages/bulk-import/bulk-import.component';
+import { ServerConfigComponent } from './pages/server-config/server-config.component';
+import { ChaosComponent } from './pages/chaos/chaos.component';
+import { TelemetryComponent } from './pages/telemetry/telemetry.component';
+import { QuotasComponent } from './pages/quotas/quotas.component';
+import { DataScrubberComponent } from './pages/data-scrubber/data-scrubber.component';
+import { BackpressureComponent } from './pages/backpressure/backpressure.component';
+import { WasmPluginsComponent } from './pages/wasm-plugins/wasm-plugins.component';
+import { CicdComponent } from './pages/cicd/cicd.component';
+import { SyncStatusComponent } from './pages/sync-status/sync-status.component';
 
 export const routes: Routes = [
   { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
@@ -12,4 +40,32 @@ export const routes: Routes = [
   { path: 'stats', component: StatsComponent },
   { path: 'features', component: FeaturesComponent },
   { path: 'admin', component: AdminComponent },
+  { path: 'notes', component: NotesComponent },
+  { path: 'graph', component: GraphComponent },
+  { path: 'tags', component: TagsComponent },
+  { path: 'compaction', component: CompactionComponent },
+  { path: 'health', component: HealthComponent },
+  { path: 'rate-limits', component: RateLimitsComponent },
+  { path: 'backup', component: BackupComponent },
+  { path: 'time-travel', component: TimeTravelComponent },
+  { path: 'webhooks', component: WebhooksComponent },
+  { path: 'pubsub', component: PubsubComponent },
+  { path: 'sql-runner', component: SqlRunnerComponent },
+  { path: 'graphql', component: GraphQLComponent },
+  { path: 'resilience', component: ResilienceComponent },
+  { path: 'access-control', component: AccessControlComponent },
+  { path: 'replication', component: ReplicationComponent },
+  { path: 'vector-search', component: VectorSearchComponent },
+  { path: 'data-sync', component: DataSyncComponent },
+  { path: 'cdc', component: CdcComponent },
+  { path: 'bulk-import', component: BulkImportComponent },
+  { path: 'server-config', component: ServerConfigComponent },
+  { path: 'chaos', component: ChaosComponent },
+  { path: 'telemetry', component: TelemetryComponent },
+  { path: 'quotas', component: QuotasComponent },
+  { path: 'data-scrubber', component: DataScrubberComponent },
+  { path: 'backpressure', component: BackpressureComponent },
+  { path: 'wasm-plugins', component: WasmPluginsComponent },
+  { path: 'cicd', component: CicdComponent },
+  { path: 'sync-status', component: SyncStatusComponent },
 ];

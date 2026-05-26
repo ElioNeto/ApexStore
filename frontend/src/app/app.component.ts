@@ -10,6 +10,24 @@ import {
   Github01Icon,
   ZapIcon,
   BookOpenIcon,
+  NoteEditIcon,
+  Share08Icon,
+  Tag01Icon,
+  HardDriveIcon,
+  CheckmarkCircle01Icon,
+  DatabaseIcon,
+  Search01Icon,
+  CpuIcon,
+  Settings01Icon,
+  Upload01Icon,
+  Download01Icon,
+  Add01Icon,
+  Delete01Icon,
+  PlayIcon,
+  PauseIcon,
+  Edit01Icon,
+  Sun01Icon,
+  Moon01Icon,
 } from '@hugeicons/core-free-icons';
 import { ToastComponent } from './components/toast/toast.component';
 import type { IconSvgObject } from '@hugeicons/angular';
@@ -30,6 +48,26 @@ export class AppComponent {
   readonly ZapIcon = ZapIcon;
   readonly GithubIcon = Github01Icon;
   readonly BookOpenIcon = BookOpenIcon;
+  readonly SunIcon = Sun01Icon;
+  readonly MoonIcon = Moon01Icon;
+
+  theme = signal<'dark' | 'light'>(
+    (localStorage.getItem('apex_theme') as 'dark' | 'light') || 'dark'
+  );
+
+  constructor() {
+    this.applyTheme();
+  }
+
+  toggleTheme(): void {
+    this.theme.update(t => (t === 'dark' ? 'light' : 'dark'));
+    this.applyTheme();
+  }
+
+  private applyTheme(): void {
+    document.documentElement.classList.toggle('light-mode', this.theme() === 'light');
+    localStorage.setItem('apex_theme', this.theme());
+  }
 
   navGroups = signal<NavGroup[]>([
     {
@@ -37,6 +75,8 @@ export class AppComponent {
       items: [
         { path: '/dashboard', icon: Home01Icon, label: 'Dashboard' },
         { path: '/stats', icon: BarChartIcon, label: 'Statistics' },
+        { path: '/health', icon: CheckmarkCircle01Icon, label: 'Health' },
+        { path: '/resilience', icon: CpuIcon, label: 'Resilience' },
       ]
     },
     {
@@ -44,12 +84,52 @@ export class AppComponent {
       items: [
         { path: '/keys', icon: Key01Icon, label: 'Key Explorer' },
         { path: '/features', icon: Flag01Icon, label: 'Feature Flags' },
+        { path: '/sql-runner', icon: Search01Icon, label: 'SQL Runner' },
+        { path: '/graphql', icon: PlayIcon, label: 'GraphQL Playground' },
+        { path: '/vector-search', icon: Search01Icon, label: 'Vector Search' },
+        { path: '/bulk-import', icon: Upload01Icon, label: 'Bulk Import' },
+      ]
+    },
+    {
+      label: 'Content',
+      items: [
+        { path: '/notes', icon: NoteEditIcon, label: 'Notes' },
+        { path: '/graph', icon: Share08Icon, label: 'Graph View' },
+        { path: '/tags', icon: Tag01Icon, label: 'Tags' },
+        { path: '/time-travel', icon: Share08Icon, label: 'Time Travel' },
+      ]
+    },
+    {
+      label: 'System',
+      items: [
+        { path: '/compaction', icon: HardDriveIcon, label: 'Compaction' },
+        { path: '/rate-limits', icon: BarChartIcon, label: 'Rate Limits' },
+        { path: '/backup', icon: DatabaseIcon, label: 'Backup' },
+        { path: '/replication', icon: Share08Icon, label: 'Replication' },
+        { path: '/cdc', icon: DatabaseIcon, label: 'CDC' },
+        { path: '/chaos', icon: CpuIcon, label: 'Chaos' },
+        { path: '/backpressure', icon: CpuIcon, label: 'Backpressure' },
+        { path: '/data-scrubber', icon: Delete01Icon, label: 'Data Scrubber' },
+      ]
+    },
+    {
+      label: 'Integrations',
+      items: [
+        { path: '/webhooks', icon: ZapIcon, label: 'Webhooks' },
+        { path: '/pubsub', icon: Share08Icon, label: 'Pub/Sub' },
+        { path: '/data-sync', icon: Share08Icon, label: 'Data Sync' },
+        { path: '/wasm-plugins', icon: CpuIcon, label: 'WASM Plugins' },
       ]
     },
     {
       label: 'Admin',
       items: [
         { path: '/admin', icon: LockPasswordIcon, label: 'Tokens' },
+        { path: '/access-control', icon: LockPasswordIcon, label: 'Access Control' },
+        { path: '/server-config', icon: Settings01Icon, label: 'Server Config' },
+        { path: '/telemetry', icon: BarChartIcon, label: 'Telemetry' },
+        { path: '/quotas', icon: DatabaseIcon, label: 'Quotas' },
+        { path: '/cicd', icon: PlayIcon, label: 'CI/CD' },
       ]
     },
   ]);

@@ -1,0 +1,98 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Backpressure & Retry</h1>
+      <p class="page-subtitle">Backpressure and retry configuration</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn btn-secondary" (click)="loadConfig()" [disabled]="loading()">
+        @if (loading()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+        }
+        Refresh
+      </button>
+      <button class="btn btn-primary" [disabled]="saving()" (click)="saveConfig()">
+        @if (saving()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="CheckmarkCircle01Icon" [size]="16" [strokeWidth]="1.5" />
+        }
+        Save
+      </button>
+    </div>
+  </div>
+
+  <!-- Backpressure Settings -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <hugeicons-icon [icon]="Settings01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+      <span class="card-title">Backpressure</span>
+    </div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="input-group">
+          <label>Enabled</label>
+          <label class="toggle">
+            <input type="checkbox" [(ngModel)]="config().enabled" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="input-group">
+          <label>Max Queue Size</label>
+          <input type="number" [(ngModel)]="config().max_queue_size" min="100" max="1000000" />
+        </div>
+        <div class="input-group">
+          <label>Max Concurrency</label>
+          <input type="number" [(ngModel)]="config().max_concurrency" min="1" max="10000" />
+        </div>
+        <div class="input-group">
+          <label>Initial Backoff (ms)</label>
+          <input type="number" [(ngModel)]="config().backoff_initial_ms" min="10" max="10000" />
+        </div>
+        <div class="input-group">
+          <label>Max Backoff (ms)</label>
+          <input type="number" [(ngModel)]="config().backoff_max_ms" min="100" max="300000" />
+        </div>
+        <div class="input-group">
+          <label>Backoff Factor</label>
+          <input type="number" [(ngModel)]="config().backoff_factor" min="1" max="10" step="0.5" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Retry Settings -->
+  <div class="card">
+    <div class="card-header">
+      <hugeicons-icon [icon]="CpuIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+      <span class="card-title">Retry Configuration</span>
+    </div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="input-group">
+          <label>Max Retry Attempts</label>
+          <input type="number" [(ngModel)]="config().retry_max_attempts" min="0" max="20" />
+        </div>
+        <div class="input-group">
+          <label>Retry on Timeout</label>
+          <label class="toggle">
+            <input type="checkbox" [(ngModel)]="config().retry_on_timeout" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="input-group">
+          <label>Retry on Error</label>
+          <label class="toggle">
+            <input type="checkbox" [(ngModel)]="config().retry_on_error" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div style="margin-top:16px;padding:12px;background:var(--bg-secondary);border-radius:8px;font-size:0.85rem;color:var(--text-secondary)">
+        Current effective config: max {{ config().retry_max_attempts }} retries with {{ config().backoff_initial_ms }}ms initial backoff (factor {{ config().backoff_factor }}), max {{ config().backoff_max_ms }}ms.
+      </div>
+    </div>
+  </div>
+</div>

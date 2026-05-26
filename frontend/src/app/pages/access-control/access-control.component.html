@@ -1,0 +1,119 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Access Control</h1>
+      <p class="page-subtitle">Policy management for authorization</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadPolicies()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <!-- Create policy -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <hugeicons-icon [icon]="LockPasswordIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+      <span class="card-title">Create Policy</span>
+    </div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="input-group">
+          <label>Name</label>
+          <input [(ngModel)]="newName" placeholder="read-only-users" />
+        </div>
+        <div class="input-group">
+          <label>Resource Pattern</label>
+          <input [(ngModel)]="newResource" placeholder="keys:*" />
+        </div>
+        <div class="input-group">
+          <label>Priority</label>
+          <input type="number" [(ngModel)]="newPriority" />
+        </div>
+        <div class="input-group">
+          <label>Effect</label>
+          <div class="effect-toggle">
+            <button class="btn btn-sm" [class.btn-success]="newEffect === 'allow'" [class.btn-secondary]="newEffect !== 'allow'" (click)="setEffect('allow')">Allow</button>
+            <button class="btn btn-sm" [class.btn-danger]="newEffect === 'deny'" [class.btn-secondary]="newEffect !== 'deny'" (click)="setEffect('deny')">Deny</button>
+          </div>
+        </div>
+        <div class="input-group" style="grid-column:1/-1">
+          <label>Actions</label>
+          <div class="action-chips">
+            @for (action of actionOptions; track action) {
+              <label class="action-chip" [class.selected]="isActionSelected(action)">
+                <input type="checkbox" [checked]="isActionSelected(action)" (change)="toggleAction(action)" />
+                {{ action }}
+              </label>
+            }
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:14px" [disabled]="!newName.trim() || !newResource.trim() || creating()" (click)="createPolicy()">
+        @if (creating()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="Add01Icon" [size]="15" [strokeWidth]="1.5" />
+        }
+        Create Policy
+      </button>
+    </div>
+  </div>
+
+  <!-- Policies list -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="card-title">Policies</span>
+        <span class="badge badge-info">{{ policies().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && policies().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (policies().length === 0) {
+      <div class="empty-state">No policies configured. Create one above.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="policies-table">
+          <thead>
+            <tr><th>Name</th><th>Resource</th><th>Actions</th><th>Effect</th><th>Priority</th><th>Created</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (p of policies(); track p.id) {
+              <tr [class.allow-row]="p.effect === 'allow'" [class.deny-row]="p.effect === 'deny'">
+                <td class="name-cell">{{ p.name }}</td>
+                <td class="mono resource-cell">{{ p.resource }}</td>
+                <td>
+                  <div class="action-badges">
+                    @for (a of p.actions; track a) {
+                      <span class="badge badge-info">{{ a }}</span>
+                    }
+                  </div>
+                </td>
+                <td>
+                  @if (p.effect === 'allow') {
+                    <span class="badge badge-success">Allow</span>
+                  } @else {
+                    <span class="badge badge-danger">Deny</span>
+                  }
+                </td>
+                <td>{{ p.priority }}</td>
+                <td class="time-cell">{{ nsToDate(p.created_at) | date:'dd/MM/yy HH:mm' }}</td>
+                <td>
+                  <button class="btn btn-danger btn-sm" (click)="deletePolicy(p.id, p.name)">
+                    <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>

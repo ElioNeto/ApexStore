@@ -1,0 +1,92 @@
+<div class="page notes-layout">
+  <!-- Left sidebar: file explorer -->
+  <aside class="notes-sidebar">
+    <div class="sidebar-header">
+      <h3>Notes</h3>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-secondary btn-sm" (click)="loadNotes()" [disabled]="loadingList()">
+          @if (loadingList()) {
+            <span class="spinner"></span>
+          } @else {
+            <hugeicons-icon [icon]="RefreshIcon" [size]="14" [strokeWidth]="1.5" />
+          }
+        </button>
+        <button class="btn btn-primary btn-sm" (click)="showNewInput.set(true)">
+          <hugeicons-icon [icon]="Add01Icon" [size]="14" [strokeWidth]="1.5" />
+        </button>
+      </div>
+    </div>
+
+    @if (showNewInput()) {
+      <div class="new-note-form">
+        <input
+          [(ngModel)]="newNotePath"
+          placeholder="path/to/note"
+          (keydown.enter)="createNote()"
+          (keydown.escape)="showNewInput.set(false)"
+          autofocus
+        />
+        <div class="new-note-actions">
+          <button class="btn btn-primary btn-sm" (click)="createNote()" [disabled]="!newNotePath().trim()">Create</button>
+          <button class="btn btn-secondary btn-sm" (click)="showNewInput.set(false)">Cancel</button>
+        </div>
+      </div>
+    }
+
+    <div class="notes-list">
+      @if (notes().length === 0 && !loadingList()) {
+        <div class="empty-state">No notes yet. Click + to create one.</div>
+      }
+      @for (note of notes(); track note.path) {
+        <div
+          class="note-item"
+          [class.active]="selectedNote()?.path === note.path"
+          (click)="selectNote(note)"
+        >
+          <hugeicons-icon [icon]="NoteEditIcon" [size]="14" [strokeWidth]="1.5" />
+          <span class="note-path">{{ note.path }}</span>
+        </div>
+      }
+    </div>
+  </aside>
+
+  <!-- Main area: editor -->
+  <main class="notes-editor">
+    @if (selectedNote(); as note) {
+      <div class="editor-header">
+        <div>
+          <h2 class="editor-title">{{ note.path }}</h2>
+          @if (note.updated_at) {
+            <span class="editor-meta">Last updated: {{ note.updated_at | date:'medium' }}</span>
+          }
+        </div>
+        <div class="editor-actions">
+          <button class="btn btn-success" (click)="saveNote()" [disabled]="loadingSave()">
+            @if (loadingSave()) {
+              <span class="spinner"></span>
+            } @else {
+              <hugeicons-icon [icon]="ArrowRight01Icon" [size]="15" [strokeWidth]="1.5" />
+            }
+            Save
+          </button>
+          <button class="btn btn-danger" (click)="deleteNote()">
+            <hugeicons-icon [icon]="Delete01Icon" [size]="15" [strokeWidth]="1.5" />
+            Delete
+          </button>
+        </div>
+      </div>
+      <div class="editor-body">
+        <textarea
+          [(ngModel)]="noteContent"
+          placeholder="Write your markdown content here..."
+          class="editor-textarea"
+        ></textarea>
+      </div>
+    } @else {
+      <div class="editor-empty">
+        <hugeicons-icon [icon]="NoteEditIcon" [size]="48" [strokeWidth]="1" />
+        <p>Select a note from the sidebar or create a new one</p>
+      </div>
+    }
+  </main>
+</div>

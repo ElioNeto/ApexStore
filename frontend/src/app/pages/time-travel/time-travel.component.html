@@ -1,0 +1,111 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Time Travel</h1>
+      <p class="page-subtitle">Snapshot browser - create and restore point-in-time snapshots</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadSnapshots()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <!-- Create snapshot -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <hugeicons-icon [icon]="Share08Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+      <span class="card-title">Create Snapshot</span>
+    </div>
+    <div class="card-body">
+      <div class="form-row">
+        <div class="input-group" style="flex:1">
+          <label>Snapshot name (optional)</label>
+          <input [(ngModel)]="snapshotName" placeholder="Leave empty for auto-name" (keydown.enter)="createSnapshot()" />
+        </div>
+        <button class="btn btn-primary" style="align-self:flex-end" [disabled]="creating()" (click)="createSnapshot()">
+          @if (creating()) {
+            <span class="spinner"></span>
+          } @else {
+            <hugeicons-icon [icon]="Add01Icon" [size]="15" [strokeWidth]="1.5" />
+          }
+          {{ creating() ? 'Creating...' : 'Create Snapshot' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Snapshots list -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="card-title">Snapshots</span>
+        <span class="badge badge-info">{{ snapshots().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && snapshots().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (snapshots().length === 0) {
+      <div class="empty-state">No snapshots yet. Create one above.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="snapshots-table">
+          <thead>
+            <tr><th>Name</th><th>Notes</th><th>Created</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (s of snapshots(); track s.id) {
+              <tr>
+                <td class="name-cell">{{ s.name }}</td>
+                <td>{{ s.note_count }}</td>
+                <td class="time-cell">{{ nsToDate(s.created_at) | date:'dd/MM/yy HH:mm' }}</td>
+                <td>
+                  <div class="action-btns">
+                    <button class="btn btn-secondary btn-sm" (click)="viewSnapshot(s)">
+                      <hugeicons-icon [icon]="ArrowRight01Icon" [size]="14" [strokeWidth]="1.5" /> Browse
+                    </button>
+                    <button class="btn btn-success btn-sm" (click)="restoreSnapshot(s.id, s.name)">
+                      <hugeicons-icon [icon]="ArrowRight01Icon" [size]="14" [strokeWidth]="1.5" /> Restore
+                    </button>
+                    <button class="btn btn-danger btn-sm" (click)="deleteSnapshot(s.id, s.name)">
+                      <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+
+  <!-- Snapshot notes -->
+  @if (notes().length > 0) {
+    <div class="card" style="margin-top:24px">
+      <div class="card-header" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="card-title">Snapshot Notes</span>
+          <span class="badge badge-info">{{ notes().length }}</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" (click)="closeNotes()">
+          <hugeicons-icon [icon]="CancelCircleIcon" [size]="14" [strokeWidth]="1.5" /> Close
+        </button>
+      </div>
+      <div class="card-body">
+        <div class="notes-list">
+          @for (note of notes(); track note.path) {
+            <div class="note-item">
+              <strong>{{ note.path }}</strong>
+              <p>{{ note.content?.substring(0, 200) }}{{ note.content?.length > 200 ? '...' : '' }}</p>
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  }
+</div>

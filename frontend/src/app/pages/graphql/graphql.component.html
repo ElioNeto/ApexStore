@@ -1,0 +1,50 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">GraphQL Playground</h1>
+      <p class="page-subtitle">Execute GraphQL queries against the ApexStore API</p>
+    </div>
+  </div>
+
+  <div class="playground-layout">
+    <div class="card editor-card">
+      <div class="card-header">
+        <span class="card-title">Query</span>
+      </div>
+      <div class="card-body">
+        <textarea
+          class="query-editor"
+          [ngModel]="query()"
+          (ngModelChange)="query.set($event)"
+          placeholder="Enter GraphQL query..."
+          spellcheck="false"
+          rows="12"
+        ></textarea>
+      </div>
+      <div class="card-footer">
+        <button class="btn btn-primary" (click)="execute()" [disabled]="!query().trim() || loading()">
+          @if (loading()) {
+            <span class="spinner"></span>
+          }
+          Execute
+        </button>
+      </div>
+    </div>
+
+    <div class="card result-card">
+      <div class="card-header">
+        <span class="card-title">Response</span>
+        @if (result()) {
+          <button class="btn btn-secondary btn-sm" (click)="result.set(null); error.set(false)">Clear</button>
+        }
+      </div>
+      <div class="card-body">
+        @if (result()) {
+          <pre class="result-pre" [class.error]="error()">{{ result() }}</pre>
+        } @else {
+          <div class="empty-state">Execute a query to see the response here.</div>
+        }
+      </div>
+    </div>
+  </div>
+</div>

@@ -107,7 +107,15 @@ async fn main() -> std::io::Result<()> {
 
     println!("✓ Engine initialized successfully!\n");
 
-    apexstore::api::start_server(Arc::new(engine), server_config)
+    let engine = Arc::new(engine);
+
+    // Register default frontmatter schema on startup
+    {
+        let note_engine = apexstore::notes::NoteEngine::new(engine.clone());
+        let _ = apexstore::notes::validate::register_default_schema(&note_engine);
+    }
+
+    apexstore::api::start_server(engine, server_config)
         .await
         .map_err(|e: io::Error| e)
 }

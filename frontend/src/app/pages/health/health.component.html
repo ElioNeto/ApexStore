@@ -1,0 +1,52 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Health</h1>
+      <p class="page-subtitle">Health probe status for the ApexStore backend</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      @if (lastCheck(); as dt) {
+        <span class="badge badge-info">Last: {{ dt | date:'HH:mm:ss' }}</span>
+      }
+      <button class="btn btn-primary" (click)="checkAll()" [disabled]="loading()">
+        @if (loading()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+        }
+        Check All
+      </button>
+    </div>
+  </div>
+
+  <!-- Overall status banner -->
+  <div class="overall-banner" [class.healthy]="overall() === 'healthy'" [class.degraded]="overall() === 'degraded'" [class.unhealthy]="overall() === 'unhealthy'">
+    <hugeicons-icon [icon]="overall() === 'healthy' ? CheckmarkCircle01Icon : CancelCircleIcon" [size]="28" [strokeWidth]="1.5" />
+    <div>
+      <strong>{{ overall() === 'healthy' ? 'All Systems Operational' : overall() === 'degraded' ? 'Degraded Service' : 'Service Unavailable' }}</strong>
+      <p>{{ overall() === 'healthy' ? 'All health probes are passing' : overall() === 'degraded' ? 'Some health probes are failing' : 'Backend may be down' }}</p>
+    </div>
+  </div>
+
+  <!-- Probe cards -->
+  <div class="probes-grid">
+    @for (probe of probes(); track probe.name) {
+      <div class="probe-card" [class.healthy]="probe.status === 'healthy'" [class.unhealthy]="probe.status === 'unhealthy'" [class.unknown]="probe.status === 'unknown'">
+        <div class="probe-header">
+          <hugeicons-icon [icon]="probe.icon" [size]="20" [strokeWidth]="1.5" />
+          <span class="probe-name">{{ probe.name }}</span>
+          <span class="badge" [class.badge-success]="probe.status === 'healthy'" [class.badge-danger]="probe.status === 'unhealthy'" [class.badge-info]="probe.status === 'unknown'">
+            {{ probe.status | uppercase }}
+          </span>
+        </div>
+        <p class="probe-message">{{ probe.message }}</p>
+        <div class="probe-footer">
+          <span class="probe-endpoint">{{ probe.endpoint }}</span>
+          <button class="btn btn-secondary btn-sm" (click)="checkProbe(probe)" [disabled]="loading()">
+            <hugeicons-icon [icon]="RefreshIcon" [size]="12" [strokeWidth]="1.5" /> Check
+          </button>
+        </div>
+      </div>
+    }
+  </div>
+</div>

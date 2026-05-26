@@ -1,0 +1,137 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Quotas</h1>
+      <p class="page-subtitle">Tenant quotas and query budget management</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadQuotas()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <!-- Quota Form -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      @if (editingId()) {
+        <span class="card-title">Edit Quota</span>
+      } @else {
+        <span class="card-title">Create Quota</span>
+      }
+    </div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="input-group" style="grid-column:1/-1">
+          <label>Tenant</label>
+          <input [(ngModel)]="form.tenant" placeholder="tenant-01" [disabled]="!!editingId()" />
+        </div>
+        <div class="input-group" style="grid-column:1/-1">
+          <label>Description</label>
+          <input [(ngModel)]="form.description" placeholder="Production tenant" />
+        </div>
+        <div class="input-group">
+          <label>Max Requests/sec</label>
+          <input type="number" [(ngModel)]="form.max_requests_per_sec" min="0" />
+        </div>
+        <div class="input-group">
+          <label>Max Reads/sec</label>
+          <input type="number" [(ngModel)]="form.max_reads_per_sec" min="0" />
+        </div>
+        <div class="input-group">
+          <label>Max Writes/sec</label>
+          <input type="number" [(ngModel)]="form.max_writes_per_sec" min="0" />
+        </div>
+        <div class="input-group">
+          <label>Max Storage (MB)</label>
+          <input type="number" [(ngModel)]="form.max_storage_mb" min="0" />
+        </div>
+        <div class="input-group">
+          <label>Daily Budget</label>
+          <input type="number" [(ngModel)]="form.max_budget_per_day" min="0" />
+        </div>
+        <div class="input-group">
+          <label>Active</label>
+          <label class="toggle">
+            <input type="checkbox" [(ngModel)]="form.active" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        @if (editingId()) {
+          <button class="btn btn-primary" [disabled]="saving()" (click)="updateQuota()">
+            @if (saving()) { <span class="spinner"></span> }
+            @else { <hugeicons-icon [icon]="CheckmarkCircle01Icon" [size]="15" [strokeWidth]="1.5" /> }
+            Update Quota
+          </button>
+          <button class="btn btn-secondary" (click)="resetForm()">Cancel</button>
+        } @else {
+          <button class="btn btn-primary" [disabled]="!form.tenant?.trim() || saving()" (click)="saveQuota()">
+            @if (saving()) { <span class="spinner"></span> }
+            @else { <hugeicons-icon [icon]="Add01Icon" [size]="15" [strokeWidth]="1.5" /> }
+            Create Quota
+          </button>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- Quotas List -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <hugeicons-icon [icon]="DatabaseIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Quotas</span>
+        <span class="badge badge-info">{{ quotas().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && quotas().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (quotas().length === 0) {
+      <div class="empty-state">No quotas configured. Create one above.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="quotas-table">
+          <thead>
+            <tr><th>Tenant</th><th>Requests/s</th><th>Reads/s</th><th>Writes/s</th><th>Storage</th><th>Budget</th><th>Used</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (q of quotas(); track q.id) {
+              <tr>
+                <td class="name-cell">{{ q.tenant }}</td>
+                <td class="mono">{{ q.max_requests_per_sec }}</td>
+                <td class="mono">{{ q.max_reads_per_sec }}</td>
+                <td class="mono">{{ q.max_writes_per_sec }}</td>
+                <td class="mono">{{ q.max_storage_mb }} MB</td>
+                <td class="mono">{{ q.max_budget_per_day }}</td>
+                <td class="mono">{{ q.current_budget_used }}</td>
+                <td>
+                  @if (q.active) {
+                    <span class="badge badge-success">Active</span>
+                  } @else {
+                    <span class="badge badge-danger">Inactive</span>
+                  }
+                </td>
+                <td>
+                  <div class="action-btns">
+                    <button class="btn btn-sm btn-secondary" (click)="editQuota(q)">
+                      <hugeicons-icon [icon]="Edit01Icon" [size]="14" [strokeWidth]="1.5" /> Edit
+                    </button>
+                    <button class="btn btn-sm btn-danger" (click)="deleteQuota(q.id, q.tenant)">
+                      <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>

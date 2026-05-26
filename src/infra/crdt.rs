@@ -78,6 +78,18 @@ impl CrdtEngine {
         self.state.is_empty()
     }
 
+    /// Return all entries currently tracked by the CRDT engine.
+    pub fn get_all_entries(&self) -> Vec<CrdtEntry> {
+        self.state
+            .iter()
+            .map(|(key, (value, timestamp))| CrdtEntry {
+                key: key.clone(),
+                value: value.clone(),
+                timestamp: *timestamp,
+            })
+            .collect()
+    }
+
     /// Clear all tracked state.
     pub fn clear(&mut self) {
         self.state.clear();

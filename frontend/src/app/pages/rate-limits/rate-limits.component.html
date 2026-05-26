@@ -1,0 +1,67 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Rate Limits</h1>
+      <p class="page-subtitle">Current rate limit state for API endpoints</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      @if (lastRefresh(); as dt) {
+        <span class="badge badge-info">Last: {{ dt | date:'HH:mm:ss' }}</span>
+      }
+      <button class="btn btn-secondary" (click)="loadLimits()" [disabled]="loading()">
+        @if (loading()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+        }
+        Refresh
+      </button>
+    </div>
+  </div>
+
+  @if (loading() && limits().length === 0) {
+    <div class="loading-state">
+      <span class="spinner" style="width:28px;height:28px;border-width:3px"></span>
+    </div>
+  } @else if (limits().length === 0) {
+    <div class="empty-state">No rate limits configured or endpoint unavailable.</div>
+  } @else {
+    <div class="limits-grid">
+      @for (entry of limits(); track entry.name) {
+        <div class="limit-card" [class.near-limit]="usagePercent(entry) >= 80" [class.at-limit]="entry.remaining === 0">
+          <div class="limit-header">
+            <hugeicons-icon [icon]="BarChartIcon" [size]="18" [strokeWidth]="1.5" />
+            <span class="limit-name">{{ entry.name }}</span>
+          </div>
+          <div class="limit-stats">
+            <div class="limit-stat">
+              <span class="stat-label">Limit</span>
+              <span class="stat-value">{{ entry.limit }}</span>
+            </div>
+            <div class="limit-stat">
+              <span class="stat-label">Remaining</span>
+              <span class="stat-value remaining">{{ entry.remaining }}</span>
+            </div>
+            <div class="limit-stat">
+              <span class="stat-label">Window</span>
+              <span class="stat-value">{{ entry.window_sec }}s</span>
+            </div>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" [style.width.%]="usagePercent(entry)" [class.warning]="usagePercent(entry) >= 80" [class.danger]="entry.remaining === 0"></div>
+          </div>
+          <div class="limit-footer">
+            <span class="reset-label">Resets at {{ resetDate(entry.reset_at) | date:'HH:mm:ss' }}</span>
+            @if (entry.remaining === 0) {
+              <span class="badge badge-danger">Exhausted</span>
+            } @else if (usagePercent(entry) >= 80) {
+              <span class="badge badge-warning">Near limit</span>
+            } @else {
+              <span class="badge badge-success">OK</span>
+            }
+          </div>
+        </div>
+      }
+    </div>
+  }
+</div>

@@ -3,6 +3,7 @@ pub mod cli;
 pub mod core;
 pub mod features;
 pub mod infra;
+pub mod notes;
 pub mod storage;
 
 // Re-exports for convenience and backward compatibility
