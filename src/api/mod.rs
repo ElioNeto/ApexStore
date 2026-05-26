@@ -92,6 +92,19 @@ async fn put_key(
         return e;
     }
     let key = path.into_inner();
+
+    // Validate key
+    if key.is_empty() {
+        return HttpResponse::BadRequest()
+            .content_type("application/json")
+            .json(json!({ "error": "key must not be empty" }));
+    }
+    if key.len() > 4096 {
+        return HttpResponse::BadRequest()
+            .content_type("application/json")
+            .json(json!({ "error": "key too long" }));
+    }
+
     match engine.put_cf(
         "default",
         key.as_bytes().to_vec(),
@@ -369,6 +382,19 @@ async fn post_key(
     if let Err(e) = require_permission(&req, Permission::Write) {
         return e;
     }
+
+    // Validate key
+    if body.key.is_empty() {
+        return HttpResponse::BadRequest()
+            .content_type("application/json")
+            .json(json!({ "success": false, "message": "key must not be empty" }));
+    }
+    if body.key.len() > 4096 {
+        return HttpResponse::BadRequest()
+            .content_type("application/json")
+            .json(json!({ "success": false, "message": "key too long" }));
+    }
+
     match engine.put_cf(
         "default",
         body.key.as_bytes().to_vec(),
@@ -435,6 +461,21 @@ async fn batch_keys(
             .content_type("application/json")
             .json(json!({ "success": false, "message": format!("batch size {} exceeds maximum of {}", body.records.len(), MAX_BATCH_SIZE) }));
     }
+
+    // Validate all keys before processing
+    for record in &body.records {
+        if record.key.is_empty() {
+            return HttpResponse::BadRequest()
+                .content_type("application/json")
+                .json(json!({ "success": false, "message": "key must not be empty" }));
+        }
+        if record.key.len() > 4096 {
+            return HttpResponse::BadRequest()
+                .content_type("application/json")
+                .json(json!({ "success": false, "message": format!("key too long: {} bytes (max 4096)", record.key.len()) }));
+        }
+    }
+
     let mut count = 0;
     for record in &body.records {
         if engine
@@ -502,6 +543,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .service(health::liveness)
         .service(health::readiness)
         .service(health::startup)
+        .service(health::health_check)
         // Notes & Tags endpoints
         .configure(notes::configure)
         // GraphQL endpoints
@@ -672,7 +714,9 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
             .wrap(self::timeout_middleware::RequestTimeout)
             .wrap(RateLimiter)
             .wrap(AccessControl)
-            .wrap(actix_web::middleware::Logger::default())
+            .wrap(actix_web::middleware::Logger::new(
+                r#"{"time":"%t","level":"%l","request_id":"%{x-request-id}xi","method":"%r","status":%s,"duration_ms":%D,"size":%b}"#,
+            ))
             .wrap(build_cors(&cors_origins, cors_enabled))
             .wrap(HttpAuthentication::bearer(self::auth::bearer_validator));
 

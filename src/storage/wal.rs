@@ -167,6 +167,15 @@ impl WriteAheadLog {
             .create(true)
             .append(true)
             .open(&wal_path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = file.metadata() {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o600);
+                let _ = std::fs::set_permissions(&wal_path, perms);
+            }
+        }
 
         Ok(Self {
             file: Mutex::new(BufWriter::new(file)),
