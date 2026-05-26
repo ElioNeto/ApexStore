@@ -7,6 +7,7 @@ use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// Statistics returned by `VersionSet::stats()`.
@@ -44,6 +45,10 @@ pub struct VersionSet<C: Cache> {
     /// moves the files out of the active directory to prevent compaction
     /// from retrying the corrupt data.
     quarantined: Arc<Mutex<HashSet<PathBuf>>>,
+    /// Number of SSTables moved to quarantine during startup discovery.
+    pub(crate) quarantined_count: AtomicU64,
+    /// Number of SSTables recovered (data replayed from WAL) during startup.
+    pub(crate) recovered_count: AtomicU64,
 }
 
 impl<C: Cache> VersionSet<C> {
@@ -74,6 +79,8 @@ impl<C: Cache> VersionSet<C> {
             encryption,
             compaction_generation: 0,
             quarantined: Arc::new(Mutex::new(HashSet::new())),
+            quarantined_count: AtomicU64::new(0),
+            recovered_count: AtomicU64::new(0),
         }
     }
 
@@ -467,5 +474,16 @@ impl<C: Cache> VersionSet<C> {
     /// capture this before building a plan, and compare when applying results.
     pub fn compaction_generation(&self) -> u64 {
         self.compaction_generation
+    }
+
+    /// Number of SSTables quarantined during startup discovery.
+    pub fn startup_quarantine_count(&self) -> u64 {
+        self.quarantined_count.load(Ordering::Relaxed)
+    }
+
+    /// Number of SSTables recovered (data replayed from WAL) during startup.
+    /// Currently only counted — WAL replay for explicit recovery is a future enhancement.
+    pub fn recovered_count(&self) -> u64 {
+        self.recovered_count.load(Ordering::Relaxed)
     }
 }

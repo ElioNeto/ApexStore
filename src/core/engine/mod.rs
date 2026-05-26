@@ -57,6 +57,9 @@ pub struct LsmStats {
     pub last_compaction_bytes_written: u64,
     pub last_compaction_files_merged: usize,
     pub last_compaction_duration_ms: u64,
+    // Crash recovery stats
+    pub quarantined_sstables: usize,
+    pub recovered_sstables: usize,
 }
 
 /// Engine options.
@@ -1922,6 +1925,10 @@ impl<C: Cache> Engine<C> {
             stats.mem_kb = core.memtable_bytes().get(cf).copied().unwrap_or(0) / 1024;
         }
 
+        // Crash recovery stats
+        stats.quarantined_sstables = core.version_set().startup_quarantine_count() as usize;
+        stats.recovered_sstables = core.version_set().recovered_count() as usize;
+
         // WAL stats — sum across all per-CF WALs
         stats.wal_kb = core
             .wals
@@ -1953,6 +1960,10 @@ impl<C: Cache> Engine<C> {
                 combined.mem_kb += core.memtable_bytes().get(&cf).copied().unwrap_or(0) / 1024;
             }
         }
+
+        // Crash recovery stats (same across all CFs)
+        combined.quarantined_sstables = core.version_set().startup_quarantine_count() as usize;
+        combined.recovered_sstables = core.version_set().recovered_count() as usize;
 
         combined.wal_kb = core
             .wals
@@ -2606,11 +2617,30 @@ impl<C: Cache> Engine<C> {
                             }
                             Err(e) => {
                                 tracing::warn!(
-                                    "discover_sstables: failed to load {} for CF {}: {:?}",
+                                    target: "apexstore::crash_recovery",
+                                    "discover_sstables: failed to load {} for CF {}: {:?} — quarantining",
                                     fname,
                                     cf,
                                     e
                                 );
+                                let quarantine_dir = sst_dir.join("quarantine");
+                                let _ = std::fs::create_dir_all(&quarantine_dir);
+                                let dest = quarantine_dir.join(fname);
+                                if let Err(move_err) = std::fs::rename(&sst_path, &dest) {
+                                    tracing::error!(
+                                        "discover_sstables: failed to quarantine {}: {:?}",
+                                        fname,
+                                        move_err
+                                    );
+                                } else {
+                                    tracing::info!(
+                                        "discover_sstables: quarantined corrupted SSTable {}",
+                                        fname
+                                    );
+                                }
+                                core.version_set()
+                                    .quarantined_count
+                                    .fetch_add(1, Ordering::Relaxed);
                             }
                         }
                     }
@@ -2634,10 +2664,29 @@ impl<C: Cache> Engine<C> {
                                 }
                                 Err(e) => {
                                     tracing::warn!(
-                                        "discover_sstables: failed to load {}: {:?}",
+                                        target: "apexstore::crash_recovery",
+                                        "discover_sstables: failed to load {}: {:?} — quarantining",
                                         fname_str,
                                         e
                                     );
+                                    let quarantine_dir = sst_dir.join("quarantine");
+                                    let _ = std::fs::create_dir_all(&quarantine_dir);
+                                    let dest = quarantine_dir.join(fname);
+                                    if let Err(move_err) = std::fs::rename(&path, &dest) {
+                                        tracing::error!(
+                                            "discover_sstables: failed to quarantine {}: {:?}",
+                                            fname_str,
+                                            move_err
+                                        );
+                                    } else {
+                                        tracing::info!(
+                                            "discover_sstables: quarantined corrupted SSTable {}",
+                                            fname_str
+                                        );
+                                    }
+                                    core.version_set()
+                                        .quarantined_count
+                                        .fetch_add(1, Ordering::Relaxed);
                                 }
                             }
                         }
