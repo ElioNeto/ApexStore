@@ -1,0 +1,141 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Data Scrubber</h1>
+      <p class="page-subtitle">Data scrubbing and idempotency key management</p>
+    </div>
+    <button class="btn btn-secondary" (click)="activeTab() === 'scrubber' ? loadScrubberJobs() : loadIdempotencyKeys()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs" style="margin-bottom:24px">
+    <button class="tab" [class.active]="activeTab() === 'scrubber'" (click)="switchTab('scrubber')">Scrubber Jobs</button>
+    <button class="tab" [class.active]="activeTab() === 'idempotency'" (click)="switchTab('idempotency')">Idempotency Keys</button>
+  </div>
+
+  @if (activeTab() === 'scrubber') {
+    <!-- Create Scrubber Job -->
+    <div class="card" style="margin-bottom:24px">
+      <div class="card-header">
+        <hugeicons-icon [icon]="Add01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Create Scrubber Job</span>
+      </div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="input-group" style="grid-column:1/-1">
+            <label>Key Pattern (glob)</label>
+            <input [(ngModel)]="newPattern" placeholder="temp:*" />
+          </div>
+          <div class="input-group">
+            <label>Retention (days)</label>
+            <input type="number" [(ngModel)]="newRetention" min="1" max="3650" />
+          </div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:14px" [disabled]="!newPattern.trim() || creating()" (click)="createScrubberJob()">
+          @if (creating()) {
+            <span class="spinner"></span>
+          } @else {
+            <hugeicons-icon [icon]="Add01Icon" [size]="15" [strokeWidth]="1.5" />
+          }
+          Create Job
+        </button>
+      </div>
+    </div>
+
+    <!-- Scrubber Jobs List -->
+    <div class="card">
+      <div class="card-header" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="card-title">Scrubber Jobs</span>
+          <span class="badge badge-info">{{ scrubberJobs().length }}</span>
+        </div>
+      </div>
+
+      @if (loading() && scrubberJobs().length === 0) {
+        <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+      } @else if (scrubberJobs().length === 0) {
+        <div class="empty-state">No scrubber jobs. Create one above.</div>
+      } @else {
+        <div class="table-wrapper">
+          <table class="scrubber-table">
+            <thead>
+              <tr><th>Pattern</th><th>Retention</th><th>Status</th><th>Scrubbed</th><th>Started</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              @for (j of scrubberJobs(); track j.id) {
+                <tr>
+                  <td class="mono name-cell">{{ j.pattern }}</td>
+                  <td>{{ j.retention_days }} days</td>
+                  <td><span class="badge" [ngClass]="statusClass(j.status)">{{ j.status }}</span></td>
+                  <td class="mono">{{ j.records_scrubbed }}</td>
+                  <td class="time-cell">{{ nsToDate(j.started_at) | date:'dd/MM HH:mm' }}</td>
+                  <td>
+                    <button class="btn btn-danger btn-sm" (click)="deleteScrubberJob(j.id)">
+                      <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </div>
+  }
+
+  @if (activeTab() === 'idempotency') {
+    <!-- Idempotency Keys -->
+    <div class="card">
+      <div class="card-header" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:10px">
+          <hugeicons-icon [icon]="Key01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+          <span class="card-title">Idempotency Keys</span>
+          <span class="badge badge-info">{{ idempotencyKeys().length }}</span>
+        </div>
+      </div>
+
+      @if (loading() && idempotencyKeys().length === 0) {
+        <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+      } @else if (idempotencyKeys().length === 0) {
+        <div class="empty-state">No idempotency keys found.</div>
+      } @else {
+        <div class="table-wrapper">
+          <table class="idemp-table">
+            <thead>
+              <tr><th>Key</th><th>Created</th><th>Expires</th><th>TTL</th><th>Used</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              @for (k of idempotencyKeys(); track k.key) {
+                <tr>
+                  <td class="mono name-cell">{{ k.key }}</td>
+                  <td class="time-cell">{{ nsToDate(k.created_at) | date:'dd/MM HH:mm' }}</td>
+                  <td class="time-cell">{{ nsToDate(k.expires_at) | date:'dd/MM HH:mm' }}</td>
+                  <td class="mono">{{ k.ttl_sec }}s</td>
+                  <td>
+                    @if (k.used) {
+                      <span class="badge badge-success">Yes</span>
+                    } @else {
+                      <span class="badge badge-warning">No</span>
+                    }
+                  </td>
+                  <td>
+                    <button class="btn btn-danger btn-sm" (click)="deleteIdempotencyKey(k.key)">
+                      <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </div>
+  }
+</div>

@@ -1,0 +1,92 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Backup</h1>
+      <p class="page-subtitle">Backup management - create, restore, and delete backups</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadBackups()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <!-- Create backup -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <hugeicons-icon [icon]="HardDriveIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+      <span class="card-title">Create Backup</span>
+    </div>
+    <div class="card-body">
+      <div class="form-row">
+        <div class="input-group" style="flex:1">
+          <label>Backup name (optional)</label>
+          <input [(ngModel)]="backupName" placeholder="Leave empty for auto-name" (keydown.enter)="createBackup()" />
+        </div>
+        <button class="btn btn-primary" style="align-self:flex-end" [disabled]="creating()" (click)="createBackup()">
+          @if (creating()) {
+            <span class="spinner"></span>
+          } @else {
+            <hugeicons-icon [icon]="Add01Icon" [size]="15" [strokeWidth]="1.5" />
+          }
+          {{ creating() ? 'Creating...' : 'Create Backup' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Backups list -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="card-title">Backups</span>
+        <span class="badge badge-info">{{ backups().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && backups().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (backups().length === 0) {
+      <div class="empty-state">No backups yet. Create one above.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="backups-table">
+          <thead>
+            <tr><th>Name</th><th>Size</th><th>Created</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (b of backups(); track b.id) {
+              <tr>
+                <td class="name-cell">{{ b.name }}</td>
+                <td class="mono">{{ formatSize(b.size_kb) }}</td>
+                <td class="time-cell">{{ nsToDate(b.created_at) | date:'dd/MM/yy HH:mm' }}</td>
+                <td>
+                  @if (b.status === 'completed') {
+                    <span class="badge badge-success">Completed</span>
+                  } @else if (b.status === 'running') {
+                    <span class="badge badge-warning">Running</span>
+                  } @else {
+                    <span class="badge badge-danger">Failed</span>
+                  }
+                </td>
+                <td>
+                  <div class="action-btns">
+                    <button class="btn btn-success btn-sm" (click)="restoreBackup(b.id, b.name)" [disabled]="b.status !== 'completed'">
+                      <hugeicons-icon [icon]="ArrowRight01Icon" [size]="14" [strokeWidth]="1.5" /> Restore
+                    </button>
+                    <button class="btn btn-danger btn-sm" (click)="deleteBackup(b.id, b.name)">
+                      <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>

@@ -1,0 +1,107 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "default_agent": "orchestrator",
+    "shell": "/bin/bash",
+    "snapshot": true,
+    "permission": {
+        "edit": "ask",
+        "bash": "ask"
+    },
+    "mcp": {
+        "github": {
+            "type": "local",
+            "command": [
+                "npx",
+                "-y",
+                "@modelcontextprotocol/server-github"
+            ],
+            "environment": {
+                "GITHUB_TOKEN": "{env:GH_TOKEN}"
+            },
+            "enabled": true
+        }
+    },
+    "agent": {
+        "orchestrator": {
+            "description": "Seleciona issues, resolve dependências, coordena implementação e validação.",
+            "mode": "primary",
+            "temperature": 0.1,
+            "max_steps": 40,
+            "prompt": ".opencode/prompts/orchestrator.md",
+            "permission": {
+                "read": "allow",
+                "edit": "deny",
+                "bash": {
+                    "*": "deny",
+                    "git status*": "allow",
+                    "git diff*": "allow",
+                    "git log*": "allow"
+                },
+                "task": {
+                    "*": "deny",
+                    "implementer": "allow",
+                    "validator": "allow",
+                    "explore": "allow"
+                }
+            }
+        },
+        "implementer": {
+            "description": "Implementa uma issue por vez no repositório local.",
+            "mode": "subagent",
+            "temperature": 0.1,
+            "max_steps": 60,
+            "prompt": ".opencode/prompts/implementer.md",
+            "permission": {
+                "read": "allow",
+                "edit": "allow",
+                "bash": {
+                    "*": "deny",
+                    "npm test*": "allow",
+                    "pnpm test*": "allow",
+                    "yarn test*": "allow",
+                    "npm run*": "allow",
+                    "pnpm run*": "allow",
+                    "yarn run*": "allow",
+                    "pytest*": "allow",
+                    "go test*": "allow",
+                    "cargo test*": "allow",
+                    "git status*": "allow",
+                    "git diff*": "allow",
+                    "git add*": "allow",
+                    "git commit*": "allow"
+                },
+                "task": {
+                    "*": "deny"
+                }
+            }
+        },
+        "validator": {
+            "description": "Valida critérios de aceite e evidências objetivas sem editar código.",
+            "mode": "subagent",
+            "temperature": 0.0,
+            "max_steps": 30,
+            "prompt": ".opencode/prompts/validator.md",
+            "permission": {
+                "read": "allow",
+                "edit": "deny",
+                "bash": {
+                    "*": "deny",
+                    "npm test*": "allow",
+                    "pnpm test*": "allow",
+                    "yarn test*": "allow",
+                    "npm run lint*": "allow",
+                    "pnpm run lint*": "allow",
+                    "yarn lint*": "allow",
+                    "pytest*": "allow",
+                    "go test*": "allow",
+                    "cargo test*": "allow",
+                    "git diff*": "allow",
+                    "git status*": "allow"
+                },
+                "task": {
+                    "*": "deny"
+                }
+            }
+        }
+    }
+}

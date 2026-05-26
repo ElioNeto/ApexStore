@@ -1,6 +1,6 @@
 [package]
 name = "apex-store-rs"
-version = "2.1.62"
+version = "2.1.66"
 edition = "2021"
 authors = ["Elio Neto <netoo.elio@hotmail.com>"]
 license = "MIT"
@@ -94,6 +94,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 ureq = "2.12"
 sqlparser = "0.45"
 jsonschema = "0.18"
+actix-ws = "0.3"
 
 [dev-dependencies]
 tempfile = "3.24"

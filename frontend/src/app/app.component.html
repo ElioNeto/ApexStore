@@ -33,6 +33,12 @@
         </span>
         <span>GitHub</span>
       </a>
+      <button class="nav-item theme-toggle" (click)="toggleTheme()" title="Toggle theme">
+        <span class="nav-icon">
+          <hugeicons-icon [icon]="theme() === 'dark' ? SunIcon : MoonIcon" [size]="17" [strokeWidth]="1.5" />
+        </span>
+        <span>{{ theme() === 'dark' ? 'Light Mode' : 'Dark Mode' }}</span>
+      </button>
     </div>
   </aside>
 

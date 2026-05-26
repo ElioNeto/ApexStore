@@ -1,0 +1,105 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Telemetry</h1>
+      <p class="page-subtitle">Log levels and telemetry configuration</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadTelemetry()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <!-- Telemetry Config -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <hugeicons-icon [icon]="Settings01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+      <span class="card-title">Telemetry Configuration</span>
+    </div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="input-group">
+          <label>Sampling Rate</label>
+          <input type="number" [(ngModel)]="config().sampling_rate" min="0" max="1" step="0.1" />
+        </div>
+        <div class="input-group">
+          <label>Export Interval (sec)</label>
+          <input type="number" [(ngModel)]="config().export_interval_sec" min="10" max="3600" />
+        </div>
+        <div class="input-group">
+          <label>Tracing</label>
+          <label class="toggle">
+            <input type="checkbox" [(ngModel)]="config().tracing_enabled" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="input-group">
+          <label>Metrics</label>
+          <label class="toggle">
+            <input type="checkbox" [(ngModel)]="config().metrics_enabled" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="input-group" style="grid-column:1/-1">
+          <label>OTLP Endpoint (optional)</label>
+          <input [(ngModel)]="config().otlp_endpoint" placeholder="http://otel-collector:4318" />
+        </div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:14px" [disabled]="saving()" (click)="saveConfig()">
+        @if (saving()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="CheckmarkCircle01Icon" [size]="15" [strokeWidth]="1.5" />
+        }
+        Save Configuration
+      </button>
+    </div>
+  </div>
+
+  <!-- Log Levels -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="card-title">Log Levels</span>
+        <span class="badge badge-info">{{ logLevels().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && logLevels().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="log-table">
+          <thead>
+            <tr><th>Module</th><th>Level</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (l of logLevels(); track l.module) {
+              <tr>
+                <td class="mono">{{ l.module }}</td>
+                <td>
+                  <span class="badge" [class.badge-success]="l.level === 'info'" [class.badge-warning]="l.level === 'warn'" [class.badge-danger]="l.level === 'error'" [class.badge-info]="l.level === 'debug' || l.level === 'trace'">
+                    {{ l.level }}
+                  </span>
+                </td>
+                <td>
+                  <div class="level-selector">
+                    @for (opt of levelOptions; track opt) {
+                      <button class="btn btn-sm" [class.btn-primary]="l.level === opt" [class.btn-secondary]="l.level !== opt" (click)="updateLogLevel(l.module, opt)">
+                        {{ opt }}
+                      </button>
+                    }
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>

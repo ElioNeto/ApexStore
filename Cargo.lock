@@ -287,6 +287,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "actix-ws"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12d4f2fbee3ef7a22fa6cb0e416b962237a167ed0419f22d4e451da2d7f082f8"
+dependencies = [
+ "actix-codec",
+ "actix-http",
+ "actix-web",
+ "bytestring",
+ "futures-core",
+ "tokio",
+]
+
+[[package]]
 name = "actix_derive"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -464,12 +478,13 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "apex-store-rs"
-version = "2.1.62"
+version = "2.1.66"
 dependencies = [
  "actix-cors",
  "actix-rt",
  "actix-web",
  "actix-web-httpauth",
+ "actix-ws",
  "aes-gcm",
  "async-graphql",
  "async-graphql-actix-web",

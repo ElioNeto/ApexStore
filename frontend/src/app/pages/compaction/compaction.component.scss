@@ -1,0 +1,126 @@
+.page {
+  padding: 32px;
+  max-width: 1100px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 28px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.page-subtitle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-top: 4px;
+}
+
+.actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.card-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.card-body {
+  padding: 18px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.stat-key {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.stat-val {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.loading-state {
+  display: flex;
+  justify-content: center;
+  padding: 60px;
+}
+
+.empty-state {
+  padding: 48px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+.levels-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  th {
+    padding: 10px 16px;
+    text-align: left;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.875rem;
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+}
+
+.level-cell {
+  font-weight: 600;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}

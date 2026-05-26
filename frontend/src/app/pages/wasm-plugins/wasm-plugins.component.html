@@ -1,0 +1,92 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">WASM Plugins</h1>
+      <p class="page-subtitle">WebAssembly plugin manager</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadPlugins()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <!-- Upload Plugin -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <hugeicons-icon [icon]="Upload01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+      <span class="card-title">Upload Plugin</span>
+    </div>
+    <div class="card-body">
+      <div class="upload-area">
+        <input type="file" (change)="onFileSelected($event)" [disabled]="uploading()" accept=".wasm" id="wasm-file" />
+        <label for="wasm-file" class="upload-label">
+          @if (uploading()) {
+            <span class="spinner" style="width:24px;height:24px;border-width:3px"></span>
+            <span>Uploading...</span>
+          } @else {
+            <hugeicons-icon [icon]="Upload01Icon" [size]="24" [strokeWidth]="1.5" />
+            <span>Click to select a .wasm file</span>
+          }
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Plugins List -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <hugeicons-icon [icon]="CpuIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Plugins</span>
+        <span class="badge badge-info">{{ plugins().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && plugins().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (plugins().length === 0) {
+      <div class="empty-state">No WASM plugins. Upload one above.</div>
+    } @else {
+      <div class="plugin-grid">
+        @for (p of plugins(); track p.id) {
+          <div class="plugin-card">
+            <div class="plugin-header">
+              <hugeicons-icon [icon]="CpuIcon" [size]="20" [strokeWidth]="1.5" color="var(--accent)" />
+              <div class="plugin-info">
+                <span class="plugin-name">{{ p.name }}</span>
+                <span class="plugin-version">v{{ p.version }}</span>
+              </div>
+              <span class="badge" [ngClass]="statusClass(p.status)">{{ p.status }}</span>
+            </div>
+            <div class="plugin-meta">
+              <span class="badge" [ngClass]="typeClass(p.type)">{{ p.type }}</span>
+              <span class="plugin-size">{{ p.size_kb }} KB</span>
+            </div>
+            <p class="plugin-desc">{{ p.description }}</p>
+            <div class="plugin-footer">
+              <span class="time-cell">Uploaded {{ nsToDate(p.created_at) | date:'dd/MM/yy' }}</span>
+              <div class="action-btns">
+                <button class="btn btn-sm" [class.btn-success]="p.status === 'inactive'" [class.btn-warning]="p.status === 'active'" (click)="togglePlugin(p.id)" [disabled]="toggling() === p.id">
+                  @if (toggling() === p.id) {
+                    <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                  } @else if (p.status === 'active') {
+                    <hugeicons-icon [icon]="PauseIcon" [size]="14" [strokeWidth]="1.5" /> Deactivate
+                  } @else {
+                    <hugeicons-icon [icon]="PlayIcon" [size]="14" [strokeWidth]="1.5" /> Activate
+                  }
+                </button>
+                <button class="btn btn-danger btn-sm" (click)="deletePlugin(p.id)">
+                  <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        }
+      </div>
+    }
+  </div>
+</div>

@@ -1,0 +1,155 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Vector Search</h1>
+      <p class="page-subtitle">Vector index management and semantic search</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadIndexes()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <div class="grid-2col">
+    <!-- Create Index -->
+    <div class="card">
+      <div class="card-header">
+        <hugeicons-icon [icon]="Add01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Create Index</span>
+      </div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="input-group" style="grid-column:1/-1">
+            <label>Index Name</label>
+            <input [(ngModel)]="newIndexName" placeholder="my_vectors" />
+          </div>
+          <div class="input-group">
+            <label>Dimensions</label>
+            <input type="number" [(ngModel)]="newIndexDim" min="1" max="4096" />
+          </div>
+          <div class="input-group">
+            <label>Metric</label>
+            <select [(ngModel)]="newIndexMetric">
+              @for (m of metrics; track m.value) {
+                <option [value]="m.value">{{ m.label }}</option>
+              }
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:14px" [disabled]="!newIndexName.trim() || creating()" (click)="createIndex()">
+          @if (creating()) {
+            <span class="spinner"></span>
+          } @else {
+            <hugeicons-icon [icon]="Add01Icon" [size]="15" [strokeWidth]="1.5" />
+          }
+          Create Index
+        </button>
+      </div>
+    </div>
+
+    <!-- Search Panel -->
+    <div class="card">
+      <div class="card-header">
+        <hugeicons-icon [icon]="Search01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Semantic Search</span>
+      </div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="input-group" style="grid-column:1/-1">
+            <label>Index</label>
+            <select [(ngModel)]="selectedIndex">
+              @for (idx of indexes(); track idx.name) {
+                <option [value]="idx.name">{{ idx.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="input-group" style="grid-column:1/-1">
+            <label>Query (text or vector)</label>
+            <input [(ngModel)]="searchQuery" placeholder="Search query..." (keydown.enter)="executeSearch()" />
+          </div>
+        </div>
+        <button class="btn btn-success" style="margin-top:14px" [disabled]="!searchQuery.trim() || !selectedIndex || searching()" (click)="executeSearch()">
+          @if (searching()) {
+            <span class="spinner"></span>
+          } @else {
+            <hugeicons-icon [icon]="Search01Icon" [size]="15" [strokeWidth]="1.5" />
+          }
+          Search
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Indexes List -->
+  <div class="card" style="margin-top:24px">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <hugeicons-icon [icon]="DatabaseIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Vector Indexes</span>
+        <span class="badge badge-info">{{ indexes().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && indexes().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (indexes().length === 0) {
+      <div class="empty-state">No vector indexes. Create one above.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="indexes-table">
+          <thead>
+            <tr><th>Name</th><th>Dimensions</th><th>Metric</th><th>Size</th><th>Status</th><th>Created</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (idx of indexes(); track idx.name) {
+              <tr>
+                <td class="mono name-cell">{{ idx.name }}</td>
+                <td class="mono">{{ idx.dimension }}</td>
+                <td>{{ idx.metric }}</td>
+                <td class="mono">{{ idx.size }} vectors</td>
+                <td><span class="badge" [ngClass]="indexStatusClass(idx.status)">{{ idx.status }}</span></td>
+                <td class="time-cell">{{ nsToDate(idx.created_at) | date:'dd/MM/yy HH:mm' }}</td>
+                <td>
+                  <button class="btn btn-danger btn-sm" (click)="deleteIndex(idx.name)">
+                    <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+
+  <!-- Search Results -->
+  @if (searchResults().length > 0) {
+    <div class="card" style="margin-top:24px">
+      <div class="card-header">
+        <hugeicons-icon [icon]="Search01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Search Results</span>
+        <span class="badge badge-info">{{ searchResults().length }}</span>
+      </div>
+      <div class="table-wrapper">
+        <table class="results-table">
+          <thead>
+            <tr><th>#</th><th>Key</th><th>Score</th></tr>
+          </thead>
+          <tbody>
+            @for (r of searchResults(); track $index) {
+              <tr>
+                <td>{{ $index + 1 }}</td>
+                <td class="mono">{{ r.key }}</td>
+                <td class="mono">{{ r.score | number:'1.4f' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  }
+</div>

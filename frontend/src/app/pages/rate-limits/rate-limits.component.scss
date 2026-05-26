@@ -1,0 +1,138 @@
+.page {
+  padding: 32px;
+  max-width: 1100px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 28px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.page-subtitle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-top: 4px;
+}
+
+.loading-state {
+  display: flex;
+  justify-content: center;
+  padding: 60px;
+}
+
+.empty-state {
+  padding: 48px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.limits-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.limit-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  &.near-limit {
+    border-left: 3px solid var(--accent);
+  }
+
+  &.at-limit {
+    border-left: 3px solid var(--red);
+  }
+}
+
+.limit-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.limit-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.limit-stats {
+  display: flex;
+  gap: 20px;
+}
+
+.limit-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+
+  &.remaining {
+    color: var(--green);
+  }
+}
+
+.progress-bar-bg {
+  height: 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--green);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+
+  &.warning {
+    background: var(--accent);
+  }
+
+  &.danger {
+    background: var(--red);
+  }
+}
+
+.limit-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.reset-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}

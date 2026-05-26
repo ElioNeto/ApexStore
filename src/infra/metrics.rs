@@ -59,6 +59,14 @@ pub struct EngineMetrics {
     // Error counter
     pub errors: AtomicU64,
 
+    // Write amplification tracking
+    /// Total bytes written to SSTables (via flush + compaction).
+    pub total_sstable_bytes_written: AtomicU64,
+    /// Total bytes written to WAL.
+    pub total_wal_bytes_written: AtomicU64,
+    /// Total bytes read from SSTables.
+    pub total_sstable_bytes_read: AtomicU64,
+
     /// Optional OpenTelemetry instruments for exporting metrics via OTLP.
     /// When `Some`, every `record_*` call also updates the corresponding OTel counter.
     pub otel_instruments: Option<Arc<OtelInstruments>>,
@@ -193,6 +201,44 @@ impl EngineMetrics {
         if let Some(ref inst) = self.otel_instruments {
             inst.errors.add(1, &[]);
         }
+    }
+
+    // ── Write amplification tracking ──
+
+    #[inline]
+    pub fn record_sstable_write(&self, bytes: u64) {
+        self.total_sstable_bytes_written
+            .fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_wal_write(&self, bytes: u64) {
+        self.total_wal_bytes_written
+            .fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_sstable_read(&self, bytes: u64) {
+        self.total_sstable_bytes_read
+            .fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Calculate write amplification factor:
+    /// (SST bytes written + WAL bytes written) / max(SST bytes read, 1)
+    pub fn write_amplification(&self) -> f64 {
+        let written = self.total_sstable_bytes_written.load(Ordering::Relaxed) as f64
+            + self.total_wal_bytes_written.load(Ordering::Relaxed) as f64;
+        let read = self.total_sstable_bytes_read.load(Ordering::Relaxed).max(1) as f64;
+        written / read
+    }
+
+    /// Calculate read amplification: SSTable bytes read per user operation.
+    /// (total SST bytes read) / max(user gets + scans, 1)
+    pub fn read_amplification(&self) -> f64 {
+        let sstable_reads = self.total_sstable_bytes_read.load(Ordering::Relaxed) as f64;
+        let user_ops =
+            (self.gets.load(Ordering::Relaxed) + self.scans.load(Ordering::Relaxed)).max(1) as f64;
+        sstable_reads / user_ops
     }
 
     // ── Snapshot ──
@@ -338,6 +384,32 @@ impl EngineMetrics {
             self.errors.load(Ordering::Relaxed)
         );
 
+        // Write amplification metrics
+        prom_counter!(
+            "apexstore_sstable_bytes_written_total",
+            "Total bytes written to SSTables via flush and compaction",
+            self.total_sstable_bytes_written.load(Ordering::Relaxed)
+        );
+        prom_counter!(
+            "apexstore_wal_bytes_written_total",
+            "Total bytes written to WAL",
+            self.total_wal_bytes_written.load(Ordering::Relaxed)
+        );
+        prom_counter!(
+            "apexstore_sstable_bytes_read_total",
+            "Total bytes read from SSTables",
+            self.total_sstable_bytes_read.load(Ordering::Relaxed)
+        );
+
+        // Read amplification gauge
+        out.push_str("# HELP apexstore_read_amplification Read amplification factor (SST bytes read per user operation)\n");
+        out.push_str("# TYPE apexstore_read_amplification gauge\n");
+        out.push_str("apexstore_read_amplification ");
+        // Format f64 without unnecessary trailing zeros
+        let ra = self.read_amplification();
+        out.push_str(&format!("{:.6}", ra));
+        out.push('\n');
+
         out
     }
 }
@@ -482,7 +554,57 @@ mod tests {
         assert!(output.contains("apexstore_set_latency_us_total 42"));
         assert!(output.contains("apexstore_get_latency_us_total 10"));
 
+        // Write amplification metrics
+        assert!(output.contains("# HELP apexstore_sstable_bytes_written_total"));
+        assert!(output.contains("# HELP apexstore_wal_bytes_written_total"));
+        assert!(output.contains("# HELP apexstore_sstable_bytes_read_total"));
+
+        // Read amplification gauge
+        assert!(output.contains("# HELP apexstore_read_amplification"));
+        assert!(output.contains("# TYPE apexstore_read_amplification gauge"));
+
         // Each metric has HELP + TYPE + value (3 lines), plus some extra
         assert!(!output.is_empty());
+    }
+
+    #[test]
+    fn test_write_amplification() {
+        let m = EngineMetrics::new();
+        // No reads yet — should give 0 / 1 = 0.0
+        assert_eq!(m.write_amplification(), 0.0);
+
+        // Record some writes
+        m.record_sstable_write(1000);
+        m.record_wal_write(500);
+        // Still no reads — write_amp = 1500 / 1 = 1500
+        assert_eq!(m.write_amplification(), 1500.0);
+
+        // Record reads
+        m.record_sstable_read(2000);
+        // write_amp = 1500 / 2000 = 0.75
+        assert!((m.write_amplification() - 0.75).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_read_amplification() {
+        let m = EngineMetrics::new();
+        // No user ops yet — denominator is max(1) = 1, no bytes read → 0.0
+        assert_eq!(m.read_amplification(), 0.0);
+
+        // Record some SSTable reads
+        m.record_sstable_read(1000);
+        // Still no user ops — read_amp = 1000 / 1 = 1000
+        assert_eq!(m.read_amplification(), 1000.0);
+
+        // Record user operations
+        m.record_get(10);
+        m.record_scan(20);
+        // read_amp = 1000 / 2 = 500
+        assert!((m.read_amplification() - 500.0).abs() < f64::EPSILON);
+
+        // More reads
+        m.record_sstable_read(500);
+        // read_amp = 1500 / 2 = 750
+        assert!((m.read_amplification() - 750.0).abs() < f64::EPSILON);
     }
 }

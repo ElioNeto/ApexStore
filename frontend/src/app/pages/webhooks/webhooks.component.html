@@ -1,0 +1,121 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Webhooks</h1>
+      <p class="page-subtitle">Manage webhook endpoints for event notifications</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadWebhooks()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <!-- Create webhook -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <span class="op-badge">POST</span>
+      <span class="card-title">Create Webhook</span>
+    </div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="input-group" style="grid-column:1/-1">
+          <label>URL</label>
+          <input [(ngModel)]="newUrl" placeholder="https://hooks.example.com/events" />
+        </div>
+        <div class="input-group" style="grid-column:1/-1">
+          <label>Events (comma-separated)</label>
+          <div class="event-chips">
+            @for (evt of allEventOptions; track evt) {
+              <label class="event-chip" [class.selected]="isEventSelected(evt)">
+                <input type="checkbox" [checked]="isEventSelected(evt)" (change)="toggleEvent(evt)" />
+                {{ evt }}
+              </label>
+            }
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:14px" [disabled]="!newUrl.trim() || creating()" (click)="createWebhook()">
+        @if (creating()) {
+          <span class="spinner"></span>
+        } @else {
+          <hugeicons-icon [icon]="Add01Icon" [size]="15" [strokeWidth]="1.5" />
+        }
+        Create Webhook
+      </button>
+    </div>
+  </div>
+
+  <!-- Webhooks list -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="card-title">Webhooks</span>
+        <span class="badge badge-info">{{ webhooks().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && webhooks().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (webhooks().length === 0) {
+      <div class="empty-state">No webhooks configured. Create one above.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="webhooks-table">
+          <thead>
+            <tr><th>URL</th><th>Events</th><th>Status</th><th>Last Trigger</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (w of webhooks(); track w.id) {
+              <tr>
+                <td class="mono url-cell">{{ w.url }}</td>
+                <td>
+                  <div class="event-badges">
+                    @for (evt of w.events; track evt) {
+                      <span class="badge badge-info">{{ evt }}</span>
+                    }
+                  </div>
+                </td>
+                <td>
+                  @if (w.active) {
+                    <span class="badge badge-success">Active</span>
+                  } @else {
+                    <span class="badge badge-danger">Inactive</span>
+                  }
+                </td>
+                <td class="time-cell">
+                  @if (w.last_triggered_at) {
+                    {{ nsToDate(w.last_triggered_at) | date:'dd/MM HH:mm' }}
+                    @if (w.last_status) {
+                      <br /><span class="badge" [class.badge-success]="w.last_status === 'success'" [class.badge-danger]="w.last_status !== 'success'">{{ w.last_status }}</span>
+                    }
+                  } @else {
+                    <span style="color:var(--text-muted)">Never</span>
+                  }
+                </td>
+                <td>
+                  <div class="action-btns">
+                    <button class="btn btn-secondary btn-sm" (click)="testWebhook(w.id)" [disabled]="testing() === w.id">
+                      @if (testing() === w.id) {
+                        <span class="spinner"></span>
+                      } @else {
+                        <hugeicons-icon [icon]="ZapIcon" [size]="14" [strokeWidth]="1.5" />
+                      }
+                      Test
+                    </button>
+                    <button class="btn btn-danger btn-sm" (click)="deleteWebhook(w.id)">
+                      <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>

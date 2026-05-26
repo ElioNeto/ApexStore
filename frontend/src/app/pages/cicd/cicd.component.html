@@ -1,0 +1,129 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">CI/CD</h1>
+      <p class="page-subtitle">CI/CD fixtures and test data management</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadFixtures()" [disabled]="loading()">
+      @if (loading()) {
+        <span class="spinner"></span>
+      } @else {
+        <hugeicons-icon [icon]="RefreshIcon" [size]="16" [strokeWidth]="1.5" />
+      }
+      Refresh
+    </button>
+  </div>
+
+  <div class="grid-2col" style="margin-bottom:24px">
+    <!-- Create Fixture -->
+    <div class="card">
+      <div class="card-header">
+        <hugeicons-icon [icon]="Add01Icon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Create Fixture</span>
+      </div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="input-group" style="grid-column:1/-1">
+            <label>Name</label>
+            <input [(ngModel)]="newFixtureName" placeholder="test-users-100" />
+          </div>
+          <div class="input-group" style="grid-column:1/-1">
+            <label>Description</label>
+            <input [(ngModel)]="newFixtureDesc" placeholder="100 test user records" />
+          </div>
+          <div class="input-group">
+            <label>Type</label>
+            <select [(ngModel)]="newFixtureType">
+              @for (t of fixtureTypes; track t.value) {
+                <option [value]="t.value">{{ t.label }}</option>
+              }
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:14px" [disabled]="!newFixtureName.trim() || creating()" (click)="createFixture()">
+          @if (creating()) {
+            <span class="spinner"></span>
+          } @else {
+            <hugeicons-icon [icon]="Add01Icon" [size]="15" [strokeWidth]="1.5" />
+          }
+          Create Fixture
+        </button>
+      </div>
+    </div>
+
+    <!-- Generate Test Data -->
+    <div class="card">
+      <div class="card-header">
+        <hugeicons-icon [icon]="DatabaseIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Generate Test Data</span>
+      </div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="input-group" style="grid-column:1/-1">
+            <label>Record Count</label>
+            <input type="number" [(ngModel)]="genCount" min="1" max="1000000" />
+          </div>
+        </div>
+        <button class="btn btn-success" style="margin-top:14px" [disabled]="generating()" (click)="generateTestData()">
+          @if (generating()) {
+            <span class="spinner"></span>
+          } @else {
+            <hugeicons-icon [icon]="PlayIcon" [size]="15" [strokeWidth]="1.5" />
+          }
+          Generate
+        </button>
+
+        @if (genStatus().status === 'completed') {
+          <div style="margin-top:12px;padding:10px 14px;background:var(--green-dim);border-radius:8px;font-size:0.85rem">
+            Generated {{ genStatus().records_generated }} records in {{ genStatus().elapsed_ms }}ms
+          </div>
+        } @else if (genStatus().status === 'failed') {
+          <div style="margin-top:12px;padding:10px 14px;background:var(--red-dim);border-radius:8px;font-size:0.85rem;color:var(--red)">
+            Generation failed
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- Fixtures List -->
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <hugeicons-icon [icon]="CpuIcon" [size]="17" [strokeWidth]="1.5" color="var(--accent)" />
+        <span class="card-title">Fixtures</span>
+        <span class="badge badge-info">{{ fixtures().length }}</span>
+      </div>
+    </div>
+
+    @if (loading() && fixtures().length === 0) {
+      <div class="loading-state"><span class="spinner" style="width:28px;height:28px;border-width:3px"></span></div>
+    } @else if (fixtures().length === 0) {
+      <div class="empty-state">No fixtures yet. Create one above.</div>
+    } @else {
+      <div class="table-wrapper">
+        <table class="fixtures-table">
+          <thead>
+            <tr><th>Name</th><th>Description</th><th>Type</th><th>Size</th><th>Created</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (f of fixtures(); track f.id) {
+              <tr>
+                <td class="name-cell">{{ f.name }}</td>
+                <td style="color:var(--text-secondary);max-width:250px;overflow:hidden;text-overflow:ellipsis;">{{ f.description }}</td>
+                <td><span class="badge badge-info">{{ f.type }}</span></td>
+                <td class="mono">{{ f.size }}</td>
+                <td class="time-cell">{{ nsToDate(f.created_at) | date:'dd/MM HH:mm' }}</td>
+                <td>
+                  <button class="btn btn-danger btn-sm" (click)="deleteFixture(f.id, f.name)">
+                    <hugeicons-icon [icon]="Delete01Icon" [size]="14" [strokeWidth]="1.5" /> Delete
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+</div>
