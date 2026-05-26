@@ -56,7 +56,10 @@ twox-hash = "2.1"
 lru = "0.12"
 rayon = "1.11"
 uuid = { version = "1.22", features = ["v4", "serde"] }
-actix-web = "4.12"
+actix-web = { version = "4.12", features = ["rustls"] }
+rustls = "0.20"
+rustls-pemfile = "1"
+
 actix-rt = "2.11"
 actix-cors = "0.7"
 actix-web-httpauth = "0.8"

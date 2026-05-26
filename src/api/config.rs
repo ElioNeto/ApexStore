@@ -32,6 +32,15 @@ pub struct ServerConfig {
 
     /// Enable/disable access control middleware (default: false)
     pub access_control_enabled: bool,
+
+    /// Enable/disable TLS/HTTPS (default: false)
+    pub tls_enabled: bool,
+    /// Path to TLS certificate file
+    pub tls_cert_path: Option<String>,
+    /// Path to TLS private key file
+    pub tls_key_path: Option<String>,
+    /// TLS/HTTPS port (default: 443)
+    pub tls_port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +69,10 @@ impl Default for ServerConfig {
             cors_enabled: true,
             cors_origins: None,
             access_control_enabled: false,
+            tls_enabled: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            tls_port: 443,
         }
     }
 }
@@ -147,6 +160,17 @@ impl ServerConfig {
             .parse::<bool>()
             .unwrap_or(false);
 
+        let tls_enabled = env::var("TLS_ENABLED")
+            .ok()
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or(false);
+        let tls_cert_path = env::var("TLS_CERT_PATH").ok();
+        let tls_key_path = env::var("TLS_KEY_PATH").ok();
+        let tls_port = env::var("TLS_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(443);
+
         Self {
             host,
             port,
@@ -166,6 +190,10 @@ impl ServerConfig {
             cors_enabled,
             cors_origins,
             access_control_enabled,
+            tls_enabled,
+            tls_cert_path,
+            tls_key_path,
+            tls_port,
         }
     }
 
@@ -238,6 +266,15 @@ impl ServerConfig {
                 "Disabled"
             }
         );
+        if self.tls_enabled {
+            println!(
+                "   TLS: enabled (cert: {:?}, port: {})",
+                self.tls_cert_path.as_deref().unwrap_or("(none)"),
+                self.tls_port
+            );
+        } else {
+            println!("   TLS: disabled");
+        }
         println!();
     }
 }
