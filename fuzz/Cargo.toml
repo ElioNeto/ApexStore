@@ -1,0 +1,28 @@
+[package]
+name = "apexstore-fuzz"
+version = "0.0.1"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+apexstore = { path = "..", package = "apex-store-rs" }
+tempfile = "3"
+
+# cargo-fuzz compatibility
+[workspace]
+
+[[bin]]
+name = "wal"
+path = "fuzz_targets/wal.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "sstable"
+path = "fuzz_targets/sstable.rs"
+test = false
+doc = false
