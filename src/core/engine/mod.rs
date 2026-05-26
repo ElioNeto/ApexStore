@@ -57,6 +57,9 @@ pub struct LsmStats {
     pub last_compaction_bytes_written: u64,
     pub last_compaction_files_merged: usize,
     pub last_compaction_duration_ms: u64,
+    // Crash recovery stats
+    pub quarantined_sstables: usize,
+    pub recovered_sstables: usize,
 }
 
 /// Engine options.
@@ -78,6 +81,9 @@ pub struct EngineOptions {
     pub default_ttl: Option<std::time::Duration>,
     /// Encryption configuration for data at rest (SSTable blocks and WAL frames).
     pub encryption: EncryptionConfig,
+    /// Number of `write_record` calls between fsyncs for WAL.
+    /// Defaults to 4 (matches [`WAL_SYNC_INTERVAL`]).
+    pub wal_sync_interval: usize,
 }
 
 impl Default for EngineOptions {
@@ -95,6 +101,7 @@ impl Default for EngineOptions {
             compaction_options: CompactionOptions::default(),
             default_ttl: None,
             encryption: EncryptionConfig::default(),
+            wal_sync_interval: crate::storage::wal::WAL_SYNC_INTERVAL,
         }
     }
 }
@@ -138,6 +145,7 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             compaction_options,
             default_ttl: None,
             encryption,
+            wal_sync_interval: config.wal.sync_interval,
         }
     }
 }
@@ -174,13 +182,20 @@ pub(crate) struct EngineCore<C: Cache> {
     compaction: Compaction,
     /// Per-column-family WALs.  The "default" CF uses `wal.log`;
     /// other CFs use `wal-{cf}.log`.
-    wals: HashMap<String, WriteAheadLog>,
+    ///
+    /// Stored as `Arc<WriteAheadLog>` so callers can clone the handle,
+    /// drop the core lock, and perform WAL I/O concurrently (see
+    /// WRITE-SERIAL-001).
+    wals: HashMap<String, Arc<WriteAheadLog>>,
     /// Database directory path, used to create new per-CF WALs lazily.
     dir_path: std::path::PathBuf,
     /// Active range tombstones per column family.
     range_tombstones: HashMap<String, Vec<crate::core::log_record::RangeTombstone>>,
     /// Encryption config used when creating new WALs.
     encryption: EncryptionConfig,
+    /// Number of `write_record` calls between fsyncs for newly created WALs.
+    /// Mirrors [`WriteAheadLog::sync_interval`] (default: 4).
+    wal_sync_interval: usize,
 }
 
 impl<C: Cache> EngineCore<C> {
@@ -210,12 +225,31 @@ impl<C: Cache> EngineCore<C> {
     }
     /// Get a mutable reference to the WAL for a specific column family.
     /// Creates a new WAL file if one doesn't exist yet.
-    pub(crate) fn wal_mut(&mut self, cf: &str) -> Result<&mut WriteAheadLog> {
+    pub(crate) fn wal_mut(&mut self, cf: &str) -> Result<&mut Arc<WriteAheadLog>> {
         if !self.wals.contains_key(cf) {
-            let wal = WriteAheadLog::new_with_encryption(&self.dir_path, cf, &self.encryption)?;
-            self.wals.insert(cf.to_string(), wal);
+            let mut wal = WriteAheadLog::new_with_encryption(&self.dir_path, cf, &self.encryption)?;
+            wal.set_sync_interval(self.wal_sync_interval);
+            self.wals.insert(cf.to_string(), Arc::new(wal));
         }
         self.wals.get_mut(cf).ok_or_else(|| {
+            crate::infra::error::LsmError::InvalidArgument(format!(
+                "WAL not found for column family: {}",
+                cf
+            ))
+        })
+    }
+
+    /// Get an `Arc`-cloned handle to the WAL for a specific column family.
+    ///
+    /// This allows callers to clone the `Arc`, drop the core lock, and
+    /// perform WAL I/O without holding the lock (WRITE-SERIAL-001).
+    pub(crate) fn wal_handle(&mut self, cf: &str) -> Result<Arc<WriteAheadLog>> {
+        if !self.wals.contains_key(cf) {
+            let mut wal = WriteAheadLog::new_with_encryption(&self.dir_path, cf, &self.encryption)?;
+            wal.set_sync_interval(self.wal_sync_interval);
+            self.wals.insert(cf.to_string(), Arc::new(wal));
+        }
+        self.wals.get(cf).cloned().ok_or_else(|| {
             crate::infra::error::LsmError::InvalidArgument(format!(
                 "WAL not found for column family: {}",
                 cf
@@ -582,14 +616,17 @@ impl<C: Cache> Engine<C> {
             dir_path: dir_path.to_path_buf(),
             range_tombstones: HashMap::new(),
             encryption: options.encryption.clone(),
+            wal_sync_interval: options.wal_sync_interval,
         };
 
         // Create and recover the "default" CF WAL
         {
-            let default_wal =
+            let mut default_wal =
                 WriteAheadLog::new_with_encryption(dir_path, "default", &options.encryption)?;
+            default_wal.set_sync_interval(options.wal_sync_interval);
             let records = default_wal.recover()?;
-            core.wals.insert("default".to_string(), default_wal);
+            core.wals
+                .insert("default".to_string(), Arc::new(default_wal));
             Self::replay_wal_records_core(&mut core, records)?;
         }
 
@@ -606,9 +643,10 @@ impl<C: Cache> Engine<C> {
                     if cf != "default" && !core.wals.contains_key(cf) {
                         match WriteAheadLog::new_with_encryption(dir_path, cf, &options.encryption)
                         {
-                            Ok(wal) => {
+                            Ok(mut wal) => {
+                                wal.set_sync_interval(options.wal_sync_interval);
                                 let records = wal.recover()?;
-                                core.wals.insert(cf.to_string(), wal);
+                                core.wals.insert(cf.to_string(), Arc::new(wal));
                                 Self::replay_wal_records_core(&mut core, records)?;
                             }
                             Err(e) => {
@@ -813,34 +851,42 @@ impl<C: Cache> Engine<C> {
         let key_str = String::from_utf8_lossy(&key).into_owned();
         let value_size = value.len();
         let needs_compact;
-        let replication_record: Option<LogRecord>;
+
+        // ── Phase 1: Create the record (no lock needed) ──────────────
+        let mut record = if let Some(ttl) = ttl {
+            let mut r = LogRecord::new_with_ttl(key.clone(), value.clone(), ttl);
+            r.column_family = Some(cf.to_string());
+            r
+        } else {
+            let mut r = LogRecord::new(key.clone(), value.clone());
+            r.column_family = Some(cf.to_string());
+            r
+        };
+        // Apply default_ttl if no explicit TTL was given
+        if record.expires_at.is_none() {
+            if let Some(default_ttl) = self.options.default_ttl {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos();
+                record.expires_at = Some(now.saturating_add(default_ttl.as_nanos()));
+            }
+        }
+
+        // ── Phase 2: Get WAL handle (brief lock, no I/O) ──────────────
+        let wal_handle: Arc<WriteAheadLog>;
         {
             let mut core = self.core.write();
-            // Write to WAL first (before modifying memtable) for crash safety
-            let mut record = if let Some(ttl) = ttl {
-                let mut r = LogRecord::new_with_ttl(key.clone(), value.clone(), ttl);
-                r.column_family = Some(cf.to_string());
-                r
-            } else {
-                let mut r = LogRecord::new(key.clone(), value.clone());
-                r.column_family = Some(cf.to_string());
-                r
-            };
-            // Apply default_ttl if no explicit TTL was given
-            if record.expires_at.is_none() {
-                if let Some(default_ttl) = self.options.default_ttl {
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_nanos();
-                    record.expires_at = Some(now.saturating_add(default_ttl.as_nanos()));
-                }
-            }
-            core.wal_mut(cf)?.write_record(&record)?;
+            wal_handle = core.wal_handle(cf)?;
+        } // core lock dropped — no I/O while holding it
 
-            // Save a clone for replication before moving record into memtable
-            replication_record = Some(record.clone());
+        // ── Phase 3: WAL I/O (NO core lock held) ────────────────────
+        wal_handle.write_record(&record)?;
+        let replication_record: Option<LogRecord> = Some(record.clone());
 
+        // ── Phase 4: Memtable insert (re-acquire lock, memory only) ──
+        {
+            let mut core = self.core.write();
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
                 mem.push(MemTable::new_unlimited());
@@ -970,18 +1016,25 @@ impl<C: Cache> Engine<C> {
         let start = std::time::Instant::now();
         let key_str = String::from_utf8_lossy(&key).into_owned();
         let needs_compact;
-        let replication_record: Option<LogRecord>;
+
+        // ── Phase 1: Create tombstone record (no lock) ──────────────
+        let mut record = LogRecord::tombstone(key.clone());
+        record.column_family = Some(cf.to_string());
+
+        // ── Phase 2: Get WAL handle (brief lock) ────────────────────
+        let wal_handle: Arc<WriteAheadLog>;
         {
             let mut core = self.core.write();
+            wal_handle = core.wal_handle(cf)?;
+        } // core lock dropped — no I/O while holding it
 
-            // Write tombstone to WAL first (before modifying memtable) for crash safety
-            let mut record = LogRecord::tombstone(key.clone());
-            record.column_family = Some(cf.to_string());
-            core.wal_mut(cf)?.write_record(&record)?;
+        // ── Phase 3: WAL I/O (no lock) ──────────────────────────────
+        wal_handle.write_record(&record)?;
+        let replication_record: Option<LogRecord> = Some(record.clone());
 
-            // Save clone for replication before consuming record
-            replication_record = Some(record.clone());
-
+        // ── Phase 4: Memtable insert (re-acquire lock, memory only) ──
+        {
+            let mut core = self.core.write();
             let mem = core.memtables_mut().entry(cf.to_string()).or_default();
             if mem.is_empty() {
                 mem.push(MemTable::new_unlimited());
@@ -1922,6 +1975,10 @@ impl<C: Cache> Engine<C> {
             stats.mem_kb = core.memtable_bytes().get(cf).copied().unwrap_or(0) / 1024;
         }
 
+        // Crash recovery stats
+        stats.quarantined_sstables = core.version_set().startup_quarantine_count() as usize;
+        stats.recovered_sstables = core.version_set().recovered_count() as usize;
+
         // WAL stats — sum across all per-CF WALs
         stats.wal_kb = core
             .wals
@@ -1953,6 +2010,10 @@ impl<C: Cache> Engine<C> {
                 combined.mem_kb += core.memtable_bytes().get(&cf).copied().unwrap_or(0) / 1024;
             }
         }
+
+        // Crash recovery stats (same across all CFs)
+        combined.quarantined_sstables = core.version_set().startup_quarantine_count() as usize;
+        combined.recovered_sstables = core.version_set().recovered_count() as usize;
 
         combined.wal_kb = core
             .wals
@@ -2205,27 +2266,33 @@ impl<C: Cache> Engine<C> {
     /// that fall within the range.
     pub fn delete_range_cf(&self, cf: &str, start: &[u8], end: &[u8]) -> Result<()> {
         let start_time = std::time::Instant::now();
-        let replication_record: Option<LogRecord>;
+
+        // ── Phase 1: Create range tombstone (no lock) ───────────────
+        let range = crate::core::log_record::RangeTombstone {
+            start_key: start.to_vec(),
+            end_key: end.to_vec(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        };
+        let mut record = LogRecord::range_tombstone(start.to_vec(), end.to_vec());
+        record.column_family = Some(cf.to_string());
+
+        // ── Phase 2: Get WAL handle (brief lock) ────────────────────
+        let wal_handle: Arc<WriteAheadLog>;
         {
             let mut core = self.core.write();
+            wal_handle = core.wal_handle(cf)?;
+        } // core lock dropped — no I/O while holding it
 
-            let range = crate::core::log_record::RangeTombstone {
-                start_key: start.to_vec(),
-                end_key: end.to_vec(),
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos(),
-            };
+        // ── Phase 3: WAL I/O (no lock) ──────────────────────────────
+        wal_handle.write_record(&record)?;
+        let replication_record: Option<LogRecord> = Some(record.clone());
 
-            // Write range tombstone to WAL
-            let mut record = LogRecord::range_tombstone(start.to_vec(), end.to_vec());
-            record.column_family = Some(cf.to_string());
-            core.wal_mut(cf)?.write_record(&record)?;
-
-            // Save clone for replication
-            replication_record = Some(record.clone());
-
+        // ── Phase 4: Apply to engine state (re-acquire lock) ─────────
+        {
+            let mut core = self.core.write();
             // Add to EngineCore-level range tombstones (survives flushes)
             core.range_tombstones_mut()
                 .entry(cf.to_string())
@@ -2606,11 +2673,30 @@ impl<C: Cache> Engine<C> {
                             }
                             Err(e) => {
                                 tracing::warn!(
-                                    "discover_sstables: failed to load {} for CF {}: {:?}",
+                                    target: "apexstore::crash_recovery",
+                                    "discover_sstables: failed to load {} for CF {}: {:?} — quarantining",
                                     fname,
                                     cf,
                                     e
                                 );
+                                let quarantine_dir = sst_dir.join("quarantine");
+                                let _ = std::fs::create_dir_all(&quarantine_dir);
+                                let dest = quarantine_dir.join(fname);
+                                if let Err(move_err) = std::fs::rename(&sst_path, &dest) {
+                                    tracing::error!(
+                                        "discover_sstables: failed to quarantine {}: {:?}",
+                                        fname,
+                                        move_err
+                                    );
+                                } else {
+                                    tracing::info!(
+                                        "discover_sstables: quarantined corrupted SSTable {}",
+                                        fname
+                                    );
+                                }
+                                core.version_set()
+                                    .quarantined_count
+                                    .fetch_add(1, Ordering::Relaxed);
                             }
                         }
                     }
@@ -2634,10 +2720,29 @@ impl<C: Cache> Engine<C> {
                                 }
                                 Err(e) => {
                                     tracing::warn!(
-                                        "discover_sstables: failed to load {}: {:?}",
+                                        target: "apexstore::crash_recovery",
+                                        "discover_sstables: failed to load {}: {:?} — quarantining",
                                         fname_str,
                                         e
                                     );
+                                    let quarantine_dir = sst_dir.join("quarantine");
+                                    let _ = std::fs::create_dir_all(&quarantine_dir);
+                                    let dest = quarantine_dir.join(fname);
+                                    if let Err(move_err) = std::fs::rename(&path, &dest) {
+                                        tracing::error!(
+                                            "discover_sstables: failed to quarantine {}: {:?}",
+                                            fname_str,
+                                            move_err
+                                        );
+                                    } else {
+                                        tracing::info!(
+                                            "discover_sstables: quarantined corrupted SSTable {}",
+                                            fname_str
+                                        );
+                                    }
+                                    core.version_set()
+                                        .quarantined_count
+                                        .fetch_add(1, Ordering::Relaxed);
                                 }
                             }
                         }
