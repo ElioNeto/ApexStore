@@ -47,6 +47,10 @@ pub struct SstableBuilder {
     timestamp: u128,
     encryptor: Encryptor,
     prefix_compression: bool,
+    /// Tracks the most recently added key to enforce sorted insertion order.
+    /// SSTable blocks use binary search internally and therefore require that
+    /// keys be added in strictly increasing (sorted) order.
+    prev_key: Option<Vec<u8>>,
 }
 
 impl SstableBuilder {
@@ -91,10 +95,25 @@ impl SstableBuilder {
             timestamp,
             encryptor,
             prefix_compression,
+            prev_key: None,
         })
     }
 
     pub fn add(&mut self, key: &[u8], record: &LogRecord) -> Result<()> {
+        // Validate that keys are added in strictly increasing order.  SSTable
+        // blocks use binary search internally and unsorted input will silently
+        // produce incorrect lookups.
+        if let Some(ref prev) = self.prev_key {
+            if key <= prev.as_slice() {
+                return Err(LsmError::InvalidSstableFormat(format!(
+                    "Keys must be added in strictly increasing order: {:?} <= {:?}",
+                    String::from_utf8_lossy(key),
+                    String::from_utf8_lossy(prev),
+                )));
+            }
+        }
+        self.prev_key = Some(key.to_vec());
+
         if self.first_key.is_none() {
             self.first_key = Some(key.to_vec());
         }
