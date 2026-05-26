@@ -397,22 +397,30 @@ pub struct BatchBody {
 }
 
 /// Handler for `GET /stats/all` — frontend-compatible full stats endpoint.
+///
+/// ⚠️ **Deprecated**: This endpoint duplicates `GET /stats` with a different
+/// response wrapper. Prefer `GET /stats` instead. This endpoint may be removed
+/// in a future release.
 #[get("/stats/all")]
 async fn get_stats_all(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
         return e;
     }
     match engine.stats("default") {
-        Ok(stats) => HttpResponse::Ok().content_type("application/json").json(
-            json!({ "success": true, "data": {
-                "mem_records": stats.mem_records,
-                "mem_kb": stats.mem_kb,
-                "sst_kb": stats.sst_kb,
-                "sst_files": stats.sst_files,
-                "wal_kb": stats.wal_kb,
-                "total_records": stats.total_records,
-            }}),
-        ),
+        Ok(stats) => HttpResponse::Ok()
+            .insert_header(("Deprecation", "true"))
+            .insert_header(("Sunset", "Sat, 31 Dec 2026 23:59:59 GMT"))
+            .content_type("application/json")
+            .json(
+                json!({ "success": true, "data": {
+                    "mem_records": stats.mem_records,
+                    "mem_kb": stats.mem_kb,
+                    "sst_kb": stats.sst_kb,
+                    "sst_files": stats.sst_files,
+                    "wal_kb": stats.wal_kb,
+                    "total_records": stats.total_records,
+                }}),
+            ),
         Err(e) => {
             tracing::error!(target: "apexstore::api", "Failed to get stats/all: {:?}", e);
             HttpResponse::InternalServerError()

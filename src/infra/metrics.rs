@@ -232,6 +232,16 @@ impl EngineMetrics {
         written / read
     }
 
+    /// Calculate read amplification: SSTable bytes read per user operation.
+    /// (total SST bytes read) / max(user gets + scans, 1)
+    pub fn read_amplification(&self) -> f64 {
+        let sstable_reads = self.total_sstable_bytes_read.load(Ordering::Relaxed) as f64;
+        let user_ops = (self.gets.load(Ordering::Relaxed)
+            + self.scans.load(Ordering::Relaxed))
+            .max(1) as f64;
+        sstable_reads / user_ops
+    }
+
     // ── Snapshot ──
 
     /// Atomically snapshot all counters into a JSON-serializable struct.
@@ -392,6 +402,15 @@ impl EngineMetrics {
             self.total_sstable_bytes_read.load(Ordering::Relaxed)
         );
 
+        // Read amplification gauge
+        out.push_str("# HELP apexstore_read_amplification Read amplification factor (SST bytes read per user operation)\n");
+        out.push_str("# TYPE apexstore_read_amplification gauge\n");
+        out.push_str("apexstore_read_amplification ");
+        // Format f64 without unnecessary trailing zeros
+        let ra = self.read_amplification();
+        out.push_str(&format!("{:.6}", ra));
+        out.push('\n');
+
         out
     }
 }
@@ -541,6 +560,10 @@ mod tests {
         assert!(output.contains("# HELP apexstore_wal_bytes_written_total"));
         assert!(output.contains("# HELP apexstore_sstable_bytes_read_total"));
 
+        // Read amplification gauge
+        assert!(output.contains("# HELP apexstore_read_amplification"));
+        assert!(output.contains("# TYPE apexstore_read_amplification gauge"));
+
         // Each metric has HELP + TYPE + value (3 lines), plus some extra
         assert!(!output.is_empty());
     }
@@ -561,5 +584,28 @@ mod tests {
         m.record_sstable_read(2000);
         // write_amp = 1500 / 2000 = 0.75
         assert!((m.write_amplification() - 0.75).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_read_amplification() {
+        let m = EngineMetrics::new();
+        // No user ops yet — denominator is max(1) = 1, no bytes read → 0.0
+        assert_eq!(m.read_amplification(), 0.0);
+
+        // Record some SSTable reads
+        m.record_sstable_read(1000);
+        // Still no user ops — read_amp = 1000 / 1 = 1000
+        assert_eq!(m.read_amplification(), 1000.0);
+
+        // Record user operations
+        m.record_get(10);
+        m.record_scan(20);
+        // read_amp = 1000 / 2 = 500
+        assert!((m.read_amplification() - 500.0).abs() < f64::EPSILON);
+
+        // More reads
+        m.record_sstable_read(500);
+        // read_amp = 1500 / 2 = 750
+        assert!((m.read_amplification() - 750.0).abs() < f64::EPSILON);
     }
 }
