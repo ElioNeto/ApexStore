@@ -6,8 +6,10 @@ use tempfile::TempDir;
 
 fn key_value_pairs() -> impl Strategy<Value = Vec<(Vec<u8>, Vec<u8>)>> {
     proptest::collection::vec(
-        (proptest::collection::vec(proptest::arbitrary::any::<u8>(), 1..=16),
-         proptest::collection::vec(proptest::arbitrary::any::<u8>(), 1..=64)),
+        (
+            proptest::collection::vec(proptest::arbitrary::any::<u8>(), 1..=16),
+            proptest::collection::vec(proptest::arbitrary::any::<u8>(), 1..=64),
+        ),
         1..=5,
     )
 }
