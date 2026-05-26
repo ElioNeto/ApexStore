@@ -32,6 +32,9 @@ pub struct ServerConfig {
 
     /// Enable/disable access control middleware (default: false)
     pub access_control_enabled: bool,
+
+    /// Maximum number of concurrent connections per IP (default: 100)
+    pub max_connections_per_ip: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +63,7 @@ impl Default for ServerConfig {
             cors_enabled: true,
             cors_origins: None,
             access_control_enabled: false,
+            max_connections_per_ip: 100,
         }
     }
 }
@@ -148,6 +152,11 @@ impl ServerConfig {
             .parse::<bool>()
             .unwrap_or(false);
 
+        let max_connections_per_ip = env::var("MAX_CONNECTIONS_PER_IP")
+            .unwrap_or_else(|_| "100".to_string())
+            .parse::<usize>()
+            .unwrap_or(100);
+
         Self {
             host,
             port,
@@ -167,6 +176,7 @@ impl ServerConfig {
             cors_enabled,
             cors_origins,
             access_control_enabled,
+            max_connections_per_ip,
         }
     }
 

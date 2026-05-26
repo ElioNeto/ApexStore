@@ -1,7 +1,9 @@
 pub mod access_control;
 pub mod admin;
+pub mod audit_middleware;
 pub mod auth;
 pub mod config;
+pub mod connection_guard;
 pub mod graphql;
 pub mod health;
 pub mod notes;
@@ -13,6 +15,7 @@ use self::access_control::AccessControl;
 pub use self::auth::{require_permission, Permission, TokenManager};
 pub use self::config::ServerConfig;
 pub use self::graphql::AppSchema;
+use self::connection_guard::IpConnectionGuard;
 use self::rate_limiter::{RateLimiter, RateLimiterState};
 use crate::infra::access_control::AccessController;
 use crate::infra::idempotency::IdempotencyMiddleware;
@@ -91,6 +94,14 @@ async fn put_key(
     if let Err(e) = require_permission(&req, Permission::Write) {
         return e;
     }
+
+    // Reject writes when engine is in read-only mode
+    if let Err(msg) = engine.degradation.check_write_allowed() {
+        return HttpResponse::ServiceUnavailable()
+            .content_type("application/json")
+            .json(json!({ "error": msg }));
+    }
+
     let key = path.into_inner();
 
     // Validate key
@@ -110,9 +121,17 @@ async fn put_key(
         key.as_bytes().to_vec(),
         body.value.as_bytes().to_vec(),
     ) {
-        Ok(_) => HttpResponse::Ok()
-            .content_type("application/json")
-            .json(json!({ "status": "ok" })),
+        Ok(_) => {
+            tracing::info!(
+                target: "apexstore::audit",
+                "PUT key={} size={}",
+                key,
+                body.value.len()
+            );
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({ "status": "ok" }))
+        }
         Err(e) => {
             tracing::error!(target: "apexstore::api", "Failed to set key: {:?}", e);
             HttpResponse::InternalServerError()
@@ -132,11 +151,26 @@ async fn delete_key(
     if let Err(e) = require_permission(&req, Permission::Delete) {
         return e;
     }
+
+    // Reject writes when engine is in read-only mode
+    if let Err(msg) = engine.degradation.check_write_allowed() {
+        return HttpResponse::ServiceUnavailable()
+            .content_type("application/json")
+            .json(json!({ "error": msg }));
+    }
+
     let key = path.into_inner();
     match engine.delete_cf("default", key.as_bytes()) {
-        Ok(_) => HttpResponse::Ok()
-            .content_type("application/json")
-            .json(json!({ "status": "ok" })),
+        Ok(_) => {
+            tracing::info!(
+                target: "apexstore::audit",
+                "DELETE key={}",
+                key
+            );
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({ "status": "ok" }))
+        }
         Err(e) => {
             tracing::error!(target: "apexstore::api", "Failed to delete key: {:?}", e);
             HttpResponse::InternalServerError()
@@ -261,6 +295,14 @@ async fn admin_flush(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Res
     if let Err(e) = require_permission(&req, Permission::Admin) {
         return e;
     }
+
+    // Reject writes when engine is in read-only mode
+    if let Err(msg) = engine.degradation.check_write_allowed() {
+        return HttpResponse::ServiceUnavailable()
+            .content_type("application/json")
+            .json(json!({ "error": msg }));
+    }
+
     match engine.flush_memtable() {
         Ok(_) => HttpResponse::Ok()
             .content_type("application/json")
@@ -280,6 +322,14 @@ async fn admin_compact(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl R
     if let Err(e) = require_permission(&req, Permission::Admin) {
         return e;
     }
+
+    // Reject writes when engine is in read-only mode
+    if let Err(msg) = engine.degradation.check_write_allowed() {
+        return HttpResponse::ServiceUnavailable()
+            .content_type("application/json")
+            .json(json!({ "error": msg }));
+    }
+
     match engine.compact() {
         Ok(results) => {
             let summaries: Vec<serde_json::Value> = results
@@ -383,6 +433,13 @@ async fn post_key(
         return e;
     }
 
+    // Reject writes when engine is in read-only mode
+    if let Err(msg) = engine.degradation.check_write_allowed() {
+        return HttpResponse::ServiceUnavailable()
+            .content_type("application/json")
+            .json(json!({ "success": false, "message": msg }));
+    }
+
     // Validate key
     if body.key.is_empty() {
         return HttpResponse::BadRequest()
@@ -400,9 +457,17 @@ async fn post_key(
         body.key.as_bytes().to_vec(),
         body.value.as_bytes().to_vec(),
     ) {
-        Ok(_) => HttpResponse::Ok()
-            .content_type("application/json")
-            .json(json!({ "success": true, "data": { "key": body.key } })),
+        Ok(_) => {
+            tracing::info!(
+                target: "apexstore::audit",
+                "PUT key={} size={}",
+                body.key,
+                body.value.len()
+            );
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({ "success": true, "data": { "key": body.key } }))
+        }
         Err(e) => {
             tracing::error!(target: "apexstore::api", "Failed to set key: {:?}", e);
             HttpResponse::InternalServerError()
@@ -456,6 +521,14 @@ async fn batch_keys(
     if let Err(e) = require_permission(&req, Permission::Write) {
         return e;
     }
+
+    // Reject writes when engine is in read-only mode
+    if let Err(msg) = engine.degradation.check_write_allowed() {
+        return HttpResponse::ServiceUnavailable()
+            .content_type("application/json")
+            .json(json!({ "success": false, "message": msg }));
+    }
+
     if body.records.len() > MAX_BATCH_SIZE {
         return HttpResponse::BadRequest()
             .content_type("application/json")
@@ -489,6 +562,11 @@ async fn batch_keys(
             count += 1;
         }
     }
+    tracing::info!(
+        target: "apexstore::audit",
+        "BATCH put {} records",
+        count
+    );
     HttpResponse::Ok()
         .content_type("application/json")
         .json(json!({ "success": true, "data": { "count": count } }))
@@ -523,18 +601,25 @@ async fn scan_keys(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Respo
 // ── Route configuration ───────────────────────────────────────────────────
 
 /// Register API routes.
+///
+/// Specific routes MUST be registered before parameterised routes
+/// (e.g. `/{key}`) so that actix-web's router matches them correctly.
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(get_keys)
-        .service(get_key)
-        .service(put_key)
-        .service(delete_key)
-        .service(post_key)
-        .service(search_keys)
-        .service(batch_keys)
-        .service(scan_keys)
-        .service(get_metrics)
-        .service(get_stats)
-        .service(get_stats_all)
+        // Specific key-list endpoints — register before /keys/{key}
+        .service(search_keys)   // GET /keys/search
+        .service(batch_keys)    // POST /keys/batch
+        // Parameterised key endpoints — must come after specific /keys/* routes
+        .service(get_key)       // GET /keys/{key}
+        .service(put_key)       // PUT /keys/{key}
+        .service(delete_key)    // DELETE /keys/{key}
+        .service(post_key)      // POST /keys
+        .service(scan_keys)     // GET /scan
+        // Metrics and stats
+        .service(get_metrics)   // GET /metrics
+        .service(get_stats)     // GET /stats
+        .service(get_stats_all) // GET /stats/all
+        // Admin endpoints
         .service(admin_flush)
         .service(admin_compact)
         .service(admin_rate_limits)
@@ -696,6 +781,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     ));
     let sync_manager = web::Data::new(sync::SyncManager::new());
     let idempotency = web::Data::new(IdempotencyMiddleware::new(Duration::from_secs(3600)));
+    let ip_connection_guard = web::Data::new(IpConnectionGuard::new(config.max_connections_per_ip));
 
     let cors_enabled = config.cors_enabled;
     let cors_origins = config.cors_origins.clone();
@@ -712,11 +798,13 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
         let app = App::new()
             .wrap(self::ContentTypeGuard)
             .wrap(self::timeout_middleware::RequestTimeout)
+            .wrap(self::connection_guard::ConnectionLimiter)
             .wrap(RateLimiter)
             .wrap(AccessControl)
             .wrap(actix_web::middleware::Logger::new(
                 r#"{"time":"%t","level":"%l","request_id":"%{x-request-id}xi","method":"%r","status":%s,"duration_ms":%D,"size":%b}"#,
             ))
+            .wrap(self::audit_middleware::AuditMiddleware)
             .wrap(build_cors(&cors_origins, cors_enabled))
             .wrap(HttpAuthentication::bearer(self::auth::bearer_validator));
 
@@ -731,6 +819,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
             .app_data(access_controller.clone())
             .app_data(access_control_enabled.clone())
             .app_data(idempotency.clone())
+            .app_data(ip_connection_guard.clone())
             .configure(configure)
     })
     .max_connections(config.max_connections)

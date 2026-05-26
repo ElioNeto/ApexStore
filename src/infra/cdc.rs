@@ -9,6 +9,7 @@
 //! - [`WebhookPublisher`] — a publisher that sends events as HTTP POST to a configured endpoint.
 
 use serde::Serialize;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Configuration for Change Data Capture.
 #[derive(Debug, Clone, Serialize, Default)]
@@ -142,27 +143,52 @@ impl CdcPublisher for CdcCollector {
 /// A CDC publisher that sends events as HTTP POST requests to a configurable endpoint.
 ///
 /// The event body is serialised as JSON with `Content-Type: application/json`.
-/// Uses a short (5 s) connect and read timeout to avoid blocking the engine for long.
+/// Uses a configurable connect and read timeout (default 30 s) to avoid blocking
+/// the engine for long.
 pub struct WebhookPublisher {
     endpoint: String,
     agent: ureq::Agent,
     auth_header: Option<(String, String)>, // (header_name, header_value)
+    /// Timeout for connect and read operations.
+    timeout: std::time::Duration,
+    /// Number of successful webhook deliveries.
+    success_count: AtomicU64,
+    /// Number of failed webhook deliveries (after retries).
+    failure_count: AtomicU64,
 }
 
 impl WebhookPublisher {
     /// Create a new webhook publisher targeting `endpoint`.
     ///
     /// The endpoint should be a full URL such as `http://example.com/webhook`.
+    /// Default timeout is 30 seconds. Use [`with_timeout`](Self::with_timeout)
+    /// to customise.
     pub fn new(endpoint: String) -> Self {
+        let timeout = std::time::Duration::from_secs(30);
         let agent = ureq::AgentBuilder::new()
-            .timeout_connect(std::time::Duration::from_secs(5))
-            .timeout_read(std::time::Duration::from_secs(5))
+            .timeout_connect(timeout)
+            .timeout_read(timeout)
             .build();
         Self {
             endpoint,
             agent,
             auth_header: None,
+            timeout,
+            success_count: AtomicU64::new(0),
+            failure_count: AtomicU64::new(0),
         }
+    }
+
+    /// Override the default HTTP timeout.
+    ///
+    /// The same value is used for both the connect and read timeout.
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = timeout;
+        self.agent = ureq::AgentBuilder::new()
+            .timeout_connect(timeout)
+            .timeout_read(timeout)
+            .build();
+        self
     }
 
     /// Attach an HTTP auth header to every request.
@@ -177,6 +203,14 @@ impl WebhookPublisher {
     pub fn with_auth(mut self, header_name: String, header_value: String) -> Self {
         self.auth_header = Some((header_name, header_value));
         self
+    }
+
+    /// Return CDC delivery metrics: (success_count, failure_count).
+    pub fn metrics(&self) -> (u64, u64) {
+        (
+            self.success_count.load(Ordering::Relaxed),
+            self.failure_count.load(Ordering::Relaxed),
+        )
     }
 }
 
@@ -197,13 +231,22 @@ impl CdcPublisher for WebhookPublisher {
             }
 
             match req.send_string(&json) {
-                Ok(_) => return Ok(()),
+                Ok(response) => {
+                    if (200..300).contains(&response.status()) {
+                        self.success_count.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        self.failure_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                    return Ok(());
+                }
                 Err(e) => {
                     last_err = Some(e);
                     std::thread::sleep(std::time::Duration::from_millis(100 * (1 << attempt)));
                 }
             }
         }
+
+        self.failure_count.fetch_add(1, Ordering::Relaxed);
 
         Err(Box::new(std::io::Error::other(
             format!("CDC publish failed after 3 retries: {:?}", last_err),
@@ -252,30 +295,11 @@ pub fn create_publisher(config: &CdcConfig) -> Option<Box<dyn CdcPublisher>> {
 
             // Apply custom timeout if configured
             if let Some(secs) = config.timeout_secs {
-                let agent = ureq::AgentBuilder::new()
-                    .timeout_connect(std::time::Duration::from_secs(secs))
-                    .timeout_read(std::time::Duration::from_secs(secs))
-                    .build();
-                publisher = WebhookPublisher {
-                    endpoint: url.clone(),
-                    agent,
-                    auth_header: None,
-                };
-                // Re-apply auth header if present (since we rebuilt the publisher)
-                if let Some(ref auth) = config.auth_header {
-                    if let Some((name, value)) = auth.split_once(':') {
-                        publisher = publisher.with_auth(
-                            name.trim().to_string(),
-                            value.trim().to_string(),
-                        );
-                    } else {
-                        publisher = publisher.with_auth(
-                            "Authorization".to_string(),
-                            format!("Bearer {}", auth),
-                        );
-                    }
-                }
-            } else if let Some(ref auth) = config.auth_header {
+                publisher = publisher.with_timeout(std::time::Duration::from_secs(secs));
+            }
+
+            // Apply auth header if configured
+            if let Some(ref auth) = config.auth_header {
                 // Support "Authorization: Bearer <token>" format
                 if let Some((name, value)) = auth.split_once(':') {
                     publisher = publisher.with_auth(
