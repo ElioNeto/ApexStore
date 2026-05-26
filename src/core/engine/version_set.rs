@@ -4,7 +4,9 @@ use crate::storage::encryption::EncryptionConfig;
 use crate::storage::reader::SstableReader;
 use lru::LruCache;
 use parking_lot::Mutex;
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Statistics returned by `VersionSet::stats()`.
@@ -37,6 +39,11 @@ pub struct VersionSet<C: Cache> {
     /// at build time and reject their results at apply time if the counter
     /// has advanced (indicating the plan's indices are stale).
     compaction_generation: u64,
+    /// Set of SSTable paths that have experienced read errors.  These tables
+    /// are skipped on subsequent read attempts, and a background process
+    /// moves the files out of the active directory to prevent compaction
+    /// from retrying the corrupt data.
+    quarantined: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
 impl<C: Cache> VersionSet<C> {
@@ -66,6 +73,7 @@ impl<C: Cache> VersionSet<C> {
             block_cache,
             encryption,
             compaction_generation: 0,
+            quarantined: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -134,6 +142,11 @@ impl<C: Cache> VersionSet<C> {
 
                 // 3. If not in memory but has a disk path, try reading from SSTable
                 if let Some(ref path) = table.path {
+                    // Skip tables that have been quarantined due to prior read errors
+                    if self.quarantined.lock().contains(path) {
+                        continue 'table_loop;
+                    }
+
                     if let Some(ref block_cache) = self.block_cache {
                         match SstableReader::open_with_encryption(
                             path.clone(),
@@ -160,17 +173,83 @@ impl<C: Cache> VersionSet<C> {
                                 }
                                 // Not found in this SSTable — continue to next table
                                 Ok(None) => continue 'table_loop,
-                                // I/O error — skip this table and try next
-                                Err(_) => continue 'table_loop,
+                                // I/O or corruption error — quarantine this SSTable
+                                Err(e) => {
+                                    tracing::warn!(
+                                        target: "apexstore::quarantine",
+                                        path = %path.display(),
+                                        error = %e,
+                                        "SSTable read error — quarantining file"
+                                    );
+                                    self.quarantined.lock().insert(path.clone());
+                                    continue 'table_loop;
+                                }
                             },
-                            // Can't open reader — skip this table
-                            Err(_) => continue 'table_loop,
+                            // Can't open reader — quarantine this SSTable
+                            Err(e) => {
+                                tracing::warn!(
+                                    target: "apexstore::quarantine",
+                                    path = %path.display(),
+                                    error = %e,
+                                    "SSTable open error — quarantining file"
+                                );
+                                self.quarantined.lock().insert(path.clone());
+                                continue 'table_loop;
+                            }
                         }
                     }
                 }
             }
         }
         None
+    }
+
+    /// Returns `true` if the given SSTable path has been quarantined.
+    pub fn is_quarantined(&self, path: &PathBuf) -> bool {
+        self.quarantined.lock().contains(path)
+    }
+
+    /// Move all quarantined SSTable files out of the active SSTable directory
+    /// into a quarantine subdirectory so compaction and future reads avoid them.
+    ///
+    /// Returns the number of files successfully moved.
+    pub fn evacuate_quarantined(&self, sst_dir: &std::path::Path) -> usize {
+        let paths: Vec<PathBuf> = self.quarantined.lock().iter().cloned().collect();
+        let quarantine_dir = sst_dir.join("quarantine");
+        let _ = std::fs::create_dir_all(&quarantine_dir);
+        let mut moved = 0;
+        for path in &paths {
+            let dest = quarantine_dir.join(
+                path.file_name()
+                    .unwrap_or_else(|| std::ffi::OsStr::new("unknown")),
+            );
+            match std::fs::rename(path, &dest) {
+                Ok(()) => {
+                    tracing::info!(
+                        target: "apexstore::quarantine",
+                        from = %path.display(),
+                        to = %dest.display(),
+                        "Quarantined SSTable moved"
+                    );
+                    moved += 1;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "apexstore::quarantine",
+                        path = %path.display(),
+                        error = %e,
+                        "Failed to move quarantined SSTable"
+                    );
+                }
+            }
+        }
+        self.quarantined.lock().clear();
+        moved
+    }
+
+    /// Return the number of currently quarantined SSTables.
+    pub fn quarantined_count(&self) -> usize {
+        self.quarantined.lock().len()
     }
 
     pub fn scan(

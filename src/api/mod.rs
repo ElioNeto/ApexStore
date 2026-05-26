@@ -757,8 +757,86 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     let host = config.host.clone();
     let port = config.port;
 
-    tracing::info!(target: "apexstore::api", "Starting server at {}:{}", host, port);
-    println!("Starting server at http://{}:{}", host, port);
+    // Build TLS config if enabled
+    let tls_config = if config.tls_enabled {
+        let cert_path = config.tls_cert_path.as_ref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "TLS enabled but TLS_CERT_PATH not set",
+            )
+        })?;
+        let key_path = config.tls_key_path.as_ref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "TLS enabled but TLS_KEY_PATH not set",
+            )
+        })?;
+
+        use std::io::BufReader;
+
+        let cert_file = std::fs::File::open(cert_path).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Cannot open cert file: {}", e),
+            )
+        })?;
+        let key_file = std::fs::File::open(key_path).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Cannot open key file: {}", e),
+            )
+        })?;
+
+        let mut cert_reader = BufReader::new(cert_file);
+        let mut key_reader = BufReader::new(key_file);
+
+        let raw_certs: Vec<Vec<u8>> = rustls_pemfile::certs(&mut cert_reader).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse cert: {}", e),
+            )
+        })?;
+        let certs: Vec<rustls::Certificate> =
+            raw_certs.into_iter().map(rustls::Certificate).collect();
+
+        // Read private key (PKCS#8 format)
+        let mut raw_keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse key: {}", e),
+            )
+        })?;
+        if raw_keys.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "No private key found in key file (PKCS#8)",
+            ));
+        }
+        let key = rustls::PrivateKey(raw_keys.remove(0));
+
+        let tls_server_config = rustls::ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("TLS config error: {}", e),
+                )
+            })?;
+
+        Some(tls_server_config)
+    } else {
+        None
+    };
+
+    if config.tls_enabled {
+        tracing::info!(target: "apexstore::api", "HTTPS server listening on {}:{}", host, config.tls_port);
+        println!("Starting server at https://{}:{}", host, config.tls_port);
+    } else {
+        tracing::info!(target: "apexstore::api", "HTTP server listening on {}:{}", host, port);
+        println!("Starting server at http://{}:{}", host, port);
+    }
 
     // Validate configuration and log warnings
     for warning in config.validate() {
@@ -828,8 +906,13 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
             .configure(configure)
     })
     .max_connections(config.max_connections)
-    .backlog(config.backlog)
-    .bind((host, port))?;
+    .backlog(config.backlog);
+
+    if let Some(tls_config) = tls_config {
+        server_builder = server_builder.bind_rustls((host.clone(), config.tls_port), tls_config)?;
+    } else {
+        server_builder = server_builder.bind((host.clone(), port))?;
+    }
 
     if let Some(workers) = config.workers {
         server_builder = server_builder.workers(workers);
