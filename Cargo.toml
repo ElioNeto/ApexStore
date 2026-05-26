@@ -95,6 +95,7 @@ ureq = "2.12"
 sqlparser = "0.45"
 jsonschema = "0.18"
 actix-ws = "0.3"
+dashmap = "6"
 
 [dev-dependencies]
 tempfile = "3.24"

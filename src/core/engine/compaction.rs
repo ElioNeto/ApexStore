@@ -1,6 +1,5 @@
 use crate::core::engine::EngineOptions;
 use crate::core::iterators::{MergeIterator, StorageIterator};
-use crate::core::key::KeySlice;
 use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::core::table::Table;
 use crate::infra::config::StorageConfig;
@@ -118,7 +117,7 @@ fn execute_compaction(
     // IMPORTANT: Iterate tables in REVERSE order (newest first) so that
     // the MergeIterator's "lower index wins" rule correctly picks the
     // newest value when duplicate keys exist across tables.
-    let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
+    let mut iters: Vec<Box<dyn StorageIterator<KeyType = Vec<u8>> + '_>> = Vec::new();
     for table in tables.iter().rev() {
         iters.push(Box::new(table.iter()));
     }

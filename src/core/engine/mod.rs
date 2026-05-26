@@ -29,7 +29,6 @@ use self::compaction::{Compaction, CompactionMetrics, CompactionOptions, Compact
 
 use self::version_set::VersionSet;
 use crate::core::iterators::{MergeIterator, StorageIterator};
-use crate::core::key::KeySlice;
 use crate::core::memtable::MemTable;
 
 pub const DEFAULT_SCAN_LIMIT: usize = 128;
@@ -1264,14 +1263,12 @@ impl<C: Cache> Engine<C> {
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let start = std::time::Instant::now();
         let core = self.core.read();
-        let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
+        let mut iters: Vec<Box<dyn StorageIterator<KeyType = Vec<u8>> + '_>> = Vec::new();
 
         // 1. Memtables (newer first)
         if let Some(memtables) = core.memtables().get(cf) {
             for mem in memtables.iter().rev() {
-                iters.push(Box::new(crate::storage::iterator::MemTableIterator::new(
-                    &mem.data,
-                )));
+                iters.push(Box::new(mem.iter()));
             }
         }
 
@@ -1436,13 +1433,11 @@ impl<C: Cache> Engine<C> {
     pub fn keys(&self) -> Result<Vec<Vec<u8>>> {
         let start = std::time::Instant::now();
         let core = self.core.read();
-        let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
+        let mut iters: Vec<Box<dyn StorageIterator<KeyType = Vec<u8>> + '_>> = Vec::new();
 
         if let Some(memtables) = core.memtables().get("default") {
             for mem in memtables.iter().rev() {
-                iters.push(Box::new(crate::storage::iterator::MemTableIterator::new(
-                    &mem.data,
-                )));
+                iters.push(Box::new(mem.iter()));
             }
         }
 
@@ -1473,7 +1468,7 @@ impl<C: Cache> Engine<C> {
         let start = std::time::Instant::now();
         let core = self.core.read();
         let mut count = 0;
-        let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
+        let mut iters: Vec<Box<dyn StorageIterator<KeyType = Vec<u8>> + '_>> = Vec::new();
 
         if let Some(memtables) = core.memtables().get("default") {
             for mem in memtables.iter().rev() {
@@ -1569,7 +1564,15 @@ impl<C: Cache> Engine<C> {
                         timestamp,
                         &self.options.encryption,
                     )?;
-                    for (key, record) in mem.data.iter() {
+                    // Collect entries into a sorted vec because DashMap
+                    // iteration order is arbitrary (shard-based).
+                    let mut sorted: Vec<_> = mem
+                        .data
+                        .iter()
+                        .map(|e| (e.key().clone(), e.value().clone()))
+                        .collect();
+                    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+                    for (key, record) in &sorted {
                         if record.is_expired_at(now) {
                             continue;
                         }
