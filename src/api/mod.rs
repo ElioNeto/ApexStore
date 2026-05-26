@@ -515,7 +515,12 @@ fn build_cors(origins: &Option<Vec<String>>, enabled: bool) -> actix_cors::Cors 
             }
             c
         }
-        None => actix_cors::Cors::permissive(),
+        None => {
+            // Default-deny when no origins are configured — blocks all cross-origin requests
+            actix_cors::Cors::default()
+                .max_age(0)
+                .allowed_origin_fn(|_, _| false)
+        }
     };
     cors = cors
         .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"])

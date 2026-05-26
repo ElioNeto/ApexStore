@@ -47,13 +47,13 @@ impl Default for ServerConfig {
         Self {
             host: "0.0.0.0".to_string(),
             port: 8080,
-            max_json_payload_size: 50 * 1024 * 1024, // 50MB
-            max_raw_payload_size: 50 * 1024 * 1024,  // 50MB
+            max_json_payload_size: 1 * 1024 * 1024, // 1MB (reduced from 50MB for security)
+            max_raw_payload_size: 1 * 1024 * 1024,  // 1MB (reduced from 50MB for security)
             feature_cache_ttl_secs: 10,
             auth: AuthConfig::default(),
             max_connections: 10_000,
             backlog: 1024u32,
-            workers: None,
+            workers: Some(4),
             rate_limit_enabled: true,
             rate_limit_requests_per_minute: 100,
             cdc_endpoint: None,
@@ -67,7 +67,7 @@ impl Default for ServerConfig {
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
-            enabled: false, // Disabled by default for backward compatibility
+            enabled: true, // Enabled by default for security
             token_expiry_days: Some(30),
         }
     }
@@ -83,14 +83,14 @@ impl ServerConfig {
             .unwrap_or(8080);
 
         let max_json_payload_size = env::var("MAX_JSON_PAYLOAD_SIZE")
-            .unwrap_or_else(|_| (50 * 1024 * 1024).to_string())
+            .unwrap_or_else(|_| (1 * 1024 * 1024).to_string())
             .parse::<usize>()
-            .unwrap_or(50 * 1024 * 1024);
+            .unwrap_or(1 * 1024 * 1024);
 
         let max_raw_payload_size = env::var("MAX_RAW_PAYLOAD_SIZE")
-            .unwrap_or_else(|_| (50 * 1024 * 1024).to_string())
+            .unwrap_or_else(|_| (1 * 1024 * 1024).to_string())
             .parse::<usize>()
-            .unwrap_or(50 * 1024 * 1024);
+            .unwrap_or(1 * 1024 * 1024);
 
         let feature_cache_ttl_secs = env::var("FEATURE_CACHE_TTL")
             .unwrap_or_else(|_| "10".to_string())
@@ -98,9 +98,9 @@ impl ServerConfig {
             .unwrap_or(10);
 
         let auth_enabled = env::var("API_AUTH_ENABLED")
-            .unwrap_or_else(|_| "false".to_string())
+            .unwrap_or_else(|_| "true".to_string())
             .parse::<bool>()
-            .unwrap_or(false);
+            .unwrap_or(true);
 
         let token_expiry_days = env::var("API_TOKEN_EXPIRY_DAYS")
             .ok()
@@ -118,7 +118,8 @@ impl ServerConfig {
 
         let workers = env::var("WORKERS")
             .ok()
-            .and_then(|s| s.parse::<usize>().ok());
+            .and_then(|s| s.parse::<usize>().ok())
+            .or(Some(4));
 
         let rate_limit_enabled = env::var("RATE_LIMIT_ENABLED")
             .unwrap_or_else(|_| "true".to_string())
