@@ -1,0 +1,5 @@
+[advisories]
+# ring 0.16.20 — Some AES functions may panic when overflow checking is enabled.
+# Pulled in via actix-web's rustls feature (rustls 0.20.9 → ring 0.16.20).
+# Cannot upgrade without upstream actix-web upgrading rustls.
+ignore = ["RUSTSEC-2025-0009", "RUSTSEC-2024-0336"]
