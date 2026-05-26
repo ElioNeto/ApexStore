@@ -15,7 +15,7 @@ use crate::storage::cache::{Cache, GlobalBlockCache};
 use crate::storage::encryption::EncryptionConfig;
 use crate::storage::wal::WriteAheadLog;
 use fs2::FileExt;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -267,8 +267,8 @@ impl<C: Cache> EngineCore<C> {
 /// ```
 pub struct Engine<C: Cache> {
     options: EngineOptions,
-    /// All mutable state behind a mutex for thread-safe access.
-    core: Arc<Mutex<EngineCore<C>>>,
+    /// All mutable state behind a RwLock for thread-safe access.
+    core: Arc<RwLock<EngineCore<C>>>,
     /// Semaphore that limits the number of concurrent compaction threads.
     /// Acquire a permit before spawning a compaction thread; the permit is
     /// released when the thread finishes.
@@ -334,9 +334,14 @@ impl<C: Cache> Engine<C> {
         &self._sst_dir
     }
 
-    /// Lock the core and return the guard.
-    pub(crate) fn lock_core(&self) -> parking_lot::MutexGuard<'_, EngineCore<C>> {
-        self.core.lock()
+    /// Lock the core for read and return the guard.
+    pub(crate) fn lock_core(&self) -> parking_lot::RwLockReadGuard<'_, EngineCore<C>> {
+        self.core.read()
+    }
+
+    /// Lock the core for write and return the guard.
+    pub(crate) fn lock_core_mut(&self) -> parking_lot::RwLockWriteGuard<'_, EngineCore<C>> {
+        self.core.write()
     }
 
     /// Returns a reference to the engine metrics.
@@ -673,7 +678,7 @@ impl<C: Cache> Engine<C> {
 
         let engine = Self {
             options: options.clone(),
-            core: Arc::new(Mutex::new(core)),
+            core: Arc::new(RwLock::new(core)),
             compaction_semaphore: Arc::new(Semaphore::new(
                 options.compaction_options.max_concurrent_compactions,
             )),
@@ -810,7 +815,7 @@ impl<C: Cache> Engine<C> {
         let needs_compact;
         let replication_record: Option<LogRecord>;
         {
-            let mut core = self.core.lock();
+            let mut core = self.core.write();
             // Write to WAL first (before modifying memtable) for crash safety
             let mut record = if let Some(ttl) = ttl {
                 let mut r = LogRecord::new_with_ttl(key.clone(), value.clone(), ttl);
@@ -967,7 +972,7 @@ impl<C: Cache> Engine<C> {
         let needs_compact;
         let replication_record: Option<LogRecord>;
         {
-            let mut core = self.core.lock();
+            let mut core = self.core.write();
 
             // Write tombstone to WAL first (before modifying memtable) for crash safety
             let mut record = LogRecord::tombstone(key.clone());
@@ -1062,7 +1067,7 @@ impl<C: Cache> Engine<C> {
         let key = key.as_ref();
         let start = std::time::Instant::now();
         let key_str = String::from_utf8_lossy(key).into_owned();
-        let core = self.core.lock();
+        let core = self.core.read();
 
         // First check memtables (newest first) — point writes take precedence
         // over range tombstones.
@@ -1205,7 +1210,7 @@ impl<C: Cache> Engine<C> {
         limit: Option<usize>,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let start = std::time::Instant::now();
-        let core = self.core.lock();
+        let core = self.core.read();
         let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
 
         // 1. Memtables (newer first)
@@ -1377,7 +1382,7 @@ impl<C: Cache> Engine<C> {
 
     pub fn keys(&self) -> Result<Vec<Vec<u8>>> {
         let start = std::time::Instant::now();
-        let core = self.core.lock();
+        let core = self.core.read();
         let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
 
         if let Some(memtables) = core.memtables().get("default") {
@@ -1413,7 +1418,7 @@ impl<C: Cache> Engine<C> {
 
     pub fn count(&self) -> Result<usize> {
         let start = std::time::Instant::now();
-        let core = self.core.lock();
+        let core = self.core.read();
         let mut count = 0;
         let mut iters: Vec<Box<dyn StorageIterator<KeyType = KeySlice<'_>> + '_>> = Vec::new();
 
@@ -1455,7 +1460,7 @@ impl<C: Cache> Engine<C> {
     pub fn flush_memtable_cf(&self, cf: &str) -> Result<()> {
         let start = std::time::Instant::now();
         {
-            let mut core = self.core.lock();
+            let mut core = self.core.write();
             self.flush_memtable_impl(cf, &mut core)?;
         }
         let elapsed_us = start.elapsed().as_micros() as u64;
@@ -1591,7 +1596,7 @@ impl<C: Cache> Engine<C> {
 
     pub fn compact_cf(&self, cf: &str) -> Result<Option<CompactionMetrics>> {
         let start = std::time::Instant::now();
-        let mut core = self.core.lock();
+        let mut core = self.core.write();
         let result = compact_cf_core(&mut core, &self.options, cf);
         if let Ok(Some(metrics)) = &result {
             self.backpressure
@@ -1644,7 +1649,7 @@ impl<C: Cache> Engine<C> {
         // replaces tables.  The three-phase background path in maybe_compact()
         // is inherently racy because it builds a plan snapshot, drops the lock
         // for I/O, then re-acquires it to apply potentially-stale indices.
-        let mut core = self.core.lock();
+        let mut core = self.core.write();
         let column_families = core.version_set().column_families();
         for cf in column_families {
             if let Some(metrics) = compact_cf_core(&mut core, &self.options, &cf)? {
@@ -1690,7 +1695,7 @@ impl<C: Cache> Engine<C> {
         }
 
         let plans: Vec<CompactionPlan> = {
-            let core = self.core.lock();
+            let core = self.core.read();
             let master_options = self.options.clone();
 
             core.version_set()
@@ -1778,7 +1783,7 @@ impl<C: Cache> Engine<C> {
                     }
 
                     // ── Phase 3: Re-acquire lock and apply results ──
-                    let mut core = core.lock();
+                    let mut core = core.write();
                     // Stale-plan detection: if the VersionSet's generation
                     // has advanced since we built this plan, the captured
                     // table indices are stale (another compaction already
@@ -1883,7 +1888,7 @@ impl<C: Cache> Engine<C> {
         // 5. Sync all per-CF WALs so all buffered data is durably on disk.
         //    The WALs are the sole persistence mechanism across restarts.
         {
-            let core = self.core.lock();
+            let core = self.core.read();
             for (cf, wal) in core.wals.iter() {
                 if let Err(e) = wal.sync() {
                     tracing::error!(
@@ -1897,7 +1902,7 @@ impl<C: Cache> Engine<C> {
     }
 
     pub fn stats(&self, cf: &str) -> Result<LsmStats> {
-        let core = self.core.lock();
+        let core = self.core.read();
         let mut stats = LsmStats::default();
 
         // Get stats from version set
@@ -1929,7 +1934,7 @@ impl<C: Cache> Engine<C> {
     }
 
     pub fn stats_all(&self) -> Result<LsmStats> {
-        let core = self.core.lock();
+        let core = self.core.read();
         let mut combined = LsmStats::default();
         let column_families = core.version_set().column_families();
 
@@ -2008,7 +2013,7 @@ impl<C: Cache> Engine<C> {
         let needs_compact;
         let batch_records: Vec<LogRecord>;
         {
-            let mut core = self.core.lock();
+            let mut core = self.core.write();
 
             // Collect all WAL records first, then write them with a single fsync
             let records: Vec<LogRecord> = items
@@ -2095,7 +2100,7 @@ impl<C: Cache> Engine<C> {
         let needs_compact;
         let batch_records: Vec<LogRecord>;
         {
-            let mut core = self.core.lock();
+            let mut core = self.core.write();
 
             // Collect all WAL records first, then write them with a single fsync
             let records: Vec<LogRecord> = keys
@@ -2202,7 +2207,7 @@ impl<C: Cache> Engine<C> {
         let start_time = std::time::Instant::now();
         let replication_record: Option<LogRecord>;
         {
-            let mut core = self.core.lock();
+            let mut core = self.core.write();
 
             let range = crate::core::log_record::RangeTombstone {
                 start_key: start.to_vec(),
@@ -2295,7 +2300,7 @@ impl<C: Cache> Engine<C> {
     fn flush_all_memtables(&self) -> Result<()> {
         loop {
             let cf_to_flush: Option<String> = {
-                let core = self.core.lock();
+                let core = self.core.read();
                 core.memtables()
                     .iter()
                     .find(|(_, mems)| !mems.is_empty())
@@ -2304,7 +2309,7 @@ impl<C: Cache> Engine<C> {
             match cf_to_flush {
                 None => return Ok(()),
                 Some(cf) => {
-                    let mut core = self.core.lock();
+                    let mut core = self.core.write();
                     self.flush_memtable_impl(&cf, &mut core)?;
                 }
             }
@@ -2316,7 +2321,7 @@ impl<C: Cache> Engine<C> {
     pub fn create_snapshot(&self, backup_dir: &Path) -> Result<()> {
         // Save WALs before flushing — flush clears per-CF WALs.
         let saved_wals: Vec<(String, Vec<u8>)> = {
-            let core = self.core.lock();
+            let core = self.core.read();
             core.wals
                 .iter()
                 .filter_map(|(cf, wal)| {
@@ -2332,7 +2337,7 @@ impl<C: Cache> Engine<C> {
         std::fs::create_dir_all(backup_dir)?;
 
         // Lock core and copy / persist data
-        let core = self.core.lock();
+        let core = self.core.read();
 
         // Build manifest mapping CF → SSTable filenames
         let mut manifest = SnapshotManifest {
@@ -2542,7 +2547,7 @@ impl<C: Cache> Engine<C> {
 
         // Register SSTables in the running engine's VersionSet
         if let Some(m) = manifest {
-            let mut core = self.core.lock();
+            let mut core = self.core.write();
             let sst_dir = sst_dir.clone();
             let enc = &self.options.encryption;
             for (cf, filenames) in &m.column_families {
@@ -2655,7 +2660,7 @@ impl<C: Cache> Engine<C> {
 
         // Collect all paths tracked by VersionSet
         let tracked_paths: std::collections::HashSet<PathBuf> = {
-            let core = self.core.lock();
+            let core = self.core.read();
             let mut paths = std::collections::HashSet::new();
             for cf in core.version_set().column_families() {
                 for table in core.version_set().get_tables(&cf) {
@@ -3435,7 +3440,7 @@ mod tests {
         // Insert some keys via the SSTable path (bypassing memtable)
         // We create a VersionSet with a table that has a bloom filter and
         // verify that reading an absent key doesn't iterate table data.
-        let mut core = engine.lock_core();
+        let mut core = engine.lock_core_mut();
         let mut data = BTreeMap::new();
         data.insert(b"present_key".to_vec(), b"present_value".to_vec());
         let mut table = Table::build(data, &engine.options);
@@ -3469,7 +3474,7 @@ mod tests {
         let engine = Engine::<NoopCache>::new_from_config(&config, NoopCache).unwrap();
 
         // Insert a key into the version set directly
-        let mut core = engine.lock_core();
+        let mut core = engine.lock_core_mut();
         let mut data = BTreeMap::new();
         data.insert(b"cached_key".to_vec(), b"cached_value".to_vec());
         let table = Table::build(data, &engine.options);
@@ -3501,7 +3506,7 @@ mod tests {
         config.core.dir_path = dir.path().to_path_buf();
         let engine = Engine::<NoopCache>::new_from_config(&config, NoopCache).unwrap();
 
-        let mut core = engine.lock_core();
+        let mut core = engine.lock_core_mut();
 
         // Table 1: keys "a" to "c"
         let mut data1 = BTreeMap::new();
