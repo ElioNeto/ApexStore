@@ -15,6 +15,7 @@ pub use self::config::ServerConfig;
 pub use self::graphql::AppSchema;
 use self::rate_limiter::{RateLimiter, RateLimiterState};
 use crate::infra::access_control::AccessController;
+use crate::infra::idempotency::IdempotencyMiddleware;
 use crate::LsmEngine;
 use actix_web::{
     delete, get, post, put, web, App, HttpRequest, HttpResponse, HttpServer, Responder,
@@ -25,6 +26,7 @@ use async_graphql_actix_web::{GraphQLRequest, GraphQLResponse};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// Maximum number of records accepted in a single batch insert request.
 pub const MAX_BATCH_SIZE: usize = 1000;
@@ -294,7 +296,14 @@ async fn graphql_handler(schema: web::Data<AppSchema>, req: GraphQLRequest) -> G
 }
 
 /// GraphQL playground (interactive IDE).
+///
+/// Only available when `ENVIRONMENT=development` is set. Returns 404 otherwise.
 async fn graphql_playground() -> HttpResponse {
+    if std::env::var("ENVIRONMENT").as_deref() != Ok("development") {
+        return HttpResponse::NotFound()
+            .content_type("application/json")
+            .body(r#"{"error":"not found"}"#);
+    }
     let html = playground_source(
         GraphQLPlaygroundConfig::new("/graphql").title("ApexStore GraphQL Playground"),
     );
@@ -567,6 +576,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
         crate::infra::time_travel::TimeTravelEngine::new(100),
     ));
     let sync_manager = web::Data::new(sync::SyncManager::new());
+    let idempotency = web::Data::new(IdempotencyMiddleware::new(Duration::from_secs(3600)));
 
     let cors_enabled = config.cors_enabled;
     let cors_origins = config.cors_origins.clone();
@@ -594,6 +604,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
             .app_data(sync_manager.clone())
             .app_data(access_controller.clone())
             .app_data(access_control_enabled.clone())
+            .app_data(idempotency.clone())
             .configure(configure)
     })
     .max_connections(config.max_connections)

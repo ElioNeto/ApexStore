@@ -4,7 +4,10 @@
 //! Uses the existing CRDT engine for last-writer-wins conflict resolution.
 
 use actix_web::{get, web, HttpRequest, HttpResponse};
+use actix_web::error::InternalError;
 use actix_ws::Message;
+
+use super::auth::{require_permission, Permission};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
@@ -137,6 +140,11 @@ pub async fn sync_handler(
     sync_manager: web::Data<SyncManager>,
     engine: web::Data<crate::LsmEngine>,
 ) -> Result<HttpResponse, actix_web::Error> {
+    // Authentication check — require at least Read permission
+    if let Err(resp) = require_permission(&req, Permission::Read) {
+        return Err(InternalError::from_response("WebSocket auth failed", resp).into());
+    }
+
     let (response, mut session, mut msg_stream) = actix_ws::handle(&req, body)?;
 
     // Create a channel for sending messages to this client

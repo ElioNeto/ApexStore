@@ -47,8 +47,8 @@ impl Default for ServerConfig {
         Self {
             host: "0.0.0.0".to_string(),
             port: 8080,
-            max_json_payload_size: 1 * 1024 * 1024, // 1MB (reduced from 50MB for security)
-            max_raw_payload_size: 1 * 1024 * 1024,  // 1MB (reduced from 50MB for security)
+            max_json_payload_size: 1024 * 1024, // 1MB (reduced from 50MB for security)
+            max_raw_payload_size: 1024 * 1024,  // 1MB (reduced from 50MB for security)
             feature_cache_ttl_secs: 10,
             auth: AuthConfig::default(),
             max_connections: 10_000,
@@ -83,14 +83,14 @@ impl ServerConfig {
             .unwrap_or(8080);
 
         let max_json_payload_size = env::var("MAX_JSON_PAYLOAD_SIZE")
-            .unwrap_or_else(|_| (1 * 1024 * 1024).to_string())
+            .unwrap_or_else(|_| (1024 * 1024).to_string())
             .parse::<usize>()
-            .unwrap_or(1 * 1024 * 1024);
+            .unwrap_or(1024 * 1024);
 
         let max_raw_payload_size = env::var("MAX_RAW_PAYLOAD_SIZE")
-            .unwrap_or_else(|_| (1 * 1024 * 1024).to_string())
+            .unwrap_or_else(|_| (1024 * 1024).to_string())
             .parse::<usize>()
-            .unwrap_or(1 * 1024 * 1024);
+            .unwrap_or(1024 * 1024);
 
         let feature_cache_ttl_secs = env::var("FEATURE_CACHE_TTL")
             .unwrap_or_else(|_| "10".to_string())

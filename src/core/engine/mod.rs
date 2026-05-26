@@ -360,6 +360,8 @@ impl<C: Cache> Engine<C> {
         cdc.config = CdcConfig {
             enabled: true,
             endpoint: None,
+            auth_header: None,
+            timeout_secs: None,
         };
         cdc.publisher = Some(publisher);
     }
