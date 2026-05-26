@@ -222,15 +222,15 @@ impl<'a> TableIterator<'a> {
 }
 
 impl<'a> crate::core::iterators::StorageIterator for TableIterator<'a> {
-    type KeyType = crate::core::key::KeySlice<'a>;
+    type KeyType = Vec<u8>;
 
     fn next(&mut self) {
         self.current = self.inner.next();
     }
     fn key(&self) -> Self::KeyType {
         match self.current {
-            Some((k, _)) => crate::core::key::KeySlice::new(k.as_slice()),
-            None => crate::core::key::KeySlice::new(&[]), // Caller should check is_valid() first
+            Some((k, _)) => k.clone(),
+            None => Vec::new(), // Caller should check is_valid() first
         }
     }
     fn value(&self) -> &[u8] {
@@ -244,7 +244,7 @@ impl<'a> crate::core::iterators::StorageIterator for TableIterator<'a> {
     }
     fn seek(&mut self, _key: &[u8]) {
         // Not strictly required for now, but good to have
-        while self.is_valid() && self.key().as_ref() < _key {
+        while self.is_valid() && self.key().as_slice() < _key {
             self.next();
         }
     }

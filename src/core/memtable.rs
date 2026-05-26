@@ -1,9 +1,9 @@
 use crate::core::log_record::{LogRecord, RangeTombstone};
 use crate::storage::iterator::MemTableIterator;
-use std::collections::BTreeMap;
+use dashmap::DashMap;
 
 pub struct MemTable {
-    pub(crate) data: BTreeMap<Vec<u8>, LogRecord>,
+    pub(crate) data: DashMap<Vec<u8>, LogRecord>,
     pub(crate) size_bytes: usize,
     pub(crate) max_size_bytes: usize,
     /// Active range tombstones that apply to this memtable's data.
@@ -17,7 +17,7 @@ impl MemTable {
     /// `should_flush()` always returns `false`.
     pub fn new(max_size_bytes: usize) -> Self {
         Self {
-            data: BTreeMap::new(),
+            data: DashMap::new(),
             size_bytes: 0,
             max_size_bytes,
             range_tombstones: Vec::new(),
@@ -45,12 +45,13 @@ impl MemTable {
 
     pub fn insert(&mut self, record: LogRecord) {
         let record_size = Self::estimate_size(&record);
-        if let Some(old_record) = self.data.insert(record.key.clone(), record) {
+        let key = record.key.clone();
+        if let Some(old_record) = self.data.insert(key, record) {
             self.size_bytes = self
                 .size_bytes
                 .saturating_sub(Self::estimate_size(&old_record));
         }
-        self.size_bytes += record_size;
+        self.size_bytes = self.size_bytes.saturating_add(record_size);
     }
 
     pub fn should_flush(&self) -> bool {
@@ -58,12 +59,7 @@ impl MemTable {
     }
 
     pub fn get(&self, key: &[u8]) -> Option<LogRecord> {
-        self.data.get(key).cloned()
-    }
-
-    /// Returns a StorageIterator over all entries (backward compatible)
-    pub fn iter_ordered(&self) -> impl Iterator<Item = (&Vec<u8>, &LogRecord)> {
-        self.data.iter()
+        self.data.get(key).map(|r| r.clone())
     }
 
     /// Returns a MemTableIterator starting from the beginning
@@ -78,8 +74,15 @@ impl MemTable {
     ///     iter.next();
     /// }
     /// ```
-    pub fn iter(&self) -> MemTableIterator<'_> {
-        MemTableIterator::new(&self.data)
+    pub fn iter(&self) -> MemTableIterator {
+        // Collect a snapshot sorted by key (DashMap does not guarantee order)
+        let mut entries: Vec<(Vec<u8>, LogRecord)> = self
+            .data
+            .iter()
+            .map(|e| (e.key().clone(), e.value().clone()))
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        MemTableIterator::new(entries)
     }
 
     /// Returns a MemTableIterator starting from a specific key
@@ -95,13 +98,31 @@ impl MemTable {
     ///     iter.next();
     /// }
     /// ```
-    pub fn iter_from(&self, start_key: &[u8]) -> MemTableIterator<'_> {
-        MemTableIterator::new_from(&self.data, start_key)
+    pub fn iter_from(&self, start_key: &[u8]) -> MemTableIterator {
+        // Collect a snapshot filtered by start_key, then sort
+        let mut entries: Vec<(Vec<u8>, LogRecord)> = self
+            .data
+            .iter()
+            .filter(|e| e.key().as_slice() >= start_key)
+            .map(|e| (e.key().clone(), e.value().clone()))
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        MemTableIterator::new(entries)
     }
 
     /// Add a range tombstone covering [start, end).
     pub fn add_range_tombstone(&mut self, range: RangeTombstone) {
         self.range_tombstones.push(range);
+    }
+
+    pub fn iter_ordered(&self) -> impl Iterator<Item = (Vec<u8>, LogRecord)> + '_ {
+        let mut entries: Vec<_> = self
+            .data
+            .iter()
+            .map(|e| (e.key().clone(), e.value().clone()))
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries.into_iter()
     }
 
     /// Check if a key falls within any active range tombstone.
@@ -120,6 +141,18 @@ impl MemTable {
         self.range_tombstones.clear();
         self.size_bytes = 0;
         count
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    pub fn size(&self) -> usize {
+        self.size_bytes
     }
 
     fn estimate_size(record: &LogRecord) -> usize {
