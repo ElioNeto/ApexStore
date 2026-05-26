@@ -265,13 +265,22 @@ impl ServerConfig {
             warnings.push("CORS_ORIGINS is empty - CORS is restrictive (default-deny)".to_string());
         }
         if self.max_json_payload_size > 10 * 1024 * 1024 {
-            warnings.push(format!("MAX_JSON_PAYLOAD_SIZE is {}MB - consider reducing to 1MB", self.max_json_payload_size / 1024 / 1024));
+            warnings.push(format!(
+                "MAX_JSON_PAYLOAD_SIZE is {}MB - consider reducing to 1MB",
+                self.max_json_payload_size / 1024 / 1024
+            ));
         }
         if self.max_raw_payload_size > 10 * 1024 * 1024 {
-            warnings.push(format!("MAX_RAW_PAYLOAD_SIZE is {}MB - consider reducing to 1MB", self.max_raw_payload_size / 1024 / 1024));
+            warnings.push(format!(
+                "MAX_RAW_PAYLOAD_SIZE is {}MB - consider reducing to 1MB",
+                self.max_raw_payload_size / 1024 / 1024
+            ));
         }
-        if self.cdc_endpoint.is_some() && self.cdc_endpoint.as_ref().unwrap().starts_with("http://") {
-            warnings.push("CDC_ENDPOINT uses HTTP (not HTTPS) - data will be sent in plaintext".to_string());
+        if self.cdc_endpoint.is_some() && self.cdc_endpoint.as_ref().unwrap().starts_with("http://")
+        {
+            warnings.push(
+                "CDC_ENDPOINT uses HTTP (not HTTPS) - data will be sent in plaintext".to_string(),
+            );
         }
 
         warnings

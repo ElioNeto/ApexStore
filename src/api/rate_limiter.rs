@@ -107,7 +107,10 @@ impl RateLimiterState {
             return false; // No limit = disabled
         }
 
-        let mut shard = self.shard_for(peer).lock().expect("rate limiter shard lock poisoned");
+        let mut shard = self
+            .shard_for(peer)
+            .lock()
+            .expect("rate limiter shard lock poisoned");
         // Prune entries in this shard
         shard.retain(|_, track| {
             track.prune(window);

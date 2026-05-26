@@ -248,9 +248,10 @@ impl CdcPublisher for WebhookPublisher {
 
         self.failure_count.fetch_add(1, Ordering::Relaxed);
 
-        Err(Box::new(std::io::Error::other(
-            format!("CDC publish failed after 3 retries: {:?}", last_err),
-        )))
+        Err(Box::new(std::io::Error::other(format!(
+            "CDC publish failed after 3 retries: {:?}",
+            last_err
+        ))))
     }
 }
 
@@ -302,16 +303,12 @@ pub fn create_publisher(config: &CdcConfig) -> Option<Box<dyn CdcPublisher>> {
             if let Some(ref auth) = config.auth_header {
                 // Support "Authorization: Bearer <token>" format
                 if let Some((name, value)) = auth.split_once(':') {
-                    publisher = publisher.with_auth(
-                        name.trim().to_string(),
-                        value.trim().to_string(),
-                    );
+                    publisher =
+                        publisher.with_auth(name.trim().to_string(), value.trim().to_string());
                 } else {
                     // Treat as bare bearer token
-                    publisher = publisher.with_auth(
-                        "Authorization".to_string(),
-                        format!("Bearer {}", auth),
-                    );
+                    publisher = publisher
+                        .with_auth("Authorization".to_string(), format!("Bearer {}", auth));
                 }
             }
 

@@ -3,8 +3,8 @@
 //! Provides a WebSocket endpoint at `/ws/sync` for bidirectional sync.
 //! Uses the existing CRDT engine for last-writer-wins conflict resolution.
 
-use actix_web::{get, web, HttpRequest, HttpResponse};
 use actix_web::error::InternalError;
+use actix_web::{get, web, HttpRequest, HttpResponse};
 use actix_ws::Message;
 
 use super::auth::{require_permission, Permission};

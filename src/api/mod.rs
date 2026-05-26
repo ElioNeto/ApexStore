@@ -14,27 +14,26 @@ pub mod timeout_middleware;
 use self::access_control::AccessControl;
 pub use self::auth::{require_permission, Permission, TokenManager};
 pub use self::config::ServerConfig;
-pub use self::graphql::AppSchema;
 use self::connection_guard::IpConnectionGuard;
+pub use self::graphql::AppSchema;
 use self::rate_limiter::{RateLimiter, RateLimiterState};
 use crate::infra::access_control::AccessController;
 use crate::infra::idempotency::IdempotencyMiddleware;
 use crate::LsmEngine;
-use actix_web::{
-    body::MessageBody,
-    delete, get, post, put,
-    web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder,
-};
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
-use std::future::{ready, Ready};
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use actix_web::{
+    body::MessageBody, delete, get, post, put, web, App, Error, HttpRequest, HttpResponse,
+    HttpServer, Responder,
+};
 use actix_web_httpauth::middleware::HttpAuthentication;
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use async_graphql_actix_web::{GraphQLRequest, GraphQLResponse};
 use serde::Deserialize;
 use serde_json::json;
+use std::future::{ready, Ready};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 /// Maximum number of records accepted in a single batch insert request.
@@ -411,16 +410,14 @@ async fn get_stats_all(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl R
             .insert_header(("Deprecation", "true"))
             .insert_header(("Sunset", "Sat, 31 Dec 2026 23:59:59 GMT"))
             .content_type("application/json")
-            .json(
-                json!({ "success": true, "data": {
-                    "mem_records": stats.mem_records,
-                    "mem_kb": stats.mem_kb,
-                    "sst_kb": stats.sst_kb,
-                    "sst_files": stats.sst_files,
-                    "wal_kb": stats.wal_kb,
-                    "total_records": stats.total_records,
-                }}),
-            ),
+            .json(json!({ "success": true, "data": {
+                "mem_records": stats.mem_records,
+                "mem_kb": stats.mem_kb,
+                "sst_kb": stats.sst_kb,
+                "sst_files": stats.sst_files,
+                "wal_kb": stats.wal_kb,
+                "total_records": stats.total_records,
+            }})),
         Err(e) => {
             tracing::error!(target: "apexstore::api", "Failed to get stats/all: {:?}", e);
             HttpResponse::InternalServerError()
@@ -615,17 +612,17 @@ async fn scan_keys(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Respo
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(get_keys)
         // Specific key-list endpoints — register before /keys/{key}
-        .service(search_keys)   // GET /keys/search
-        .service(batch_keys)    // POST /keys/batch
+        .service(search_keys) // GET /keys/search
+        .service(batch_keys) // POST /keys/batch
         // Parameterised key endpoints — must come after specific /keys/* routes
-        .service(get_key)       // GET /keys/{key}
-        .service(put_key)       // PUT /keys/{key}
-        .service(delete_key)    // DELETE /keys/{key}
-        .service(post_key)      // POST /keys
-        .service(scan_keys)     // GET /scan
+        .service(get_key) // GET /keys/{key}
+        .service(put_key) // PUT /keys/{key}
+        .service(delete_key) // DELETE /keys/{key}
+        .service(post_key) // POST /keys
+        .service(scan_keys) // GET /scan
         // Metrics and stats
-        .service(get_metrics)   // GET /metrics
-        .service(get_stats)     // GET /stats
+        .service(get_metrics) // GET /metrics
+        .service(get_stats) // GET /stats
         .service(get_stats_all) // GET /stats/all
         // Admin endpoints
         .service(admin_flush)

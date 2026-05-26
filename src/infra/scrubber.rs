@@ -474,9 +474,9 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let mut builder = SstableBuilder::new_with_encryption(
-            sst_path.clone(), config, timestamp, &enc_config,
-        ).unwrap();
+        let mut builder =
+            SstableBuilder::new_with_encryption(sst_path.clone(), config, timestamp, &enc_config)
+                .unwrap();
 
         builder
             .add(
@@ -524,9 +524,9 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let mut builder = SstableBuilder::new_with_encryption(
-            sst_path.clone(), config, timestamp, &enc_config,
-        ).unwrap();
+        let mut builder =
+            SstableBuilder::new_with_encryption(sst_path.clone(), config, timestamp, &enc_config)
+                .unwrap();
 
         builder
             .add(

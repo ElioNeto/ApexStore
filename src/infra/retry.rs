@@ -133,7 +133,9 @@ mod tests {
     #[tokio::test]
     async fn test_retry_succeeds_on_first_attempt() {
         let config = RetryConfig::default();
-        let result = config.retry_with_backoff(|_| async { Ok::<_, &str>(42) }).await;
+        let result = config
+            .retry_with_backoff(|_| async { Ok::<_, &str>(42) })
+            .await;
         assert_eq!(result.unwrap(), 42);
     }
 
@@ -178,9 +180,7 @@ mod tests {
     #[tokio::test]
     async fn test_zero_retries() {
         let config = RetryConfig::new(0, 5, 100);
-        let result: Result<(), &str> = config
-            .retry_with_backoff(|_| async { Err("fail") })
-            .await;
+        let result: Result<(), &str> = config.retry_with_backoff(|_| async { Err("fail") }).await;
         assert!(result.is_err());
     }
 

@@ -34,7 +34,7 @@ use crate::core::memtable::MemTable;
 
 pub const DEFAULT_SCAN_LIMIT: usize = 128;
 pub const MAX_SCAN_LIMIT: usize = 1024;
-pub const MAX_KEY_SIZE: usize = 4096;              // 4KB max key size
+pub const MAX_KEY_SIZE: usize = 4096; // 4KB max key size
 pub const MAX_VALUE_SIZE: usize = 16 * 1024 * 1024; // 16MB max value size
 
 #[derive(Debug, Clone, Default)]
@@ -790,18 +790,18 @@ impl<C: Cache> Engine<C> {
     ) -> Result<()> {
         // Validate key and value sizes before any WAL operations
         if key.len() > MAX_KEY_SIZE {
-            return Err(crate::infra::error::LsmError::InvalidArgument(
-                format!("key size {} exceeds maximum of {}", key.len(), MAX_KEY_SIZE),
-            ));
+            return Err(crate::infra::error::LsmError::InvalidArgument(format!(
+                "key size {} exceeds maximum of {}",
+                key.len(),
+                MAX_KEY_SIZE
+            )));
         }
         if value.len() > MAX_VALUE_SIZE {
-            return Err(crate::infra::error::LsmError::InvalidArgument(
-                format!(
-                    "value size {} exceeds maximum of {}",
-                    value.len(),
-                    MAX_VALUE_SIZE
-                ),
-            ));
+            return Err(crate::infra::error::LsmError::InvalidArgument(format!(
+                "value size {} exceeds maximum of {}",
+                value.len(),
+                MAX_VALUE_SIZE
+            )));
         }
 
         let start = std::time::Instant::now();
@@ -1594,7 +1594,8 @@ impl<C: Cache> Engine<C> {
         let mut core = self.core.lock();
         let result = compact_cf_core(&mut core, &self.options, cf);
         if let Ok(Some(metrics)) = &result {
-            self.backpressure.record_compaction_progress(metrics.bytes_written);
+            self.backpressure
+                .record_compaction_progress(metrics.bytes_written);
         }
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_compaction(elapsed_us);

@@ -236,9 +236,8 @@ impl EngineMetrics {
     /// (total SST bytes read) / max(user gets + scans, 1)
     pub fn read_amplification(&self) -> f64 {
         let sstable_reads = self.total_sstable_bytes_read.load(Ordering::Relaxed) as f64;
-        let user_ops = (self.gets.load(Ordering::Relaxed)
-            + self.scans.load(Ordering::Relaxed))
-            .max(1) as f64;
+        let user_ops =
+            (self.gets.load(Ordering::Relaxed) + self.scans.load(Ordering::Relaxed)).max(1) as f64;
         sstable_reads / user_ops
     }
 

@@ -49,7 +49,10 @@ impl IpConnectionGuard {
 
     /// Try to acquire a connection slot for `ip` with an explicit max (used by tests).
     pub fn try_acquire_with_max(&self, ip: &str, max_per_ip: usize) -> bool {
-        let mut map = self.connections.lock().expect("IpConnectionGuard lock poisoned");
+        let mut map = self
+            .connections
+            .lock()
+            .expect("IpConnectionGuard lock poisoned");
         let count = map.entry(ip.to_string()).or_insert(0);
         if *count >= max_per_ip {
             return false;
@@ -67,7 +70,10 @@ impl IpConnectionGuard {
     ///
     /// Must be called exactly once for every successful [`try_acquire`](Self::try_acquire).
     pub fn release(&self, ip: &str) {
-        let mut map = self.connections.lock().expect("IpConnectionGuard lock poisoned");
+        let mut map = self
+            .connections
+            .lock()
+            .expect("IpConnectionGuard lock poisoned");
         if let Some(count) = map.get_mut(ip) {
             *count = count.saturating_sub(1);
             if *count == 0 {
