@@ -32,6 +32,8 @@ use crate::core::memtable::MemTable;
 
 pub const DEFAULT_SCAN_LIMIT: usize = 128;
 pub const MAX_SCAN_LIMIT: usize = 1024;
+pub const MAX_KEY_SIZE: usize = 4096;              // 4KB max key size
+pub const MAX_VALUE_SIZE: usize = 16 * 1024 * 1024; // 16MB max value size
 
 #[derive(Debug, Clone, Default)]
 pub struct LsmStats {
@@ -744,6 +746,22 @@ impl<C: Cache> Engine<C> {
         value: Vec<u8>,
         ttl: Option<std::time::Duration>,
     ) -> Result<()> {
+        // Validate key and value sizes before any WAL operations
+        if key.len() > MAX_KEY_SIZE {
+            return Err(crate::infra::error::LsmError::InvalidArgument(
+                format!("key size {} exceeds maximum of {}", key.len(), MAX_KEY_SIZE),
+            ));
+        }
+        if value.len() > MAX_VALUE_SIZE {
+            return Err(crate::infra::error::LsmError::InvalidArgument(
+                format!(
+                    "value size {} exceeds maximum of {}",
+                    value.len(),
+                    MAX_VALUE_SIZE
+                ),
+            ));
+        }
+
         let start = std::time::Instant::now();
         let key_str = String::from_utf8_lossy(&key).into_owned();
         let value_size = value.len();

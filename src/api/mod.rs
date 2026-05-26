@@ -26,6 +26,9 @@ use serde::Deserialize;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 
+/// Maximum number of records accepted in a single batch insert request.
+pub const MAX_BATCH_SIZE: usize = 1000;
+
 /// Query parameters for `GET /keys`
 #[derive(Deserialize)]
 pub struct KeysQuery {
@@ -412,6 +415,11 @@ async fn batch_keys(
     if let Err(e) = require_permission(&req, Permission::Write) {
         return e;
     }
+    if body.records.len() > MAX_BATCH_SIZE {
+        return HttpResponse::BadRequest()
+            .content_type("application/json")
+            .json(json!({ "success": false, "message": format!("batch size {} exceeds maximum of {}", body.records.len(), MAX_BATCH_SIZE) }));
+    }
     let mut count = 0;
     for record in &body.records {
         if engine
@@ -436,18 +444,12 @@ async fn scan_keys(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Respo
     if let Err(e) = require_permission(&req, Permission::Read) {
         return e;
     }
-    match engine.keys() {
-        Ok(keys) => {
-            let records: Vec<serde_json::Value> = keys
+    let max_limit = 1000; // reasonable limit to prevent OOM
+    match engine.scan_cf("default", None, None, Some(max_limit)) {
+        Ok(records) => {
+            let records: Vec<serde_json::Value> = records
                 .into_iter()
-                .filter_map(|k| {
-                    let key_str = String::from_utf8_lossy(&k).to_string();
-                    engine
-                        .get_cf("default", key_str.as_bytes())
-                        .ok()
-                        .flatten()
-                        .map(|v| json!({ "key": key_str, "value": String::from_utf8_lossy(&v) }))
-                })
+                .map(|(k, v)| json!({ "key": String::from_utf8_lossy(&k), "value": String::from_utf8_lossy(&v) }))
                 .collect();
             HttpResponse::Ok()
                 .content_type("application/json")
@@ -553,8 +555,10 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     }
 
     let engine_data = web::Data::from(engine.clone());
-    let rate_limiter_state =
-        web::Data::new(RateLimiterState::new(config.rate_limit_requests_per_minute));
+    let mut rl_state = RateLimiterState::new(config.rate_limit_requests_per_minute);
+    rl_state.set_endpoint_limit("/admin/compact", 5);
+    rl_state.set_endpoint_limit("/admin/flush", 5);
+    let rate_limiter_state = web::Data::new(rl_state);
     let token_manager = web::Data::new(TokenManager::new_with_engine(engine.clone()));
     let auth_enabled = web::Data::new(config.auth.enabled);
     let graphql_schema = web::Data::new(graphql::build_schema(engine.clone()));
