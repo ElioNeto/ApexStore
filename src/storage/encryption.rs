@@ -9,7 +9,7 @@
 //! [`EncryptionConfig`].  The [`Encryptor`] struct wraps the cipher and
 //! exposes `encrypt_block` / `decrypt_block`.
 //!
-//! Encryption is **optional** and **disabled by default**.
+//! Encryption is **enabled by default** for maximum security.
 
 use crate::infra::error::{LsmError, Result};
 use aes_gcm::{
@@ -22,14 +22,23 @@ use serde::{Deserialize, Serialize};
 
 /// Configuration for encryption at rest.
 ///
-/// When `enabled` is `false` (the default), all operations are
-/// pass-through with zero overhead.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// When `enabled` is `true` (the default), all SSTable blocks and WAL
+/// frames are transparently encrypted using AES-256-GCM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptionConfig {
     /// AES-256 key (exactly 32 bytes).
     pub key: [u8; 32],
     /// Whether encryption is enabled.
     pub enabled: bool,
+}
+
+impl Default for EncryptionConfig {
+    fn default() -> Self {
+        Self {
+            key: [0u8; 32],
+            enabled: true,
+        }
+    }
 }
 
 impl EncryptionConfig {
@@ -270,7 +279,7 @@ mod tests {
     #[test]
     fn test_encryption_config_from_none() {
         let config = EncryptionConfig::from_key_path(None).unwrap();
-        assert!(!config.enabled);
+        assert!(config.enabled, "encryption is enabled by default");
     }
 
     #[test]

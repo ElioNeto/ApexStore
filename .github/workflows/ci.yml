@@ -27,6 +27,14 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Run cargo audit
+        run: cargo audit
+
   report-status:
     if: always()
     needs: [validate-workflows, audit]

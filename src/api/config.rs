@@ -241,4 +241,29 @@ impl ServerConfig {
         );
         println!();
     }
+
+    /// Validate configuration and return a list of warning messages
+    /// for missing or insecure settings.
+    pub fn validate(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        // Check for missing or insecure configurations
+        if !self.auth.enabled {
+            warnings.push("API_AUTH_ENABLED is disabled - authentication is off".to_string());
+        }
+        if self.cors_origins.is_none() && self.cors_enabled {
+            warnings.push("CORS_ORIGINS is empty - CORS is restrictive (default-deny)".to_string());
+        }
+        if self.max_json_payload_size > 10 * 1024 * 1024 {
+            warnings.push(format!("MAX_JSON_PAYLOAD_SIZE is {}MB - consider reducing to 1MB", self.max_json_payload_size / 1024 / 1024));
+        }
+        if self.max_raw_payload_size > 10 * 1024 * 1024 {
+            warnings.push(format!("MAX_RAW_PAYLOAD_SIZE is {}MB - consider reducing to 1MB", self.max_raw_payload_size / 1024 / 1024));
+        }
+        if self.cdc_endpoint.is_some() && self.cdc_endpoint.as_ref().unwrap().starts_with("http://") {
+            warnings.push("CDC_ENDPOINT uses HTTP (not HTTPS) - data will be sent in plaintext".to_string());
+        }
+
+        warnings
+    }
 }

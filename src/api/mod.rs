@@ -18,8 +18,14 @@ use crate::infra::access_control::AccessController;
 use crate::infra::idempotency::IdempotencyMiddleware;
 use crate::LsmEngine;
 use actix_web::{
-    delete, get, post, put, web, App, HttpRequest, HttpResponse, HttpServer, Responder,
+    body::MessageBody,
+    delete, get, post, put,
+    web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder,
 };
+use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
+use std::future::{ready, Ready};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use actix_web_httpauth::middleware::HttpAuthentication;
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use async_graphql_actix_web::{GraphQLRequest, GraphQLResponse};
@@ -506,6 +512,72 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .service(sync::sync_handler);
 }
 
+/// Middleware that ensures mutating requests have a JSON content type,
+/// preventing simple CSRF attacks via form-encoded submissions.
+///
+/// CSRF is not a primary concern for this API since we use Bearer token
+/// authentication (not session cookies), which is inherently immune to
+/// CSRF. This guard provides defense-in-depth for mutating endpoints.
+struct ContentTypeGuard;
+
+impl<S, B> Transform<S, ServiceRequest> for ContentTypeGuard
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: MessageBody + 'static,
+{
+    type Transform = ContentTypeGuardMiddleware<S>;
+    type InitError = ();
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(ContentTypeGuardMiddleware { service }))
+    }
+}
+
+struct ContentTypeGuardMiddleware<S> {
+    service: S,
+}
+
+impl<S, B> Service<ServiceRequest> for ContentTypeGuardMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        // Only check mutating methods
+        if req.method() == actix_web::http::Method::PUT
+            || req.method() == actix_web::http::Method::POST
+            || req.method() == actix_web::http::Method::DELETE
+        {
+            let content_type = req
+                .headers()
+                .get(actix_web::http::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+
+            // Allow only JSON content types for mutating requests
+            if !content_type.starts_with("application/json") {
+                return Box::pin(ready(Err(actix_web::error::ErrorUnsupportedMediaType(
+                    "Content-Type must be application/json for mutating requests",
+                ))));
+            }
+        }
+        Box::pin(self.service.call(req))
+    }
+}
+
 /// Build CORS middleware from configuration.
 /// When disabled, returns a restrictive CORS policy that blocks all cross-origin
 /// requests (default-deny). When enabled, either allows specific origins or all
@@ -556,6 +628,11 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     tracing::info!(target: "apexstore::api", "Starting server at {}:{}", host, port);
     println!("Starting server at http://{}:{}", host, port);
 
+    // Validate configuration and log warnings
+    for warning in config.validate() {
+        tracing::warn!(target: "apexstore::api", "Configuration warning: {}", warning);
+    }
+
     // Configure CDC if an endpoint was provided
     if let Some(ref endpoint) = config.cdc_endpoint {
         let cdc_config = crate::infra::cdc::CdcConfig::with_endpoint(endpoint.clone());
@@ -586,7 +663,12 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     let access_control_enabled = web::Data::new(config.access_control_enabled);
 
     let mut server_builder = HttpServer::new(move || {
+        // CSRF protection is handled by the Bearer token authentication middleware.
+        // Since the API uses stateless token auth (not session cookies), it is
+        // inherently immune to CSRF attacks. The ContentTypeGuard below provides
+        // defense-in-depth by rejecting non-JSON content types on mutating requests.
         let app = App::new()
+            .wrap(self::ContentTypeGuard)
             .wrap(self::timeout_middleware::RequestTimeout)
             .wrap(RateLimiter)
             .wrap(AccessControl)

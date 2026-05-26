@@ -118,6 +118,12 @@ pub struct WriteAheadLog {
     batch_count: Mutex<usize>,
     /// Optional encryptor for transparent WAL frame encryption.
     encryptor: Encryptor,
+    /// Number of `write_record` calls between fsyncs.
+    ///
+    /// Defaults to [`WAL_SYNC_INTERVAL`] (4).  A value of 1 means every
+    /// write fsyncs (maximum durability).  Higher values improve write
+    /// throughput at the cost of a wider durability window.
+    pub sync_interval: usize,
 }
 
 /// How many `write_record` calls to accumulate before issuing an fsync.
@@ -125,7 +131,12 @@ pub struct WriteAheadLog {
 /// A value of 1 means every write fsyncs (maximum durability).
 /// Higher values improve write throughput at the cost of a wider
 /// durability window in the event of a crash.
-const WAL_SYNC_INTERVAL: usize = 4;
+///
+/// This is the default used by [`WriteAheadLog`] when no explicit
+/// interval is configured.  Callers can override it per-instance via
+/// [`WriteAheadLog::set_sync_interval`] or by assigning to the public
+/// [`WriteAheadLog::sync_interval`] field directly.
+pub const WAL_SYNC_INTERVAL: usize = 4;
 
 const MAX_WAL_RECORD_BYTES: usize = 32 * 1024 * 1024; // 32 MiB
 
@@ -162,14 +173,24 @@ impl WriteAheadLog {
             path: wal_path,
             batch_count: Mutex::new(0),
             encryptor: Encryptor::new(encryption),
+            sync_interval: WAL_SYNC_INTERVAL,
         })
+    }
+
+    /// Set the number of `write_record` calls between fsyncs.
+    ///
+    /// A value of 1 means every write fsyncs (maximum durability).
+    /// Higher values improve write throughput at the cost of a wider
+    /// durability window in the event of a crash.
+    pub fn set_sync_interval(&mut self, interval: usize) {
+        self.sync_interval = interval;
     }
 
     /// Append a single record to the WAL with batched fsync.
     ///
     /// Instead of fsyncing after every write (which limits throughput to
     /// ~1 100 ops/s on typical hardware), the method accumulates
-    /// [`WAL_SYNC_INTERVAL`] records before issuing an fsync.  Callers
+    /// [`Self::sync_interval`] records before issuing an fsync.  Callers
     /// that need strict durability after every operation should use
     /// [`WriteAheadLog::sync()`] explicitly.
     ///
@@ -211,10 +232,10 @@ impl WriteAheadLog {
         writer.write_all(&checksum.to_le_bytes())?;
         writer.flush()?;
 
-        // Accumulate writes and fsync only every WAL_SYNC_INTERVAL calls.
+        // Accumulate writes and fsync only every `self.sync_interval` calls.
         let mut count = self.batch_count.lock();
         *count += 1;
-        if *count >= WAL_SYNC_INTERVAL {
+        if *count >= self.sync_interval {
             *count = 0;
             // Drop the batch lock before fsync so we don't hold two locks.
             drop(count);
@@ -744,7 +765,7 @@ impl WriteAheadLog {
 ///
 /// ## Why this is necessary
 ///
-/// The batched WAL fsync (`WAL_SYNC_INTERVAL = 4`) delays `sync_all()` across
+/// The batched WAL fsync (default [`WAL_SYNC_INTERVAL`]) delays `sync_all()` across
 /// multiple `write_record()` calls.  If a key is written multiple times (e.g.
 /// `k=v1`, `k=v2`, `k=v3`) and only 1 out of 3 fsyncs completes before a crash,
 /// the WAL might contain `k=v1` but not `k=v2` or `k=v3`.  Without deduplication,
