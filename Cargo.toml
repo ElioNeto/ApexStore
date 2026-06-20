@@ -1,6 +1,6 @@
 [package]
 name = "apex-store-rs"
-version = "2.1.71"
+version = "2.2.0"
 edition = "2021"
 authors = ["Elio Neto <netoo.elio@hotmail.com>"]
 license = "MIT"
@@ -96,6 +96,8 @@ sqlparser = "0.45"
 jsonschema = "0.18"
 actix-ws = "0.3"
 dashmap = "6"
+regex-lite = "0.1"
+futures = "0.3"
 
 [dev-dependencies]
 tempfile = "3.24"

@@ -4,6 +4,7 @@ pub mod audit_middleware;
 pub mod auth;
 pub mod config;
 pub mod connection_guard;
+pub mod events;
 pub mod graphql;
 pub mod health;
 pub mod notes;
@@ -18,11 +19,14 @@ use self::connection_guard::IpConnectionGuard;
 pub use self::graphql::AppSchema;
 use self::rate_limiter::{RateLimiter, RateLimiterState};
 use crate::infra::access_control::AccessController;
+use crate::infra::cdc::CdcPublisher;
 use crate::infra::idempotency::IdempotencyMiddleware;
+use crate::core::engine::transaction::Transaction;
+use crate::storage::cache::GlobalBlockCache;
 use crate::LsmEngine;
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
 use actix_web::{
-    body::MessageBody, delete, get, post, put, web, App, Error, HttpRequest, HttpResponse,
+    body::MessageBody, delete, get, patch, post, put, web, App, Error, HttpRequest, HttpResponse,
     HttpServer, Responder,
 };
 use actix_web_httpauth::middleware::HttpAuthentication;
@@ -30,11 +34,53 @@ use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use async_graphql_actix_web::{GraphQLRequest, GraphQLResponse};
 use serde::Deserialize;
 use serde_json::json;
+use std::collections::HashMap;
 use std::future::{ready, Ready};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
+
+// ── Transaction management ──────────────────────────────────────────────────
+
+/// Manages active transactions for the REST API.
+pub struct TransactionManager {
+    /// Map from numeric transaction ID to active transaction.
+    pub transactions: Mutex<HashMap<u64, Transaction<Arc<GlobalBlockCache>>>>,
+    /// Counter for generating transaction IDs.
+    next_id: AtomicU64,
+}
+
+impl Default for TransactionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TransactionManager {
+    pub fn new() -> Self {
+        Self {
+            transactions: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(1),
+        }
+    }
+
+    /// Begin a new transaction and return its numeric ID.
+    pub fn begin(&self, engine: &LsmEngine) -> u64 {
+        let txn = engine.begin_transaction();
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let mut map = self.transactions.lock().unwrap();
+        map.insert(id, txn);
+        id
+    }
+
+    /// Remove and return a transaction by ID (for operations that need to mutate it).
+    /// This is used for put/delete operations that consume the transaction.
+    pub fn take(&self, id: u64) -> Option<Transaction<Arc<GlobalBlockCache>>> {
+        self.transactions.lock().unwrap().remove(&id)
+    }
+}
 
 /// Maximum number of records accepted in a single batch insert request.
 pub const MAX_BATCH_SIZE: usize = 1000;
@@ -44,13 +90,63 @@ pub const MAX_BATCH_SIZE: usize = 1000;
 pub struct KeysQuery {
     prefix: Option<String>,
     limit: Option<usize>,
+    /// Query string (used by frontend for prefix search).
+    #[allow(dead_code)]
     q: Option<String>,
+    /// Cursor for paginated results (returned by previous response).
+    cursor: Option<String>,
 }
+
+/// Query parameters for `GET /keys/search` with search mode.
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    /// Search query string (for prefix/contains/suffix/regex modes)
+    q: Option<String>,
+    /// Search mode: "prefix" (default), "contains", "suffix", "regex"
+    mode: Option<String>,
+    limit: Option<usize>,
+    cursor: Option<String>,
+    prefix: Option<String>,
+}
+
+/// Query parameters for `GET /keys/value-search`.
+#[derive(Deserialize)]
+pub struct ValueSearchQuery {
+    q: Option<String>,
+    limit: Option<usize>,
+}
+
+/// Query parameters for `GET /scan` with pagination and range bounds.
+#[derive(Deserialize)]
+pub struct ScanQuery {
+    /// Lower bound (inclusive when include_lower is true)
+    lower: Option<String>,
+    /// Upper bound (exclusive when include_upper is false)
+    upper: Option<String>,
+    /// Maximum number of results (default 100, max MAX_SCAN_LIMIT)
+    limit: Option<usize>,
+    /// Cursor for paginated results
+    cursor: Option<String>,
+    /// Whether the lower bound is inclusive (default true)
+    #[allow(dead_code)]
+    #[serde(default = "default_true")]
+    include_lower: bool,
+    /// Whether the upper bound is inclusive (default false)
+    #[allow(dead_code)]
+    #[serde(default)]
+    include_upper: bool,
+}
+
+#[allow(dead_code)]
+fn default_true() -> bool { true }
 
 /// Request body for `PUT /keys/{key}`
 #[derive(Deserialize)]
 pub struct SetBody {
     value: String,
+    /// Optional TTL in seconds. When set, the key will auto-expire.
+    #[serde(default)]
+    pub ttl_secs: Option<u64>,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────
@@ -115,17 +211,26 @@ async fn put_key(
             .json(json!({ "error": "key too long" }));
     }
 
-    match engine.put_cf(
-        "default",
-        key.as_bytes().to_vec(),
-        body.value.as_bytes().to_vec(),
-    ) {
+    let ttl = body.ttl_secs.map(std::time::Duration::from_secs);
+
+    let result = if let Some(ttl) = ttl {
+        engine.set_cf_with_ttl("default", key.as_bytes().to_vec(), body.value.as_bytes().to_vec(), ttl)
+    } else {
+        engine.put_cf(
+            "default",
+            key.as_bytes().to_vec(),
+            body.value.as_bytes().to_vec(),
+        )
+    };
+
+    match result {
         Ok(_) => {
             tracing::info!(
                 target: "apexstore::audit",
-                "PUT key={} size={}",
+                "PUT key={} size={} ttl_secs={:?}",
                 key,
-                body.value.len()
+                body.value.len(),
+                body.ttl_secs
             );
             HttpResponse::Ok()
                 .content_type("application/json")
@@ -133,6 +238,219 @@ async fn put_key(
         }
         Err(e) => {
             tracing::error!(target: "apexstore::api", "Failed to set key: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// Handler for `GET /keys/{key}/ttl` — get remaining TTL for a key.
+#[get("/keys/{key}/ttl")]
+async fn get_key_ttl(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    path: web::Path<String>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Read) {
+        return e;
+    }
+    let key = path.into_inner();
+
+    // Check if key exists
+    match engine.get_cf("default", key.as_bytes()) {
+        Ok(Some(_value)) => {
+            // Look up TTL metadata: __ttl:{key}
+            let ttl_key = format!("__ttl:{}", key);
+            match engine.get_cf("default", ttl_key.as_bytes()) {
+                Ok(Some(ttl_raw)) if ttl_raw.len() == 16 => {
+                    let expires_at = u128::from_le_bytes(
+                        ttl_raw.as_slice().try_into().unwrap_or(u128::MAX.to_le_bytes()),
+                    );
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    if now >= expires_at {
+                        return HttpResponse::Ok()
+                            .content_type("application/json")
+                            .json(json!({ "key": key, "ttl_secs": 0, "expired": true }));
+                    }
+                    let remaining_ns = expires_at - now;
+                    let remaining_secs = remaining_ns / 1_000_000_000;
+                    HttpResponse::Ok()
+                        .content_type("application/json")
+                        .json(json!({ "key": key, "ttl_secs": remaining_secs as u64, "expired": false }))
+                }
+                _ => {
+                    // Key exists but no TTL metadata → no expiry
+                    HttpResponse::Ok()
+                        .content_type("application/json")
+                        .json(json!({ "key": key, "ttl_secs": null, "expired": false }))
+                }
+            }
+        }
+        Ok(None) => HttpResponse::NotFound()
+            .content_type("application/json")
+            .json(json!({ "error": "key not found" })),
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to get key: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// Handler for `PATCH /keys/{key}/ttl` — update TTL on an existing key.
+#[patch("/keys/{key}/ttl")]
+async fn update_key_ttl(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    path: web::Path<String>,
+    body: web::Json<TtlUpdateBody>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Write) {
+        return e;
+    }
+
+    // Reject writes when engine is in read-only mode
+    if let Err(msg) = engine.degradation.check_write_allowed() {
+        return HttpResponse::ServiceUnavailable()
+            .content_type("application/json")
+            .json(json!({ "error": msg }));
+    }
+
+    let key = path.into_inner();
+
+    // Read existing value
+    let value = match engine.get_cf("default", key.as_bytes()) {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .content_type("application/json")
+                .json(json!({ "error": "key not found" }));
+        }
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to get key: {:?}", e);
+            return HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }));
+        }
+    };
+
+    // Re-write with new TTL
+    let ttl = std::time::Duration::from_secs(body.ttl_secs);
+    match engine.set_cf_with_ttl("default", key.as_bytes().to_vec(), value, ttl) {
+        Ok(_) => {
+            tracing::info!(
+                target: "apexstore::audit",
+                "UPDATE TTL key={} ttl_secs={}",
+                key,
+                body.ttl_secs
+            );
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({ "status": "ok", "key": key, "ttl_secs": body.ttl_secs }))
+        }
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to update TTL: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// Handler for `POST /keys/batch/delete` — delete a batch of specific keys.
+#[post("/keys/batch/delete")]
+async fn batch_delete_keys(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    body: web::Json<BatchDeleteBody>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Delete) {
+        return e;
+    }
+
+    // Reject writes when engine is in read-only mode
+    if let Err(msg) = engine.degradation.check_write_allowed() {
+        return HttpResponse::ServiceUnavailable()
+            .content_type("application/json")
+            .json(json!({ "error": msg }));
+    }
+
+    if body.keys.is_empty() {
+        return HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "deleted_count": 0 }));
+    }
+
+    let count = body.keys.len();
+    match engine.delete_batch_cf("default", &body.keys.iter().map(|k| k.as_bytes()).collect::<Vec<_>>()) {
+        Ok(_) => {
+            tracing::info!(
+                target: "apexstore::audit",
+                "BATCH DELETE {} keys",
+                count
+            );
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({ "deleted_count": count }))
+        }
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to batch delete keys: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// Handler for `DELETE /keys?prefix=...` — delete all keys matching a prefix.
+#[delete("/keys")]
+async fn delete_keys_by_prefix(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    query: web::Query<KeysQuery>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Delete) {
+        return e;
+    }
+
+    // Reject writes when engine is in read-only mode
+    if let Err(msg) = engine.degradation.check_write_allowed() {
+        return HttpResponse::ServiceUnavailable()
+            .content_type("application/json")
+            .json(json!({ "error": msg }));
+    }
+
+    let prefix = match query.prefix {
+        Some(ref p) if !p.is_empty() => p.clone(),
+        _ => {
+            return HttpResponse::BadRequest()
+                .content_type("application/json")
+                .json(json!({ "error": "prefix query parameter is required" }));
+        }
+    };
+
+    // Calculate upper bound for prefix
+    let upper_bound = crate::core::engine::Engine::<crate::storage::cache::GlobalBlockCache>::prefix_end(&prefix);
+
+    // Use range tombstone for efficient prefix deletion
+    match engine.delete_range_cf("default", prefix.as_bytes(), upper_bound.as_deref().unwrap_or(b"")) {
+        Ok(_) => {
+            tracing::info!(
+                target: "apexstore::audit",
+                "DELETE keys by prefix={}",
+                prefix
+            );
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({ "status": "ok", "prefix": prefix }))
+        }
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to delete keys by prefix: {:?}", e);
             HttpResponse::InternalServerError()
                 .content_type("application/json")
                 .json(json!({ "error": "internal server error" }))
@@ -179,7 +497,7 @@ async fn delete_key(
     }
 }
 
-/// Handler for `GET /keys` — list keys with optional prefix and limit.
+/// Handler for `GET /keys` — list keys with optional prefix, cursor, lower/upper bounds, and limit.
 #[get("/keys")]
 async fn get_keys(
     req: HttpRequest,
@@ -194,8 +512,10 @@ async fn get_keys(
         .unwrap_or(100)
         .min(crate::core::engine::MAX_SCAN_LIMIT);
 
-    let result = if let Some(ref prefix) = query.prefix {
-        let (results, _cursor) = match engine.search_prefix(prefix, None, limit) {
+    let cursor = query.cursor.as_deref();
+
+    if let Some(ref prefix) = query.prefix {
+        let (results, new_cursor) = match engine.search_prefix(prefix, cursor, limit) {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!(target: "apexstore::api", "Failed to search prefix: {:?}", e);
@@ -208,29 +528,104 @@ async fn get_keys(
             .into_iter()
             .map(|(k, _)| String::from_utf8_lossy(&k).to_string())
             .collect();
-        serde_json::to_value(&keys).unwrap_or_default()
-    } else {
-        match engine.keys() {
-            Ok(keys) => {
-                let limited: Vec<String> = keys
-                    .into_iter()
-                    .take(limit)
-                    .map(|k| String::from_utf8_lossy(&k).to_string())
-                    .collect();
-                serde_json::to_value(&limited).unwrap_or_default()
-            }
-            Err(e) => {
-                tracing::error!(target: "apexstore::api", "Failed to fetch keys: {:?}", e);
-                return HttpResponse::InternalServerError()
-                    .content_type("application/json")
-                    .json(json!({ "error": "internal server error" }));
-            }
+        return HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "keys": keys, "cursor": new_cursor }));
+    }
+
+    match engine.keys() {
+        Ok(keys) => {
+            let limited: Vec<String> = keys
+                .into_iter()
+                .take(limit)
+                .map(|k| String::from_utf8_lossy(&k).to_string())
+                .collect();
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({ "keys": limited }))
         }
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to fetch keys: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// Handler for `GET /keys/range` — composite key range query with cursor pagination.
+#[get("/keys/range")]
+async fn keys_range(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    query: web::Query<ScanQuery>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Read) {
+        return e;
+    }
+    let limit = query
+        .limit
+        .unwrap_or(100)
+        .min(crate::core::engine::MAX_SCAN_LIMIT);
+
+    // Determine lower bound: cursor takes precedence, then explicit lower
+    let lower: Option<Vec<u8>> = if let Some(ref cursor) = query.cursor {
+        Some(cursor.as_bytes().to_vec())
+    } else {
+        query.lower.as_ref().map(|s| s.as_bytes().to_vec())
     };
 
-    HttpResponse::Ok()
-        .content_type("application/json")
-        .json(json!({ "keys": result }))
+    // Adjust bounds for inclusivity
+    let adjusted_lower: Option<&[u8]> = lower.as_deref();
+    let adjusted_upper: Option<&[u8]> = query.upper.as_ref().map(|s| s.as_bytes());
+
+    // Request extra records to detect if there are more results
+    let scan_limit = limit + 1;
+
+    match engine.scan_cf("default", adjusted_lower, adjusted_upper, Some(scan_limit)) {
+        Ok(records) => {
+            // If cursor is set, skip the first result if it matches the cursor key
+            let records: Vec<(Vec<u8>, Vec<u8>)> = records
+                .into_iter()
+                .skip_while(|(k, _)| {
+                    query.cursor.is_some()
+                        && query.cursor.as_deref().is_some_and(|c| k.as_slice() == c.as_bytes())
+                })
+                .collect();
+
+            let has_more = records.len() > limit;
+
+            let mut records = records;
+            records.truncate(limit);
+
+            let new_cursor = if has_more {
+                records
+                    .last()
+                    .and_then(|(k, _)| String::from_utf8(k.clone()).ok())
+            } else {
+                None
+            };
+
+            let records_json: Vec<serde_json::Value> = records
+                .into_iter()
+                .map(|(k, v)| json!({ "key": String::from_utf8_lossy(&k), "value": String::from_utf8_lossy(&v) }))
+                .collect();
+
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({
+                    "keys": records_json,
+                    "cursor": new_cursor,
+                    "has_more": has_more
+                }))
+        }
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to query range: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
 }
 
 /// Handler for `GET /metrics`.
@@ -387,12 +782,28 @@ async fn graphql_playground() -> HttpResponse {
 pub struct FrontendSetBody {
     key: String,
     value: String,
+    /// Optional TTL in seconds. When set, the key will auto-expire.
+    #[serde(default)]
+    pub ttl_secs: Option<u64>,
 }
 
 /// Request body for `POST /keys/batch`.
 #[derive(Deserialize)]
 pub struct BatchBody {
     records: Vec<FrontendSetBody>,
+}
+
+/// Request body for `POST /keys/batch/delete`.
+#[derive(Deserialize)]
+pub struct BatchDeleteBody {
+    keys: Vec<String>,
+}
+
+/// Request body for `PATCH /keys/{key}/ttl`.
+#[derive(Deserialize)]
+pub struct TtlUpdateBody {
+    /// New TTL in seconds from now.
+    pub ttl_secs: u64,
 }
 
 /// Handler for `GET /stats/all` — frontend-compatible full stats endpoint.
@@ -457,17 +868,26 @@ async fn post_key(
             .json(json!({ "success": false, "message": "key too long" }));
     }
 
-    match engine.put_cf(
-        "default",
-        body.key.as_bytes().to_vec(),
-        body.value.as_bytes().to_vec(),
-    ) {
+    let ttl = body.ttl_secs.map(std::time::Duration::from_secs);
+
+    let result = if let Some(ttl) = ttl {
+        engine.set_cf_with_ttl("default", body.key.as_bytes().to_vec(), body.value.as_bytes().to_vec(), ttl)
+    } else {
+        engine.put_cf(
+            "default",
+            body.key.as_bytes().to_vec(),
+            body.value.as_bytes().to_vec(),
+        )
+    };
+
+    match result {
         Ok(_) => {
             tracing::info!(
                 target: "apexstore::audit",
-                "PUT key={} size={}",
+                "PUT key={} size={} ttl_secs={:?}",
                 body.key,
-                body.value.len()
+                body.value.len(),
+                body.ttl_secs
             );
             HttpResponse::Ok()
                 .content_type("application/json")
@@ -482,38 +902,446 @@ async fn post_key(
     }
 }
 
-/// Handler for `GET /keys/search` — search keys by prefix or query.
+// ── Transaction types ───────────────────────────────────────────────────────
+
+/// Request body for `POST /txn/{txn_id}/put`.
+#[derive(Deserialize)]
+pub struct TxnPutBody {
+    pub key: String,
+    pub value: String,
+    pub cf: Option<String>,
+}
+
+/// Request body for `POST /txn/{txn_id}/delete`.
+#[derive(Deserialize)]
+pub struct TxnDeleteBody {
+    pub key: String,
+    pub cf: Option<String>,
+}
+
+/// Handler for `POST /txn` — begin a new transaction.
+#[post("/txn")]
+async fn begin_txn(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    txn_mgr: web::Data<TransactionManager>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Write) {
+        return e;
+    }
+    let id = txn_mgr.begin(&engine);
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .json(json!({ "txn_id": id }))
+}
+
+/// Handler for `POST /txn/{txn_id}/put` — stage a write in a transaction.
+#[post("/txn/{txn_id}/put")]
+async fn txn_put(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    txn_mgr: web::Data<TransactionManager>,
+    path: web::Path<u64>,
+    body: web::Json<TxnPutBody>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Write) {
+        return e;
+    }
+    let txn_id = path.into_inner();
+
+    // Reject writes when engine is in read-only mode
+    if let Err(msg) = engine.degradation.check_write_allowed() {
+        return HttpResponse::ServiceUnavailable()
+            .content_type("application/json")
+            .json(json!({ "error": msg }));
+    }
+
+    let mut txn = match txn_mgr.take(txn_id) {
+        Some(t) => t,
+        None => {
+            return HttpResponse::NotFound()
+                .content_type("application/json")
+                .json(json!({ "error": "transaction not found" }));
+        }
+    };
+
+    let cf = body.cf.as_deref().unwrap_or("default");
+    if let Err(e) = txn.put_cf(cf, body.key.as_bytes(), body.value.as_bytes()) {
+        tracing::error!(target: "apexstore::api", "txn put failed: {:?}", e);
+        // Re-insert the transaction even on error
+        txn_mgr.transactions.lock().unwrap().insert(txn_id, txn);
+        return HttpResponse::InternalServerError()
+            .content_type("application/json")
+            .json(json!({ "error": "internal server error" }));
+    }
+
+    // Re-insert transaction after modification
+    txn_mgr.transactions.lock().unwrap().insert(txn_id, txn);
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .json(json!({ "status": "ok" }))
+}
+
+/// Handler for `POST /txn/{txn_id}/delete` — stage a delete in a transaction.
+#[post("/txn/{txn_id}/delete")]
+async fn txn_delete(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    txn_mgr: web::Data<TransactionManager>,
+    path: web::Path<u64>,
+    body: web::Json<TxnDeleteBody>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Delete) {
+        return e;
+    }
+    let txn_id = path.into_inner();
+
+    // Reject writes when engine is in read-only mode
+    if let Err(msg) = engine.degradation.check_write_allowed() {
+        return HttpResponse::ServiceUnavailable()
+            .content_type("application/json")
+            .json(json!({ "error": msg }));
+    }
+
+    let mut txn = match txn_mgr.take(txn_id) {
+        Some(t) => t,
+        None => {
+            return HttpResponse::NotFound()
+                .content_type("application/json")
+                .json(json!({ "error": "transaction not found" }));
+        }
+    };
+
+    let cf = body.cf.as_deref().unwrap_or("default");
+    if let Err(e) = txn.delete_cf(cf, body.key.as_bytes()) {
+        tracing::error!(target: "apexstore::api", "txn delete failed: {:?}", e);
+        txn_mgr.transactions.lock().unwrap().insert(txn_id, txn);
+        return HttpResponse::InternalServerError()
+            .content_type("application/json")
+            .json(json!({ "error": "internal server error" }));
+    }
+
+    txn_mgr.transactions.lock().unwrap().insert(txn_id, txn);
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .json(json!({ "status": "ok" }))
+}
+
+/// Handler for `POST /txn/{txn_id}/commit` — atomically commit a transaction.
+#[post("/txn/{txn_id}/commit")]
+async fn txn_commit(
+    req: HttpRequest,
+    txn_mgr: web::Data<TransactionManager>,
+    path: web::Path<u64>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Write) {
+        return e;
+    }
+    let txn_id = path.into_inner();
+
+    let mut txn = match txn_mgr.take(txn_id) {
+        Some(t) => t,
+        None => {
+            return HttpResponse::NotFound()
+                .content_type("application/json")
+                .json(json!({ "error": "transaction not found" }));
+        }
+    };
+
+    if let Err(e) = txn.commit() {
+        tracing::error!(target: "apexstore::api", "txn commit failed: {:?}", e);
+        return HttpResponse::InternalServerError()
+            .content_type("application/json")
+            .json(json!({ "error": "commit failed" }));
+    }
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .json(json!({ "status": "ok", "txn_id": txn_id }))
+}
+
+/// Handler for `POST /txn/{txn_id}/rollback` — discard staged writes.
+#[post("/txn/{txn_id}/rollback")]
+async fn txn_rollback(
+    req: HttpRequest,
+    txn_mgr: web::Data<TransactionManager>,
+    path: web::Path<u64>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Write) {
+        return e;
+    }
+    let txn_id = path.into_inner();
+
+    let mut txn = match txn_mgr.take(txn_id) {
+        Some(t) => t,
+        None => {
+            return HttpResponse::NotFound()
+                .content_type("application/json")
+                .json(json!({ "error": "transaction not found" }));
+        }
+    };
+
+    txn.rollback();
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .json(json!({ "status": "ok", "txn_id": txn_id }))
+}
+
+/// Handler for `GET /keys/search` — search keys with multiple modes (prefix, contains, suffix, regex).
 #[get("/keys/search")]
 async fn search_keys(
     req: HttpRequest,
     engine: web::Data<LsmEngine>,
-    query: web::Query<KeysQuery>,
+    query: web::Query<SearchQuery>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
         return e;
     }
+
     let limit = query
         .limit
         .unwrap_or(100)
         .min(crate::core::engine::MAX_SCAN_LIMIT);
-    // Use `q` if provided (frontend compatibility), otherwise fall back to `prefix`
-    let prefix = query.q.as_deref().or(query.prefix.as_deref()).unwrap_or("");
-    let (results, _cursor) = match engine.search_prefix(prefix, None, limit) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!(target: "apexstore::api", "Failed to search keys: {:?}", e);
-            return HttpResponse::InternalServerError()
+
+    let query_str = query.q.as_deref().or(query.prefix.as_deref()).unwrap_or("");
+    let mode = query.mode.as_deref().unwrap_or("prefix");
+
+    match mode {
+        "contains" | "substring" => {
+            // Substring/key-contains search
+            match engine.search_contains(query_str, limit) {
+                Ok(results) => {
+                    let records: Vec<serde_json::Value> = results
+                        .into_iter()
+                        .map(|(k, v)| json!({ "key": String::from_utf8_lossy(&k), "value": String::from_utf8_lossy(&v) }))
+                        .collect();
+                    HttpResponse::Ok()
+                        .content_type("application/json")
+                        .json(json!({ "success": true, "data": { "records": records } }))
+                }
+                Err(e) => {
+                    tracing::error!(target: "apexstore::api", "Failed to search contains: {:?}", e);
+                    HttpResponse::InternalServerError()
+                        .content_type("application/json")
+                        .json(json!({ "error": "internal server error" }))
+                }
+            }
+        }
+        "regex" => {
+            // Regex matching on keys
+            let re = match regex_lite::Regex::new(query_str) {
+                Ok(r) => r,
+                Err(e) => {
+                    return HttpResponse::BadRequest()
+                        .content_type("application/json")
+                        .json(json!({ "error": format!("invalid regex: {}", e) }));
+                }
+            };
+            match engine.scan_cf("default", None, None, Some(10000)) {
+                Ok(results) => {
+                    let filtered: Vec<serde_json::Value> = results
+                        .into_iter()
+                        .filter(|(k, _)| {
+                            re.is_match(&String::from_utf8_lossy(k))
+                        })
+                        .take(limit)
+                        .map(|(k, v)| json!({ "key": String::from_utf8_lossy(&k), "value": String::from_utf8_lossy(&v) }))
+                        .collect();
+                    HttpResponse::Ok()
+                        .content_type("application/json")
+                        .json(json!({ "success": true, "data": { "records": filtered } }))
+                }
+                Err(e) => {
+                    tracing::error!(target: "apexstore::api", "Failed to scan for regex: {:?}", e);
+                    HttpResponse::InternalServerError()
+                        .content_type("application/json")
+                        .json(json!({ "error": "internal server error" }))
+                }
+            }
+        }
+        _ => {
+            // Default: prefix search (supports cursor pagination)
+            let cursor = query.cursor.as_deref();
+            let (results, new_cursor) = match engine.search_prefix(query_str, cursor, limit) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!(target: "apexstore::api", "Failed to search keys: {:?}", e);
+                    return HttpResponse::InternalServerError()
+                        .content_type("application/json")
+                        .json(json!({ "success": false, "message": "internal server error" }));
+                }
+            };
+            let records: Vec<serde_json::Value> = results
+                .into_iter()
+                .map(|(k, v)| json!({ "key": String::from_utf8_lossy(&k), "value": String::from_utf8_lossy(&v) }))
+                .collect();
+            HttpResponse::Ok()
                 .content_type("application/json")
-                .json(json!({ "success": false, "message": "internal server error" }));
+                .json(json!({ "success": true, "data": { "records": records, "cursor": new_cursor } }))
+        }
+    }
+}
+
+// ── Secondary Index types ───────────────────────────────────────────────────
+
+/// Request body for `POST /keys/{key}/index/{field}`.
+#[derive(Deserialize)]
+pub struct IndexQuery {
+    /// Index field name(s), comma-separated for compound indexes.
+    #[serde(rename = "index")]
+    pub index: Option<String>,
+    /// Value(s) to match, comma-separated for compound queries.
+    pub eq: Option<String>,
+    pub limit: Option<usize>,
+}
+
+/// Handler for `GET /keys/by-index` — query by secondary index.
+#[get("/keys/by-index")]
+async fn query_by_index(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    query: web::Query<IndexQuery>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Read) {
+        return e;
+    }
+
+    let field = match query.index {
+        Some(ref f) => f.clone(),
+        None => {
+            return HttpResponse::BadRequest()
+                .content_type("application/json")
+                .json(json!({ "error": "index parameter is required" }));
         }
     };
-    let records: Vec<serde_json::Value> = results
-        .into_iter()
-        .map(|(k, v)| json!({ "key": String::from_utf8_lossy(&k), "value": String::from_utf8_lossy(&v) }))
-        .collect();
-    HttpResponse::Ok()
-        .content_type("application/json")
-        .json(json!({ "success": true, "data": { "records": records } }))
+
+    let value = match query.eq {
+        Some(ref v) => v.clone(),
+        None => {
+            return HttpResponse::BadRequest()
+                .content_type("application/json")
+                .json(json!({ "error": "eq parameter is required" }));
+        }
+    };
+
+    let limit = query.limit.unwrap_or(100).min(1000);
+
+    match engine.query_index("default", &field, &value, limit) {
+        Ok(results) => {
+            let records: Vec<serde_json::Value> = results
+                .into_iter()
+                .map(|(k, v)| json!({ "key": String::from_utf8_lossy(&k), "value": String::from_utf8_lossy(&v) }))
+                .collect();
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({ "success": true, "data": { "records": records } }))
+        }
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Index query failed: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// Handler for `POST /keys/{key}/index/{field}` — create a secondary index on a field.
+#[post("/keys/{key}/index/{field}")]
+async fn create_index(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    path: web::Path<(String, String)>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Write) {
+        return e;
+    }
+
+    let (key, field) = path.into_inner();
+
+    match engine.create_index("default", &field) {
+        Ok(_) => {
+            tracing::info!(
+                target: "apexstore::audit",
+                "CREATE INDEX key={} field={}",
+                key,
+                field
+            );
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({ "status": "ok", "key": key, "field": field }))
+        }
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to create index: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// Handler for `GET /keys/indexes` — list all secondary indexes.
+#[get("/keys/indexes")]
+async fn list_indexes(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Read) {
+        return e;
+    }
+
+    match engine.list_indexes("default") {
+        Ok(fields) => {
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({ "indexes": fields }))
+        }
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed to list indexes: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
+}
+
+/// Handler for `GET /keys/value-search` — search by value content.
+#[get("/keys/value-search")]
+async fn value_search_keys(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    query: web::Query<ValueSearchQuery>,
+) -> impl Responder {
+    if let Err(e) = require_permission(&req, Permission::Read) {
+        return e;
+    }
+
+    let q = match query.q {
+        Some(ref q) if !q.is_empty() => q.clone(),
+        _ => {
+            return HttpResponse::BadRequest()
+                .content_type("application/json")
+                .json(json!({ "error": "q parameter is required" }));
+        }
+    };
+
+    let limit = query.limit.unwrap_or(100).min(100); // Safety cap
+
+    match engine.value_search(&q, limit) {
+        Ok(results) => {
+            let records: Vec<serde_json::Value> = results
+                .into_iter()
+                .map(|(k, v)| json!({ "key": String::from_utf8_lossy(&k), "value": String::from_utf8_lossy(&v) }))
+                .collect();
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(json!({ "success": true, "data": { "records": records } }))
+        }
+        Err(e) => {
+            tracing::error!(target: "apexstore::api", "Failed value search: {:?}", e);
+            HttpResponse::InternalServerError()
+                .content_type("application/json")
+                .json(json!({ "error": "internal server error" }))
+        }
+    }
 }
 
 /// Handler for `POST /keys/batch` — batch insert.
@@ -556,14 +1384,17 @@ async fn batch_keys(
 
     let mut count = 0;
     for record in &body.records {
-        if engine
-            .put_cf(
+        let ttl = record.ttl_secs.map(std::time::Duration::from_secs);
+        let result = if let Some(ttl) = ttl {
+            engine.set_cf_with_ttl("default", record.key.as_bytes().to_vec(), record.value.as_bytes().to_vec(), ttl)
+        } else {
+            engine.put_cf(
                 "default",
                 record.key.as_bytes().to_vec(),
                 record.value.as_bytes().to_vec(),
             )
-            .is_ok()
-        {
+        };
+        if result.is_ok() {
             count += 1;
         }
     }
@@ -577,22 +1408,77 @@ async fn batch_keys(
         .json(json!({ "success": true, "data": { "count": count } }))
 }
 
-/// Handler for `GET /scan` — full scan of all keys.
+/// Handler for `GET /scan` — scan keys with pagination, range bounds, and cursor.
 #[get("/scan")]
-async fn scan_keys(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
+async fn scan_keys(
+    req: HttpRequest,
+    engine: web::Data<LsmEngine>,
+    query: web::Query<ScanQuery>,
+) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
         return e;
     }
-    let max_limit = 1000; // reasonable limit to prevent OOM
-    match engine.scan_cf("default", None, None, Some(max_limit)) {
+    let limit = query
+        .limit
+        .unwrap_or(100)
+        .min(crate::core::engine::MAX_SCAN_LIMIT);
+
+    // Determine lower bound: cursor takes precedence, then explicit lower
+    let lower: Option<Vec<u8>> = if let Some(ref cursor) = query.cursor {
+        // If cursor is set, use it as the new lower bound
+        Some(cursor.as_bytes().to_vec())
+    } else {
+        query.lower.as_ref().map(|s| s.as_bytes().to_vec())
+    };
+
+    // Adjust bounds for inclusivity
+    let adjusted_lower: Option<&[u8]> = lower.as_deref();
+    let adjusted_upper: Option<&[u8]> = query.upper.as_ref().map(|s| s.as_bytes());
+
+    // Request extra records to detect if there are more results.
+    // Always +1 to check for more pages beyond the current limit.
+    let scan_limit = limit + 1;
+
+    match engine.scan_cf("default", adjusted_lower, adjusted_upper, Some(scan_limit)) {
         Ok(records) => {
-            let records: Vec<serde_json::Value> = records
+            // If cursor is set, skip the first result if it matches the cursor key
+            let records: Vec<(Vec<u8>, Vec<u8>)> = records
+                .into_iter()
+                .skip_while(|(k, _)| {
+                    query.cursor.is_some()
+                        && query.cursor.as_deref().is_some_and(|c| k.as_slice() == c.as_bytes())
+                })
+                .collect();
+
+            // Determine if there are more results
+            let has_more = records.len() > limit;
+
+            // Take only `limit` results
+            let mut records = records;
+            records.truncate(limit);
+            let new_cursor = if has_more {
+                records
+                    .last()
+                    .and_then(|(k, _)| String::from_utf8(k.clone()).ok())
+            } else {
+                None
+            };
+
+            let records_json: Vec<serde_json::Value> = records
                 .into_iter()
                 .map(|(k, v)| json!({ "key": String::from_utf8_lossy(&k), "value": String::from_utf8_lossy(&v) }))
                 .collect();
+
             HttpResponse::Ok()
                 .content_type("application/json")
-                .json(json!({ "success": true, "data": { "records": records } }))
+                .json(json!({
+                    "success": true,
+                    "data": {
+                        "records": records_json,
+                        "cursor": new_cursor,
+                        "has_more": has_more
+                    }
+                }))
         }
         Err(e) => {
             tracing::error!(target: "apexstore::api", "Failed to scan keys: {:?}", e);
@@ -613,7 +1499,23 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(get_keys)
         // Specific key-list endpoints — register before /keys/{key}
         .service(search_keys) // GET /keys/search
+        .service(value_search_keys) // GET /keys/value-search
+        .service(query_by_index) // GET /keys/by-index
+        .service(create_index) // POST /keys/{key}/index/{field}
+        .service(list_indexes) // GET /keys/indexes
         .service(batch_keys) // POST /keys/batch
+        .service(batch_delete_keys) // POST /keys/batch/delete
+        .service(delete_keys_by_prefix) // DELETE /keys (with ?prefix=)
+        .service(keys_range) // GET /keys/range
+        // Transaction endpoints — register before /keys/{key}
+        .service(begin_txn) // POST /txn
+        .service(txn_put) // POST /txn/{txn_id}/put
+        .service(txn_delete) // POST /txn/{txn_id}/delete
+        .service(txn_commit) // POST /txn/{txn_id}/commit
+        .service(txn_rollback) // POST /txn/{txn_id}/rollback
+        // TTL-specific endpoints — register before parameterised /keys/{key}
+        .service(get_key_ttl) // GET /keys/{key}/ttl
+        .service(update_key_ttl) // PATCH /keys/{key}/ttl
         // Parameterised key endpoints — must come after specific /keys/* routes
         .service(get_key) // GET /keys/{key}
         .service(put_key) // PUT /keys/{key}
@@ -641,7 +1543,10 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .route("/graphql", web::get().to(graphql_handler))
         .route("/graphql/playground", web::get().to(graphql_playground))
         // WebSocket sync endpoint
-        .service(sync::sync_handler);
+        .service(sync::sync_handler)
+        // Real-time event endpoints
+        .service(events::ws_events) // GET /ws/events
+        .service(events::sse_events); // GET /events
 }
 
 /// Middleware that ensures mutating requests have a JSON content type,
@@ -843,12 +1748,26 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
         tracing::warn!(target: "apexstore::api", "Configuration warning: {}", warning);
     }
 
-    // Configure CDC if an endpoint was provided
-    if let Some(ref endpoint) = config.cdc_endpoint {
-        let cdc_config = crate::infra::cdc::CdcConfig::with_endpoint(endpoint.clone());
-        engine.set_cdc(cdc_config);
-        tracing::info!(target: "apexstore::api", "CDC enabled, endpoint: {}", endpoint);
-    }
+    // Create EventBus for WebSocket/SSE real-time event streaming
+    let event_bus_inner = events::EventBus::new();
+    event_bus_inner.set_enabled(true);
+    let event_bus = web::Data::new(event_bus_inner.clone());
+
+    // If a webhook endpoint is configured, chain both publishers
+    let cdc_publisher: Box<dyn CdcPublisher> = if let Some(ref endpoint) = config.cdc_endpoint {
+        let webhook_config = crate::infra::cdc::CdcConfig::with_endpoint(endpoint.clone());
+        let webhook_publisher = crate::infra::cdc::create_publisher(&webhook_config)
+            .expect("webhook publisher should be created");
+        tracing::info!(target: "apexstore::api", "CDC webhook enabled, endpoint: {}", endpoint);
+        Box::new(crate::infra::cdc::MultiPublisher::new(vec![
+            Box::new(event_bus_inner.clone()),
+            webhook_publisher,
+        ]))
+    } else {
+        Box::new(event_bus_inner.clone())
+    };
+
+    engine.set_cdc_publisher(cdc_publisher);
 
     let engine_data = web::Data::from(engine.clone());
     let mut rl_state = RateLimiterState::new(config.rate_limit_requests_per_minute);
@@ -863,6 +1782,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
         crate::infra::time_travel::TimeTravelEngine::new(100),
     ));
     let sync_manager = web::Data::new(sync::SyncManager::new());
+    let txn_manager = web::Data::new(TransactionManager::new());
     let idempotency = web::Data::new(IdempotencyMiddleware::new(Duration::from_secs(3600)));
     let ip_connection_guard = web::Data::new(IpConnectionGuard::new(config.max_connections_per_ip));
 
@@ -899,6 +1819,8 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
             .app_data(note_engine.clone())
             .app_data(time_travel_engine.clone())
             .app_data(sync_manager.clone())
+            .app_data(txn_manager.clone())
+            .app_data(event_bus.clone())
             .app_data(access_controller.clone())
             .app_data(access_control_enabled.clone())
             .app_data(idempotency.clone())

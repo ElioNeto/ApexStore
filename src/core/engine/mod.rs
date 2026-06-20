@@ -17,6 +17,7 @@ use crate::storage::wal::WriteAheadLog;
 use fs2::FileExt;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,7 +33,7 @@ use crate::core::iterators::{MergeIterator, StorageIterator};
 use crate::core::memtable::MemTable;
 
 pub const DEFAULT_SCAN_LIMIT: usize = 128;
-pub const MAX_SCAN_LIMIT: usize = 1024;
+pub const MAX_SCAN_LIMIT: usize = 10000;
 pub const MAX_KEY_SIZE: usize = 4096; // 4KB max key size
 pub const MAX_VALUE_SIZE: usize = 16 * 1024 * 1024; // 16MB max value size
 
@@ -915,6 +916,11 @@ impl<C: Cache> Engine<C> {
         // Publish CDC event (fire-and-forget, runs outside core lock)
         self.publish_cdc_event(cf, &key, Some(&value));
 
+        // Update secondary indexes (best-effort, runs outside core lock)
+        if let Err(e) = self.update_indexes(cf, &key, &value) {
+            tracing::warn!(target: "apexstore::engine", "Failed to update indexes: {:?}", e);
+        }
+
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_set(elapsed_us);
         tracing::debug!(
@@ -1060,6 +1066,20 @@ impl<C: Cache> Engine<C> {
 
         // Publish CDC event (fire-and-forget, runs outside core lock)
         self.publish_cdc_event(cf, &key, None);
+
+        // Remove secondary indexes (best-effort, runs outside core lock)
+        // Note: old value is not available here, so index entries for deleted keys
+        // may accumulate. Compaction should clean them up, or a full re-index
+        // can be triggered manually.
+        let ttl_key = format!("__ttl:{}", String::from_utf8_lossy(&key)).into_bytes();
+        if let Ok(Some(old_value)) = self.get_cf(cf, &key) {
+            if let Err(e) = self.remove_indexes(cf, &key, &old_value) {
+                tracing::warn!(target: "apexstore::engine", "Failed to remove indexes: {:?}", e);
+            }
+        } else if let Ok(Some(old_value)) = self.get_cf(cf, &ttl_key) {
+            // Also try to read old value from TTL metadata
+            let _ = old_value;
+        }
 
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_delete(elapsed_us);
@@ -2026,6 +2046,296 @@ impl<C: Cache> Engine<C> {
             / 1024;
 
         Ok(combined)
+    }
+
+    /// Search for keys whose key contains the given substring.
+    ///
+    /// This scans the entire key space and returns only keys containing `substring`.
+    /// Use with caution on large datasets — this is an O(n) scan operation.
+    /// Results are limited by `limit` (max 100 by safety limit).
+    pub fn search_contains(
+        &self,
+        substring: &str,
+        limit: usize,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let start = std::time::Instant::now();
+        let safe_limit = limit.min(100); // Safety cap for value scanning
+        let results = self.scan_cf("default", None, None, Some(10000))?;
+        let filtered: Vec<(Vec<u8>, Vec<u8>)> = results
+            .into_iter()
+            .filter(|(k, _)| {
+                String::from_utf8_lossy(k).contains(substring)
+            })
+            .take(safe_limit)
+            .collect();
+
+        let elapsed = start.elapsed();
+        tracing::debug!(
+            target: "apexstore::engine",
+            operation = "search_contains",
+            substring = %substring,
+            limit = safe_limit,
+            results = filtered.len(),
+            duration_us = elapsed.as_micros() as u64,
+        );
+        Ok(filtered)
+    }
+
+    /// Search for keys whose value contains the given substring.
+    ///
+    /// This scans the entire key-value space — use with caution on large datasets.
+    /// Results are limited by `limit` (max 100 by safety limit).
+    pub fn value_search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let start = std::time::Instant::now();
+        let safe_limit = limit.min(100); // Safety cap for value scanning
+        let results = self.scan_cf("default", None, None, Some(10000))?;
+        let filtered: Vec<(Vec<u8>, Vec<u8>)> = results
+            .into_iter()
+            .filter(|(_, v)| {
+                String::from_utf8_lossy(v).contains(query)
+            })
+            .take(safe_limit)
+            .collect();
+
+        let elapsed = start.elapsed();
+        tracing::debug!(
+            target: "apexstore::engine",
+            operation = "value_search",
+            query = %query,
+            limit = safe_limit,
+            results = filtered.len(),
+            duration_us = elapsed.as_micros() as u64,
+        );
+        Ok(filtered)
+    }
+
+    // ── Secondary Index API ──
+
+    /// Internal prefix for secondary index entries.
+    const INDEX_PREFIX: &'static str = "__idx:";
+
+    /// Register a value field as indexed. The engine will extract the field from
+    /// JSON values and maintain a reverse index: `__idx:{field}:{value}:{key}` → `""`.
+    ///
+    /// This is a metadata operation — current keys are NOT retroactively indexed.
+    /// New writes to keys in this column family will automatically update the index.
+    pub fn create_index(&self, cf: &str, field: &str) -> Result<()> {
+        let index_key = format!("{}__schema:index:{}", Self::INDEX_PREFIX, field);
+        self.put_cf(cf, index_key.into_bytes(), b"1".to_vec())?;
+        tracing::info!(
+            target: "apexstore::engine",
+            operation = "create_index",
+            cf = cf,
+            field = field,
+            "secondary index created"
+        );
+        Ok(())
+    }
+
+    /// Query by indexed field value: returns all keys where `field == value`.
+    ///
+    /// Uses the reverse index (`__idx:{field}:{value}:{key}`) to find matching keys.
+    /// Supports compound queries: `fields` and `values` are comma-separated.
+    pub fn query_index(
+        &self,
+        cf: &str,
+        fields: &str,
+        values: &str,
+        limit: usize,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let start = std::time::Instant::now();
+        let field_list: Vec<&str> = fields.split(',').collect();
+        let value_list: Vec<&str> = values.split(',').collect();
+
+        if field_list.len() != value_list.len() || field_list.is_empty() {
+            return Err(crate::infra::error::LsmError::InvalidArgument(
+                "fields and values must have the same non-empty length".to_string(),
+            ));
+        }
+
+        // For single-field index, do a prefix scan
+        if field_list.len() == 1 {
+            let field = field_list[0];
+            let value = value_list[0];
+            let index_prefix = format!("{}index:{}:{}:", Self::INDEX_PREFIX, field, value);
+            let (results, _cursor) = self.search_prefix(&index_prefix, None, limit)?;
+            // Extract the primary key from the index key (after the last ':')
+            let mut primary_keys: Vec<Vec<u8>> = Vec::new();
+            for (idx_key, _) in &results {
+                let idx_str = String::from_utf8_lossy(idx_key);
+                if let Some(pos) = idx_str.rfind(':') {
+                    let pk = &idx_str[pos + 1..];
+                    primary_keys.push(pk.as_bytes().to_vec());
+                }
+            }
+            // Fetch the actual values for each primary key
+            let mut output = Vec::new();
+            for pk in &primary_keys {
+                if let Ok(Some(value)) = self.get_cf(cf, pk) {
+                    output.push((pk.clone(), value));
+                }
+            }
+            let elapsed = start.elapsed();
+            tracing::debug!(
+                target: "apexstore::engine",
+                operation = "query_index",
+                cf = cf,
+                field = field,
+                value = value,
+                results = output.len(),
+                duration_us = elapsed.as_micros() as u64,
+            );
+            return Ok(output);
+        }
+
+        // For compound indexes, we need to intersect results from each field
+        // This is a simplified approach: scan the first field's index, then filter
+        let first_field = field_list[0];
+        let first_value = value_list[0];
+        let index_prefix = format!("{}index:{}:{}:", Self::INDEX_PREFIX, first_field, first_value);
+        let (results, _cursor) = self.search_prefix(&index_prefix, None, 10000)?;
+
+        let mut candidates: Vec<Vec<u8>> = Vec::new();
+        for (idx_key, _) in &results {
+            let idx_str = String::from_utf8_lossy(idx_key);
+            if let Some(pos) = idx_str.rfind(':') {
+                let pk = &idx_str[pos + 1..];
+                candidates.push(pk.as_bytes().to_vec());
+            }
+        }
+
+        // Filter by remaining field/value pairs
+        let mut output = Vec::new();
+        for pk in &candidates {
+            let mut matches_all = true;
+            if let Ok(Some(value)) = self.get_cf(cf, pk) {
+                // Parse JSON value and check field equality
+                if let Ok(json_val) = serde_json::from_slice::<Value>(&value) {
+                    for (j, field) in field_list.iter().enumerate().skip(1) {
+                        let expected = value_list[j];
+                        if json_val.get(field).and_then(|v| v.as_str()) != Some(expected) {
+                            matches_all = false;
+                            break;
+                        }
+                    }
+                    if matches_all {
+                        output.push((pk.clone(), value));
+                    }
+                }
+            }
+            if output.len() >= limit {
+                break;
+            }
+        }
+
+        let elapsed = start.elapsed();
+        tracing::debug!(
+            target: "apexstore::engine",
+            operation = "query_index_compound",
+            cf = cf,
+            fields = fields,
+            values = values,
+            results = output.len(),
+            duration_us = elapsed.as_micros() as u64,
+        );
+        Ok(output)
+    }
+
+    /// Maintain secondary indexes for a key-value pair being written.
+    /// Called internally by put_cf_with_ttl_inner.
+    fn update_indexes(
+        &self,
+        cf: &str,
+        key: &[u8],
+        value: &[u8],
+    ) -> Result<()> {
+        // Check if any indexes exist for this CF
+        let schema_prefix = format!("{}__schema:index:", Self::INDEX_PREFIX);
+        let (index_fields, _) = self.search_prefix(&schema_prefix, None, 100)?;
+
+        if index_fields.is_empty() {
+            return Ok(()); // No indexes configured
+        }
+
+        // Parse the value as JSON to extract indexed fields
+        let json_val: Value = match serde_json::from_slice(value) {
+            Ok(v) => v,
+            Err(_) => return Ok(()), // Non-JSON values can't be indexed by fields
+        };
+
+        for (idx_key, _) in &index_fields {
+            let idx_str = String::from_utf8_lossy(idx_key);
+            // Key format: __idx:__schema:index:{field}
+            if let Some(field_name) = idx_str.strip_prefix(&schema_prefix) {
+                if let Some(field_value) = json_val.get(field_name).and_then(|v| v.as_str()) {
+                    // Write reverse index entry: __idx:index:{field}:{value}:{key} → ""
+                    let index_entry = format!(
+                        "{}index:{}:{}:{}",
+                        Self::INDEX_PREFIX,
+                        field_name,
+                        field_value,
+                        String::from_utf8_lossy(key)
+                    );
+                    self.put_cf(cf, index_entry.into_bytes(), Vec::new())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove secondary index entries for a deleted key.
+    /// Called internally by delete_cf.
+    fn remove_indexes(
+        &self,
+        cf: &str,
+        key: &[u8],
+        old_value: &[u8],
+    ) -> Result<()> {
+        let schema_prefix = format!("{}__schema:index:", Self::INDEX_PREFIX);
+        let (index_fields, _) = self.search_prefix(&schema_prefix, None, 100)?;
+
+        if index_fields.is_empty() {
+            return Ok(());
+        }
+
+        let json_val: Value = match serde_json::from_slice(old_value) {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+
+        for (idx_key, _) in &index_fields {
+            let idx_str = String::from_utf8_lossy(idx_key);
+            if let Some(field_name) = idx_str.strip_prefix(&schema_prefix) {
+                if let Some(field_value) = json_val.get(field_name).and_then(|v| v.as_str()) {
+                    let index_entry = format!(
+                        "{}index:{}:{}:{}",
+                        Self::INDEX_PREFIX,
+                        field_name,
+                        field_value,
+                        String::from_utf8_lossy(key)
+                    );
+                    self.delete_cf(cf, index_entry.as_bytes())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn list_indexes(&self, _cf: &str) -> Result<Vec<String>> {
+        let schema_prefix = format!("{}__schema:index:", Self::INDEX_PREFIX);
+        let (results, _) = self.search_prefix(&schema_prefix, None, 100)?;
+        let mut fields = Vec::new();
+        for (idx_key, _) in &results {
+            let idx_str = String::from_utf8_lossy(idx_key);
+            if let Some(field_name) = idx_str.strip_prefix(&schema_prefix) {
+                fields.push(field_name.to_string());
+            }
+        }
+        Ok(fields)
     }
 
     /// Calculate the upper bound for a prefix scan.

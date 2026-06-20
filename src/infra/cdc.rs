@@ -277,6 +277,34 @@ mod hex_serde {
     }
 }
 
+// ── MultiPublisher ──────────────────────────────────────────────────────────
+
+/// A CDC publisher that fans out events to multiple inner publishers.
+///
+/// All publishers receive every event. If any publisher fails, the error
+/// is logged but other publishers still receive the event.
+pub struct MultiPublisher {
+    publishers: Vec<Box<dyn CdcPublisher>>,
+}
+
+impl MultiPublisher {
+    /// Create a new multi-publisher from a list of publishers.
+    pub fn new(publishers: Vec<Box<dyn CdcPublisher>>) -> Self {
+        Self { publishers }
+    }
+}
+
+impl CdcPublisher for MultiPublisher {
+    fn publish(&self, event: CdcEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        for publisher in &self.publishers {
+            if let Err(e) = publisher.publish(event.clone()) {
+                tracing::warn!(target: "apexstore::cdc", "MultiPublisher: sub-publisher failed: {:?}", e);
+            }
+        }
+        Ok(())
+    }
+}
+
 // ── Factory helpers ──────────────────────────────────────────────────────────
 
 /// Create a [`CdcPublisher`] box from a [`CdcConfig`].

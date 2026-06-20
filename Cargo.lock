@@ -516,6 +516,7 @@ dependencies = [
  "rand 0.8.5",
  "ratatui 0.29.0",
  "rayon",
+ "regex-lite",
  "reqwest",
  "rustls 0.20.9",
  "rustls-pemfile",
