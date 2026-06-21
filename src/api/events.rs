@@ -123,9 +123,10 @@ impl futures::Stream for SseEventStream {
                 "type": "connected",
                 "message": "CDC event stream connected"
             });
-            return Poll::Ready(Some(Ok(actix_web::web::Bytes::from(
-                format!("data: {}\n\n", connect_data)
-            ))));
+            return Poll::Ready(Some(Ok(actix_web::web::Bytes::from(format!(
+                "data: {}\n\n",
+                connect_data
+            )))));
         }
 
         loop {

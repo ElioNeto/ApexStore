@@ -1596,9 +1596,8 @@ impl<C: Cache> Engine<C> {
                         .map(|e| (e.key().clone(), e.value().clone()))
                         .collect();
                     sorted.sort_by(|a, b| a.0.cmp(&b.0));
-                    let mut combined: Vec<(Vec<u8>, LogRecord)> = Vec::with_capacity(
-                        sorted.len() * 2,
-                    );
+                    let mut combined: Vec<(Vec<u8>, LogRecord)> =
+                        Vec::with_capacity(sorted.len() * 2);
                     for (key, record) in &sorted {
                         if record.is_expired_at(now) {
                             continue;
@@ -2068,9 +2067,7 @@ impl<C: Cache> Engine<C> {
         let results = self.scan_cf("default", None, None, Some(10000))?;
         let filtered: Vec<(Vec<u8>, Vec<u8>)> = results
             .into_iter()
-            .filter(|(k, _)| {
-                String::from_utf8_lossy(k).contains(substring)
-            })
+            .filter(|(k, _)| String::from_utf8_lossy(k).contains(substring))
             .take(safe_limit)
             .collect();
 
@@ -2090,19 +2087,13 @@ impl<C: Cache> Engine<C> {
     ///
     /// This scans the entire key-value space — use with caution on large datasets.
     /// Results are limited by `limit` (max 100 by safety limit).
-    pub fn value_search(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+    pub fn value_search(&self, query: &str, limit: usize) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let start = std::time::Instant::now();
         let safe_limit = limit.min(100); // Safety cap for value scanning
         let results = self.scan_cf("default", None, None, Some(10000))?;
         let filtered: Vec<(Vec<u8>, Vec<u8>)> = results
             .into_iter()
-            .filter(|(_, v)| {
-                String::from_utf8_lossy(v).contains(query)
-            })
+            .filter(|(_, v)| String::from_utf8_lossy(v).contains(query))
             .take(safe_limit)
             .collect();
 
@@ -2201,7 +2192,12 @@ impl<C: Cache> Engine<C> {
         // This is a simplified approach: scan the first field's index, then filter
         let first_field = field_list[0];
         let first_value = value_list[0];
-        let index_prefix = format!("{}index:{}:{}:", Self::INDEX_PREFIX, first_field, first_value);
+        let index_prefix = format!(
+            "{}index:{}:{}:",
+            Self::INDEX_PREFIX,
+            first_field,
+            first_value
+        );
         let (results, _cursor) = self.search_prefix(&index_prefix, None, 10000)?;
 
         let mut candidates: Vec<Vec<u8>> = Vec::new();
@@ -2252,12 +2248,7 @@ impl<C: Cache> Engine<C> {
 
     /// Maintain secondary indexes for a key-value pair being written.
     /// Called internally by put_cf_with_ttl_inner.
-    fn update_indexes(
-        &self,
-        cf: &str,
-        key: &[u8],
-        value: &[u8],
-    ) -> Result<()> {
+    fn update_indexes(&self, cf: &str, key: &[u8], value: &[u8]) -> Result<()> {
         // Check if any indexes exist for this CF
         let schema_prefix = format!("{}__schema:index:", Self::INDEX_PREFIX);
         let (index_fields, _) = self.search_prefix(&schema_prefix, None, 100)?;
@@ -2294,12 +2285,7 @@ impl<C: Cache> Engine<C> {
 
     /// Remove secondary index entries for a deleted key.
     /// Called internally by delete_cf.
-    fn remove_indexes(
-        &self,
-        cf: &str,
-        key: &[u8],
-        old_value: &[u8],
-    ) -> Result<()> {
+    fn remove_indexes(&self, cf: &str, key: &[u8], old_value: &[u8]) -> Result<()> {
         let schema_prefix = format!("{}__schema:index:", Self::INDEX_PREFIX);
         let (index_fields, _) = self.search_prefix(&schema_prefix, None, 100)?;
 

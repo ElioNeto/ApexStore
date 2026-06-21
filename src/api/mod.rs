@@ -19,10 +19,10 @@ pub use self::config::ServerConfig;
 use self::connection_guard::IpConnectionGuard;
 pub use self::graphql::AppSchema;
 use self::rate_limiter::{RateLimiter, RateLimiterState};
+use crate::core::engine::transaction::Transaction;
 use crate::infra::access_control::AccessController;
 use crate::infra::cdc::CdcPublisher;
 use crate::infra::idempotency::IdempotencyMiddleware;
-use crate::core::engine::transaction::Transaction;
 use crate::storage::cache::GlobalBlockCache;
 use crate::LsmEngine;
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
@@ -139,7 +139,9 @@ pub struct ScanQuery {
 }
 
 #[allow(dead_code)]
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 /// Request body for `PUT /keys/{key}`
 #[derive(Deserialize)]
@@ -215,7 +217,12 @@ async fn put_key(
     let ttl = body.ttl_secs.map(std::time::Duration::from_secs);
 
     let result = if let Some(ttl) = ttl {
-        engine.set_cf_with_ttl("default", key.as_bytes().to_vec(), body.value.as_bytes().to_vec(), ttl)
+        engine.set_cf_with_ttl(
+            "default",
+            key.as_bytes().to_vec(),
+            body.value.as_bytes().to_vec(),
+            ttl,
+        )
     } else {
         engine.put_cf(
             "default",
@@ -266,7 +273,10 @@ async fn get_key_ttl(
             match engine.get_cf("default", ttl_key.as_bytes()) {
                 Ok(Some(ttl_raw)) if ttl_raw.len() == 16 => {
                     let expires_at = u128::from_le_bytes(
-                        ttl_raw.as_slice().try_into().unwrap_or(u128::MAX.to_le_bytes()),
+                        ttl_raw
+                            .as_slice()
+                            .try_into()
+                            .unwrap_or(u128::MAX.to_le_bytes()),
                     );
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -279,9 +289,9 @@ async fn get_key_ttl(
                     }
                     let remaining_ns = expires_at - now;
                     let remaining_secs = remaining_ns / 1_000_000_000;
-                    HttpResponse::Ok()
-                        .content_type("application/json")
-                        .json(json!({ "key": key, "ttl_secs": remaining_secs as u64, "expired": false }))
+                    HttpResponse::Ok().content_type("application/json").json(
+                        json!({ "key": key, "ttl_secs": remaining_secs as u64, "expired": false }),
+                    )
                 }
                 _ => {
                     // Key exists but no TTL metadata → no expiry
@@ -388,7 +398,10 @@ async fn batch_delete_keys(
     }
 
     let count = body.keys.len();
-    match engine.delete_batch_cf("default", &body.keys.iter().map(|k| k.as_bytes()).collect::<Vec<_>>()) {
+    match engine.delete_batch_cf(
+        "default",
+        &body.keys.iter().map(|k| k.as_bytes()).collect::<Vec<_>>(),
+    ) {
         Ok(_) => {
             tracing::info!(
                 target: "apexstore::audit",
@@ -436,10 +449,15 @@ async fn delete_keys_by_prefix(
     };
 
     // Calculate upper bound for prefix
-    let upper_bound = crate::core::engine::Engine::<crate::storage::cache::GlobalBlockCache>::prefix_end(&prefix);
+    let upper_bound =
+        crate::core::engine::Engine::<crate::storage::cache::GlobalBlockCache>::prefix_end(&prefix);
 
     // Use range tombstone for efficient prefix deletion
-    match engine.delete_range_cf("default", prefix.as_bytes(), upper_bound.as_deref().unwrap_or(b"")) {
+    match engine.delete_range_cf(
+        "default",
+        prefix.as_bytes(),
+        upper_bound.as_deref().unwrap_or(b""),
+    ) {
         Ok(_) => {
             tracing::info!(
                 target: "apexstore::audit",
@@ -590,7 +608,10 @@ async fn keys_range(
                 .into_iter()
                 .skip_while(|(k, _)| {
                     query.cursor.is_some()
-                        && query.cursor.as_deref().is_some_and(|c| k.as_slice() == c.as_bytes())
+                        && query
+                            .cursor
+                            .as_deref()
+                            .is_some_and(|c| k.as_slice() == c.as_bytes())
                 })
                 .collect();
 
@@ -872,7 +893,12 @@ async fn post_key(
     let ttl = body.ttl_secs.map(std::time::Duration::from_secs);
 
     let result = if let Some(ttl) = ttl {
-        engine.set_cf_with_ttl("default", body.key.as_bytes().to_vec(), body.value.as_bytes().to_vec(), ttl)
+        engine.set_cf_with_ttl(
+            "default",
+            body.key.as_bytes().to_vec(),
+            body.value.as_bytes().to_vec(),
+            ttl,
+        )
     } else {
         engine.put_cf(
             "default",
@@ -1175,9 +1201,9 @@ async fn search_keys(
                 .into_iter()
                 .map(|(k, v)| json!({ "key": String::from_utf8_lossy(&k), "value": String::from_utf8_lossy(&v) }))
                 .collect();
-            HttpResponse::Ok()
-                .content_type("application/json")
-                .json(json!({ "success": true, "data": { "records": records, "cursor": new_cursor } }))
+            HttpResponse::Ok().content_type("application/json").json(
+                json!({ "success": true, "data": { "records": records, "cursor": new_cursor } }),
+            )
         }
     }
 }
@@ -1281,20 +1307,15 @@ async fn create_index(
 
 /// Handler for `GET /keys/indexes` — list all secondary indexes.
 #[get("/keys/indexes")]
-async fn list_indexes(
-    req: HttpRequest,
-    engine: web::Data<LsmEngine>,
-) -> impl Responder {
+async fn list_indexes(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
         return e;
     }
 
     match engine.list_indexes("default") {
-        Ok(fields) => {
-            HttpResponse::Ok()
-                .content_type("application/json")
-                .json(json!({ "indexes": fields }))
-        }
+        Ok(fields) => HttpResponse::Ok()
+            .content_type("application/json")
+            .json(json!({ "indexes": fields })),
         Err(e) => {
             tracing::error!(target: "apexstore::api", "Failed to list indexes: {:?}", e);
             HttpResponse::InternalServerError()
@@ -1387,7 +1408,12 @@ async fn batch_keys(
     for record in &body.records {
         let ttl = record.ttl_secs.map(std::time::Duration::from_secs);
         let result = if let Some(ttl) = ttl {
-            engine.set_cf_with_ttl("default", record.key.as_bytes().to_vec(), record.value.as_bytes().to_vec(), ttl)
+            engine.set_cf_with_ttl(
+                "default",
+                record.key.as_bytes().to_vec(),
+                record.value.as_bytes().to_vec(),
+                ttl,
+            )
         } else {
             engine.put_cf(
                 "default",
@@ -1447,7 +1473,10 @@ async fn scan_keys(
                 .into_iter()
                 .skip_while(|(k, _)| {
                     query.cursor.is_some()
-                        && query.cursor.as_deref().is_some_and(|c| k.as_slice() == c.as_bytes())
+                        && query
+                            .cursor
+                            .as_deref()
+                            .is_some_and(|c| k.as_slice() == c.as_bytes())
                 })
                 .collect();
 

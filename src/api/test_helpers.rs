@@ -19,7 +19,7 @@ use crate::storage::cache::GlobalBlockCache;
 use crate::LsmEngine;
 use actix_http::Request;
 use actix_web::dev::{Service, ServiceResponse};
-use actix_web::{test, web, App, http::StatusCode};
+use actix_web::{http::StatusCode, test, web, App};
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::Mutex;

@@ -22,11 +22,7 @@ async fn flush_engine(
     >,
 ) {
     let (status, body) = test_helpers::post_json(app, "/admin/flush", &json!({})).await;
-    assert_eq!(
-        status, 200,
-        "Flush should succeed, got body: {:?}",
-        body
-    );
+    assert_eq!(status, 200, "Flush should succeed, got body: {:?}", body);
 }
 
 #[actix_web::test]
@@ -48,9 +44,11 @@ async fn test_put_key_with_ttl() {
     flush_engine(&mut app).await;
 
     // GET /keys/{key}/ttl returns ttl_secs > 0
-    let body: serde_json::Value =
-        test_helpers::get_json(&mut app, "/keys/ttl-key-1/ttl").await;
-    assert_eq!(body["key"], "ttl-key-1", "Response should echo back the key");
+    let body: serde_json::Value = test_helpers::get_json(&mut app, "/keys/ttl-key-1/ttl").await;
+    assert_eq!(
+        body["key"], "ttl-key-1",
+        "Response should echo back the key"
+    );
     let ttl = body["ttl_secs"].as_u64();
     assert!(ttl.is_some(), "ttl_secs should be present (got {:?})", body);
     assert!(
@@ -58,10 +56,7 @@ async fn test_put_key_with_ttl() {
         "ttl_secs should be positive (got {})",
         ttl.unwrap()
     );
-    assert_eq!(
-        body["expired"], false,
-        "Key should not be expired"
-    );
+    assert_eq!(body["expired"], false, "Key should not be expired");
 }
 
 #[actix_web::test]
@@ -80,8 +75,7 @@ async fn test_get_ttl_for_key_without_ttl() {
     assert_eq!(status, 200);
 
     // GET /keys/{key}/ttl should return ttl_secs as null
-    let body: serde_json::Value =
-        test_helpers::get_json(&mut app, "/keys/no-ttl-key/ttl").await;
+    let body: serde_json::Value = test_helpers::get_json(&mut app, "/keys/no-ttl-key/ttl").await;
     assert_eq!(body["key"], "no-ttl-key");
     assert!(
         body["ttl_secs"].is_null(),

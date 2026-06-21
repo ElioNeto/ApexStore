@@ -21,12 +21,8 @@ async fn put_key(
     key: &str,
     value: &str,
 ) {
-    let (status, _) = test_helpers::put_json(
-        app,
-        &format!("/keys/{}", key),
-        &json!({"value": value}),
-    )
-    .await;
+    let (status, _) =
+        test_helpers::put_json(app, &format!("/keys/{}", key), &json!({"value": value})).await;
     assert_eq!(status, 200, "PUT /keys/{} should succeed", key);
 }
 
@@ -40,7 +36,12 @@ async fn test_scan_basic() {
 
     // Insert several keys
     for i in 1..=5 {
-        put_key(&mut app, &format!("scan-basic-{}", i), &format!("val-{}", i)).await;
+        put_key(
+            &mut app,
+            &format!("scan-basic-{}", i),
+            &format!("val-{}", i),
+        )
+        .await;
     }
 
     // GET /scan
@@ -62,7 +63,12 @@ async fn test_scan_with_limit() {
     let mut app = test_helpers::test_app(engine).await;
 
     for i in 1..=10 {
-        put_key(&mut app, &format!("scan-limit-{:02}", i), &format!("val-{}", i)).await;
+        put_key(
+            &mut app,
+            &format!("scan-limit-{:02}", i),
+            &format!("val-{}", i),
+        )
+        .await;
     }
 
     // GET /scan?limit=3
@@ -108,10 +114,7 @@ async fn test_scan_with_cursor_pagination() {
     assert_eq!(records2.len(), 3, "Second page should have 3 records");
 
     // Verify keys are different between pages
-    let first_keys: Vec<&str> = records
-        .iter()
-        .map(|r| r["key"].as_str().unwrap())
-        .collect();
+    let first_keys: Vec<&str> = records.iter().map(|r| r["key"].as_str().unwrap()).collect();
     let second_keys: Vec<&str> = records2
         .iter()
         .map(|r| r["key"].as_str().unwrap())
@@ -142,22 +145,15 @@ async fn test_keys_range_basic() {
     }
 
     // GET /keys/range with lower and upper bounds
-    let body: serde_json::Value = test_helpers::get_json(
-        &mut app,
-        "/keys/range?lower=range-key-2&upper=range-key-4",
-    )
-    .await;
+    let body: serde_json::Value =
+        test_helpers::get_json(&mut app, "/keys/range?lower=range-key-2&upper=range-key-4").await;
     let keys = body["keys"].as_array().unwrap();
     assert!(!keys.is_empty(), "Range should return results");
 
     // Keys should be within bounds
     for entry in keys {
         let key = entry["key"].as_str().unwrap();
-        assert!(
-            key >= "range-key-2",
-            "Key {} should be >= lower bound",
-            key
-        );
+        assert!(key >= "range-key-2", "Key {} should be >= lower bound", key);
     }
 }
 
@@ -207,10 +203,7 @@ async fn test_value_search() {
     // GET /keys/value-search?q=hello
     let body: serde_json::Value =
         test_helpers::get_json(&mut app, "/keys/value-search?q=hello").await;
-    assert!(
-        body.get("error").is_none(),
-        "Value search should not error"
-    );
+    assert!(body.get("error").is_none(), "Value search should not error");
 
     let records = body["data"]["records"].as_array().unwrap();
     assert_eq!(
@@ -258,10 +251,7 @@ async fn test_batch_delete() {
     )
     .await;
     assert_eq!(status, 200, "Batch delete should succeed");
-    assert_eq!(
-        body["deleted_count"], 2,
-        "Should report 2 deleted keys"
-    );
+    assert_eq!(body["deleted_count"], 2, "Should report 2 deleted keys");
 
     // Verify deletions via engine
     let val1 = engine.get("bd-key-1").unwrap();
@@ -279,17 +269,10 @@ async fn test_batch_delete_empty_keys() {
     let mut app = test_helpers::test_app(engine).await;
 
     // POST /keys/batch/delete with empty keys list
-    let (status, body) = test_helpers::post_json(
-        &mut app,
-        "/keys/batch/delete",
-        &json!({"keys": []}),
-    )
-    .await;
+    let (status, body) =
+        test_helpers::post_json(&mut app, "/keys/batch/delete", &json!({"keys": []})).await;
     assert_eq!(status, 200, "Empty batch delete should succeed");
-    assert_eq!(
-        body["deleted_count"], 0,
-        "Should report 0 deleted keys"
-    );
+    assert_eq!(body["deleted_count"], 0, "Should report 0 deleted keys");
 }
 
 // ── Secondary Index: POST /keys/{key}/index/{field} + GET /keys/by-index ──
@@ -301,12 +284,8 @@ async fn test_create_and_query_index() {
     let mut app = test_helpers::test_app(engine).await;
 
     // Create an index on the "status" field
-    let (status, _body) = test_helpers::post_json(
-        &mut app,
-        "/keys/test-key/index/status",
-        &json!({}),
-    )
-    .await;
+    let (status, _body) =
+        test_helpers::post_json(&mut app, "/keys/test-key/index/status", &json!({})).await;
     assert_eq!(status, 200, "Create index should succeed");
 
     // Query by index (the index is empty since no keys have the field)
@@ -335,20 +314,12 @@ async fn test_query_index_missing_params() {
         .uri("/keys/by-index?eq=active")
         .to_request();
     let resp = actix_web::test::call_service(&app, req).await;
-    assert_eq!(
-        resp.status(),
-        400,
-        "Missing index param should return 400"
-    );
+    assert_eq!(resp.status(), 400, "Missing index param should return 400");
 
     // Missing `eq` parameter -> should return 400
     let req = actix_web::test::TestRequest::get()
         .uri("/keys/by-index?index=status")
         .to_request();
     let resp = actix_web::test::call_service(&app, req).await;
-    assert_eq!(
-        resp.status(),
-        400,
-        "Missing eq param should return 400"
-    );
+    assert_eq!(resp.status(), 400, "Missing eq param should return 400");
 }
