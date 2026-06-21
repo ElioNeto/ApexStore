@@ -10,6 +10,7 @@ pub mod health;
 pub mod notes;
 pub mod rate_limiter;
 pub mod sync;
+pub mod test_helpers;
 pub mod timeout_middleware;
 
 use self::access_control::AccessControl;
@@ -1749,7 +1750,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     }
 
     // Create EventBus for WebSocket/SSE real-time event streaming
-    let event_bus_inner = events::EventBus::new();
+    let event_bus_inner = crate::infra::events::EventBus::new();
     event_bus_inner.set_enabled(true);
     let event_bus = web::Data::new(event_bus_inner.clone());
 

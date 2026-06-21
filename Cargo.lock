@@ -481,6 +481,7 @@ name = "apex-store-rs"
 version = "2.2.1"
 dependencies = [
  "actix-cors",
+ "actix-http",
  "actix-rt",
  "actix-web",
  "actix-web-httpauth",

@@ -15,6 +15,7 @@ pub mod data_tiering;
 pub mod degradation;
 pub mod disk_monitor;
 pub mod error;
+pub mod events;
 pub mod idempotency;
 pub mod log;
 pub mod memory_limiter;
@@ -40,3 +41,7 @@ pub mod webhook_triggers;
 /// WebAssembly plugin system (requires `wasm` feature).
 #[cfg(feature = "wasm")]
 pub mod wasm_plugin;
+
+// ── Re-exports ──────────────────────────────────────────────────────────────
+
+pub use self::events::{EventBus, EventQuery};

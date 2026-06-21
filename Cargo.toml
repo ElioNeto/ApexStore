@@ -57,6 +57,7 @@ lru = "0.12"
 rayon = "1.11"
 uuid = { version = "1.22", features = ["v4", "serde"] }
 actix-web = { version = "4.12", features = ["rustls"] }
+actix-http = "3"
 rustls = "0.20"
 rustls-pemfile = "1"
 
@@ -98,9 +99,9 @@ actix-ws = "0.3"
 dashmap = "6"
 regex-lite = "0.1"
 futures = "0.3"
+tempfile = "3.24"
 
 [dev-dependencies]
-tempfile = "3.24"
 criterion = { version = "0.5", features = ["html_reports"] }
 fail = "0.4"
 futures = "0.3"

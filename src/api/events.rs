@@ -9,116 +9,14 @@
 use actix_web::{get, web, HttpRequest, HttpResponse};
 use actix_ws::Message;
 use futures::StreamExt;
-use serde::Deserialize;
 use serde_json::json;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::broadcast;
 
 use super::auth::{require_permission, Permission};
-use crate::infra::cdc::{CdcEvent, CdcEventType, CdcPublisher};
-
-// ── Event Bus ───────────────────────────────────────────────────────────────
-
-/// Capacity of the broadcast channel for CDC events.
-const EVENT_CHANNEL_CAPACITY: usize = 256;
-
-/// A CDC event publisher that broadcasts events to all connected clients
-/// via a tokio broadcast channel.
-#[derive(Clone)]
-pub struct EventBus {
-    /// Broadcast sender for CDC events.
-    sender: broadcast::Sender<CdcEvent>,
-    /// Whether the event bus is enabled.
-    enabled: Arc<AtomicBool>,
-}
-
-impl Default for EventBus {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl EventBus {
-    /// Create a new event bus.
-    pub fn new() -> Self {
-        let (sender, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
-        Self {
-            sender,
-            enabled: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    /// Return a receiver that can subscribe to events.
-    pub fn subscribe(&self) -> broadcast::Receiver<CdcEvent> {
-        self.sender.subscribe()
-    }
-
-    /// Enable or disable the event bus.
-    pub fn set_enabled(&self, enabled: bool) {
-        self.enabled.store(enabled, Ordering::SeqCst);
-    }
-
-    /// Check if the event bus is enabled.
-    pub fn is_enabled(&self) -> bool {
-        self.enabled.load(Ordering::SeqCst)
-    }
-}
-
-impl CdcPublisher for EventBus {
-    fn publish(&self, event: CdcEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if !self.enabled.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        let _ = self.sender.send(event);
-        Ok(())
-    }
-}
-
-impl CdcPublisher for Arc<EventBus> {
-    fn publish(&self, event: CdcEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        (**self).publish(event)
-    }
-}
-
-// ── Query parameters ────────────────────────────────────────────────────────
-
-/// Query parameters for event subscriptions.
-#[derive(Deserialize)]
-pub struct EventsQuery {
-    /// Optional prefix filter — only receive events for keys matching this prefix.
-    prefix: Option<String>,
-    /// Optional event type filter: "put" or "delete".
-    #[serde(rename = "type")]
-    event_type: Option<String>,
-}
-
-impl EventsQuery {
-    /// Check if an event passes the filter criteria.
-    fn matches(&self, event: &CdcEvent) -> bool {
-        // Filter by key prefix
-        if let Some(ref prefix) = self.prefix {
-            let key_str = String::from_utf8_lossy(&event.key);
-            if !key_str.starts_with(prefix) {
-                return false;
-            }
-        }
-        // Filter by event type
-        if let Some(ref evt_type) = self.event_type {
-            let matches_type = match evt_type.to_lowercase().as_str() {
-                "put" => matches!(event.event_type, CdcEventType::Put),
-                "delete" => matches!(event.event_type, CdcEventType::Delete),
-                _ => true,
-            };
-            if !matches_type {
-                return false;
-            }
-        }
-        true
-    }
-}
+use crate::infra::cdc::CdcEvent;
+use crate::infra::events::{EventBus, EventQuery};
 
 // ── WebSocket handler ───────────────────────────────────────────────────────
 
@@ -128,7 +26,7 @@ pub async fn ws_events(
     req: HttpRequest,
     body: web::Payload,
     event_bus: web::Data<EventBus>,
-    query: web::Query<EventsQuery>,
+    query: web::Query<EventQuery>,
 ) -> Result<HttpResponse, actix_web::Error> {
     // Permission check
     if let Err(e) = require_permission(&req, Permission::Read) {
@@ -210,7 +108,7 @@ pub async fn ws_events(
 /// A stream that yields SSE-formatted CDC events.
 struct SseEventStream {
     rx: broadcast::Receiver<CdcEvent>,
-    filter: EventsQuery,
+    filter: EventQuery,
     initial_sent: bool,
 }
 
@@ -266,7 +164,7 @@ impl futures::Stream for SseEventStream {
 pub async fn sse_events(
     req: HttpRequest,
     event_bus: web::Data<EventBus>,
-    query: web::Query<EventsQuery>,
+    query: web::Query<EventQuery>,
 ) -> HttpResponse {
     if let Err(e) = require_permission(&req, Permission::Read) {
         return e;

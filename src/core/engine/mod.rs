@@ -129,7 +129,10 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
                 })
                 .unwrap_or_default()
         } else {
-            EncryptionConfig::default()
+            crate::storage::encryption::EncryptionConfig {
+                enabled: false,
+                ..Default::default()
+            }
         };
 
         Self {
@@ -1576,8 +1579,9 @@ impl<C: Cache> Engine<C> {
                 // Write SSTable using SstableBuilder (preserves LogRecord
                 // metadata including is_deleted for correct tombstone vs
                 // empty-value distinction when read back via SstableReader).
-                let mut ttl_entries: Vec<(Vec<u8>, u128)> = Vec::new();
-                {
+                // Build a combined list of regular + TTL entries in sorted order
+                // so that the SSTable builder receives strictly increasing keys.
+                let combined: Vec<(Vec<u8>, LogRecord)> = {
                     let mut builder = SstableBuilder::new_with_encryption(
                         output_path.clone(),
                         storage_config,
@@ -1592,30 +1596,31 @@ impl<C: Cache> Engine<C> {
                         .map(|e| (e.key().clone(), e.value().clone()))
                         .collect();
                     sorted.sort_by(|a, b| a.0.cmp(&b.0));
+                    let mut combined: Vec<(Vec<u8>, LogRecord)> = Vec::with_capacity(
+                        sorted.len() * 2,
+                    );
                     for (key, record) in &sorted {
                         if record.is_expired_at(now) {
                             continue;
                         }
-                        builder.add(key, record)?;
-                        // Track TTL entries so we can persist them as
-                        // __ttl:{key} -> expires_at in the SSTable and
-                        // also in the in-memory Table for crash-safe reads.
+                        combined.push((key.clone(), record.clone()));
                         if let Some(expires_at) = record.expires_at {
-                            ttl_entries.push((key.clone(), expires_at));
+                            let ttl_key =
+                                format!("__ttl:{}", String::from_utf8_lossy(key)).into_bytes();
+                            let ttl_value = expires_at.to_le_bytes().to_vec();
+                            let ttl_record = LogRecord::new(ttl_key, ttl_value);
+                            combined.push((ttl_record.key.clone(), ttl_record));
                         }
                     }
-                    // Write TTL metadata entries into the SSTable so that
-                    // after a restart the engine can detect expired keys
-                    // that were flushed.
-                    for (key, expires_at) in &ttl_entries {
-                        let ttl_key =
-                            format!("__ttl:{}", String::from_utf8_lossy(key)).into_bytes();
-                        let ttl_value = expires_at.to_le_bytes().to_vec();
-                        let ttl_record = LogRecord::new(ttl_key, ttl_value);
-                        builder.add(&ttl_record.key, &ttl_record)?;
+                    // Re-sort to ensure __ttl:{key} entries are interleaved correctly
+                    // (they sort before their corresponding data key because '_' < most chars).
+                    combined.sort_by(|a, b| a.0.cmp(&b.0));
+                    for (key, record) in &combined {
+                        builder.add(key, record)?;
                     }
                     builder.finish()?;
-                }
+                    combined
+                };
 
                 // ── Build in-memory Table (for fast reads) ───────────────────
                 // Keep the raw BTreeMap for the in-memory fast path, but also
@@ -1629,10 +1634,10 @@ impl<C: Cache> Engine<C> {
                     .collect();
                 // Add TTL metadata to the in-memory Table so that fast
                 // reads from table.data can correctly detect expiry.
-                for (key, expires_at) in &ttl_entries {
-                    let ttl_key = format!("__ttl:{}", String::from_utf8_lossy(key)).into_bytes();
-                    let ttl_value = expires_at.to_le_bytes().to_vec();
-                    raw_data.insert(ttl_key, ttl_value);
+                for (key, record) in &combined {
+                    if key.starts_with(b"__ttl:") {
+                        raw_data.insert(key.clone(), record.value.clone());
+                    }
                 }
 
                 let mut table =

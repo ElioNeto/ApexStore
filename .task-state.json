@@ -445,7 +445,7 @@
       "number": 184,
       "priority": "high",
       "title": "[BUG] Snapshot restore may lose data when all data was flushed to SSTables",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "blocks": [],
       "acceptance_summary": [
@@ -463,7 +463,7 @@
       "number": 181,
       "priority": "high",
       "title": "[BUG] SSTable count mismatch — engine reports 5 files but 19 exist on disk",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "blocks": [],
       "acceptance_summary": [
@@ -559,7 +559,7 @@
       "number": 206,
       "priority": "medium",
       "title": "[FEATURE] WebAssembly plugin system",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "blocks": [],
       "acceptance_summary": [
@@ -575,7 +575,7 @@
       "number": 207,
       "priority": "medium",
       "title": "[FEATURE] Built-in vector search / embeddings index",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "blocks": [],
       "acceptance_summary": [
@@ -590,7 +590,7 @@
       "number": 208,
       "priority": "medium",
       "title": "[FEATURE] Time-travel queries",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "blocks": [],
       "acceptance_summary": [
@@ -605,7 +605,7 @@
       "number": 209,
       "priority": "medium",
       "title": "[FEATURE] Built-in pub/sub messaging",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "blocks": [],
       "acceptance_summary": [
@@ -620,7 +620,7 @@
       "number": 210,
       "priority": "medium",
       "title": "[FEATURE] Automatic data tiering",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "blocks": [],
       "acceptance_summary": [
@@ -635,7 +635,7 @@
       "number": 211,
       "priority": "medium",
       "title": "[FEATURE] Multi-model queries",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "blocks": [],
       "acceptance_summary": [
@@ -650,7 +650,7 @@
       "number": 212,
       "priority": "medium",
       "title": "[FEATURE] Webhook triggers",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "blocks": [],
       "acceptance_summary": [
