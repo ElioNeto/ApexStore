@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/ElioNeto/teamcode/main/schemas/teamcode.json",
-  "default_agent": "build",
+  "default_agent": "god",
   "command": {
     "dev": {
       "description": "Start dev server",
@@ -20,6 +20,21 @@
     }
   },
   "agent": {
+    "god": {
+      "description": "Omnipotent agent with unrestricted access to all tools and permissions",
+      "permission": {
+        "edit": "allow",
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "bash": "allow",
+        "task": "allow",
+        "external_directory": "allow",
+        "question": "allow",
+        "webfetch": "allow"
+      }
+    },
     "build": {
       "description": "Default development agent"
     },
