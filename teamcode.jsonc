@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/ElioNeto/teamcode/main/schemas/teamcode.json",
+  "default_agent": "build",
+  "command": {
+    "dev": {
+      "description": "Start dev server",
+      "template": "npm run dev"
+    },
+    "build": {
+      "description": "Build project",
+      "template": "npm run build"
+    },
+    "test": {
+      "description": "Run tests",
+      "template": "npm test"
+    },
+    "lint": {
+      "description": "Lint code",
+      "template": "npx eslint frontend/src --ext .js,.jsx,.ts,.tsx"
+    }
+  },
+  "agent": {
+    "build": {
+      "description": "Default development agent"
+    },
+    "frontend": {
+      "description": "Frontend specialist for UI development"
+    }
+  },
+  "permission": {
+    "edit": "allow",
+    "bash": {
+      "npm *": "allow",
+      "npx *": "allow",
+      "node *": "allow",
+      "cargo *": "allow",
+      "*": "ask"
+    }
+  }
+}
