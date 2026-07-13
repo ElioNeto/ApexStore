@@ -145,11 +145,11 @@ impl Encryptor {
         Ok(result)
     }
 
-    /// Decrypt a ciphertext block previously produced by [`encrypt_block`].
+    /// Decrypt a ciphertext block previously produced by `encrypt_block`.
     ///
     /// When encryption is disabled, returns `data` unchanged.
     ///
-    /// Expects the data to be in the format produced by [`encrypt_block`]:
+    /// Expects the data to be in the format produced by `encrypt_block`:
     /// `[12-byte IV][ciphertext + tag]`.
     pub fn decrypt_block(&self, data: &[u8]) -> Result<Vec<u8>> {
         if !self.enabled {

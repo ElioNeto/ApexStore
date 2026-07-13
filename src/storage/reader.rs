@@ -47,6 +47,7 @@ pub struct SstableReader {
     block_cache: Arc<GlobalBlockCache>,
     path: PathBuf,
     table_id: u64,
+    /// Storage configuration (retained for future extensibility).
     #[allow(dead_code)]
     config: StorageConfig,
     encryptor: Encryptor,

@@ -84,7 +84,7 @@ impl Table {
     /// Create a table from an SSTable file path.
     ///
     /// `encryption` controls how the meta block is decrypted on read.
-    /// Pass [`EncryptionConfig::default()`] (or `None`) when encryption
+    /// Pass `EncryptionConfig::default()` (or `None`) when encryption
     /// is not needed.
     pub fn from_sstable_path(
         path: &std::path::Path,

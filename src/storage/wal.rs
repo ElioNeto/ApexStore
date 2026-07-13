@@ -833,7 +833,7 @@ fn resync_after_invalid_length(
     ///
     /// A LogRecord with both key and value empty serialises to 34 bytes
     /// (Vec length prefixes 0+0 = 16, u128 timestamp = 16, bool = 1,
-    /// Option<String> = 1), so the WAL frame length field is at least
+    /// `Option<String>` = 1), so the WAL frame length field is at least
     /// `1 + 34 = 35`.  Any candidate smaller than this is certainly a
     /// false positive from payload data.
     const MIN_LENGTH: usize = 35;

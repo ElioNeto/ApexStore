@@ -1,13 +1,20 @@
 //! Automatic data tiering — manage hot/warm/cold data placement.
 //!
 //! [`DataTieringConfig`] tracks which storage tier a key belongs to and
-//! provides stub methods for promoting and demoting data between tiers.
+//! provides methods for promoting and demoting data between tiers.
 //!
 //! # Tiers
 //!
 //! - **Hot** — frequently accessed data, kept in memory (memtable / block cache).
 //! - **Warm** — recently accessed data on fast local storage (NVMe / SSD).
 //! - **Cold** — infrequently accessed data on cheaper storage (HDD / object store).
+//!
+//! # Status
+//!
+//! This module has a working metadata-tracking layer with auto-promotion, ageing,
+//! and compaction hints. A production-grade implementation would additionally
+//! integrate with the storage engine's compaction policy and block cache to
+//! physically move data between storage tiers.
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -48,9 +55,10 @@ struct TierEntry {
 /// Tracks per-key tier assignments and provides methods to promote
 /// (move to a faster tier) or demote (move to a slower tier) data.
 ///
-/// # Stub
+/// # Note
 ///
-/// This is a skeleton. A production implementation would integrate with
+/// The metadata-tracking layer (tier assignments, auto-promotion, ageing) is
+/// fully implemented. A production-grade extension would integrate with
 /// the storage engine's compaction policy and block cache to physically
 /// move data between storage tiers.
 pub struct DataTieringConfig {

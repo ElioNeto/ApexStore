@@ -1,3 +1,17 @@
+//! HTTP API layer — REST + GraphQL endpoints for the ApexStore engine.
+//!
+//! Built on actix-web 4 with:
+//!
+//! - Full CRUD for key-value operations (GET, PUT, DELETE, SCAN, BATCH).
+//! - Transaction management (begin, commit, rollback) via REST.
+//! - GraphQL endpoint (`/graphql`) with query and mutation support.
+//! - Token-based authentication with role-based permissions (read/write/delete/admin).
+//! - Rate limiting with IP-based sliding window and proxy support (`X-Forwarded-For`).
+//! - Admin dashboard at `/admin/dashboard` with engine stats and compaction status.
+//! - WebSocket sync endpoint for real-time data synchronisation.
+//! - Server-Sent Events (SSE) for event streaming.
+//! - Notes engine REST endpoints (templates, daily notes, frontmatter validation).
+
 pub mod access_control;
 pub mod admin;
 pub mod audit_middleware;
@@ -92,6 +106,7 @@ pub struct KeysQuery {
     prefix: Option<String>,
     limit: Option<usize>,
     /// Query string (used by frontend for prefix search).
+    /// This field is populated by serde deserialization from HTTP query params.
     #[allow(dead_code)]
     q: Option<String>,
     /// Cursor for paginated results (returned by previous response).
@@ -128,17 +143,19 @@ pub struct ScanQuery {
     limit: Option<usize>,
     /// Cursor for paginated results
     cursor: Option<String>,
-    /// Whether the lower bound is inclusive (default true)
+    /// Whether the lower bound is inclusive (default true).
+    /// Deserialized from HTTP query params via serde.
     #[allow(dead_code)]
     #[serde(default = "default_true")]
     include_lower: bool,
-    /// Whether the upper bound is inclusive (default false)
+    /// Whether the upper bound is inclusive (default false).
+    /// Deserialized from HTTP query params via serde.
     #[allow(dead_code)]
     #[serde(default)]
     include_upper: bool,
 }
 
-#[allow(dead_code)]
+/// Helper for serde default for `include_lower` (default true).
 fn default_true() -> bool {
     true
 }

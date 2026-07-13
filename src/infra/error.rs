@@ -1,3 +1,18 @@
+//! Unified error types for the ApexStore engine.
+//!
+//! Defines [`LsmError`] — the primary error enum used across the entire
+//! codebase — and the [`Result`] type alias.
+//!
+//! Error variants cover:
+//!
+//! - I/O errors (disk, file operations)
+//! - Corruption (CRC mismatch, SSTable format, WAL)
+//! - Key/value too large
+//! - Lock poisoning (legacy, retained for compatibility)
+//! - Invalid arguments
+//! - Resource exhaustion
+//! - Serialisation failures
+
 use std::io;
 use std::time::SystemTimeError;
 use thiserror::Error;

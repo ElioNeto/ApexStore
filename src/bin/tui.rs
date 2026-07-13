@@ -4,9 +4,9 @@
 //! Quit: `q`, `quit`, `exit`, or Esc / Ctrl-C
 //!
 //! Commands (identical to CLI):
-//!   SET <key> <value> | GET <key> | DEL <key>
-//!   SEARCH <q> [--prefix] | SCAN <prefix> | ALL | KEYS | COUNT
-//!   STATS [ALL] | BATCH <n> | BATCH SET <file> | DEMO | CLEAR | HELP
+//!   SET `key` `value` | GET `key` | DEL `key`
+//!   SEARCH `query` [--prefix] | SCAN `prefix` | ALL | KEYS | COUNT
+//!   STATS ALL | BATCH `n` | BATCH SET `file` | DEMO | CLEAR | HELP
 
 use apexstore::{LogLevel, LsmConfig, LsmEngine, LsmError, LsmStats, UsageLog};
 use chrono::Local;

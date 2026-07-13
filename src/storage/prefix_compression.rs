@@ -84,7 +84,7 @@ impl PrefixCompressor {
 
     /// Decode a prefix-compressed key sequence back into full keys.
     ///
-    /// The `data` must be the output of [`encode_keys`] for the **full** key list
+    /// The `data` must be the output of `encode_keys` for the **full** key list
     /// (including the first key).  `first_key` is used as the base for reconstructing
     /// the first key from the encoded data (which stores the first key with
     /// `shared_prefix_len = 0`).

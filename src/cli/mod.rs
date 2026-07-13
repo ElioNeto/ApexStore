@@ -1,15 +1,15 @@
 //! ApexStore CLI — command-line interface for the key-value store.
 //!
 //! Usage:
-//!   apexstore-cli --db <PATH> get <key>
-//!   apexstore-cli --db <PATH> set <key> <value>
-//!   apexstore-cli --db <PATH> delete <key>
-//!   apexstore-cli --db <PATH> scan [--prefix <PREFIX>] [--limit <N>]
-//!   apexstore-cli --db <PATH> keys [--prefix <PREFIX>] [--limit <N>]
-//!   apexstore-cli --db <PATH> count [--prefix <PREFIX>]
-//!   apexstore-cli --db <PATH> stats
-//!   apexstore-cli --db <PATH> flush
-//!   apexstore-cli --db <PATH> compact
+//!   apexstore-cli --db `PATH` get `key`
+//!   apexstore-cli --db `PATH` set `key` `value`
+//!   apexstore-cli --db `PATH` delete `key`
+//!   apexstore-cli --db `PATH` scan [--prefix `PREFIX`] [--limit `N`]
+//!   apexstore-cli --db `PATH` keys [--prefix `PREFIX`] [--limit `N`]
+//!   apexstore-cli --db `PATH` count [--prefix `PREFIX`]
+//!   apexstore-cli --db `PATH` stats
+//!   apexstore-cli --db `PATH` flush
+//!   apexstore-cli --db `PATH` compact
 
 use crate::api::auth::token::{ApiToken, Permission};
 use crate::api::auth::TokenManager;
@@ -37,7 +37,7 @@ struct Cli {
     #[arg(long = "encrypt-key-file")]
     encrypt_key_file: Option<std::path::PathBuf>,
 
-    /// CDC endpoint URL for streaming data changes (e.g. http://localhost:9000/webhook).
+    /// CDC endpoint URL for streaming data changes (e.g. `http://localhost:9000/webhook`).
     /// When set, CDC is enabled and data mutations are posted as JSON to this endpoint.
     #[arg(long = "cdc-endpoint")]
     cdc_endpoint: Option<String>,

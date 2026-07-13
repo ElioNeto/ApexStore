@@ -14,7 +14,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use crate::infra::multi_model::StorageEngine;
+//! use crate::infra::models::multi_model::StorageEngine;
 //! use crate::infra::cdc::CdcCollector;
 //!
 //! let inner = MyEngine::new();
@@ -27,7 +27,7 @@
 //! ```
 
 use crate::infra::cdc::{CdcEvent, CdcPublisher};
-use crate::infra::multi_model::StorageEngine;
+use crate::infra::models::multi_model::StorageEngine;
 
 // ── WebhookStorage trait ────────────────────────────────────────────────────
 
@@ -273,7 +273,7 @@ impl Default for WebhookRegistry {
 mod tests {
     use super::*;
     use crate::infra::cdc::CdcCollector;
-    use crate::infra::multi_model::InMemoryEngine;
+    use crate::infra::models::multi_model::InMemoryEngine;
     use std::sync::Arc;
 
     // ── WebhookRegistry tests ─────────────────────────────────────────────

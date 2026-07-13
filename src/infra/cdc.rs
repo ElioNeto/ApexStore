@@ -54,7 +54,7 @@ impl CdcConfig {
 }
 
 /// The type of a CDC event.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CdcEventType {
     /// A key-value pair was inserted or updated.
@@ -267,6 +267,8 @@ mod hex_serde {
         serializer.serialize_str(&hex::encode(bytes))
     }
 
+    /// Deserialize hex-encoded bytes (counterpart to `serialize`).
+    /// Currently unused but kept for symmetry and future JSON ↔ hex integration.
     #[allow(dead_code)]
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
     where

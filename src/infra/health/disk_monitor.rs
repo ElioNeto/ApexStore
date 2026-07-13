@@ -3,7 +3,7 @@
 //! Periodically checks the available disk space on the data directory and
 //! triggers actions (warnings, graceful shutdown) when thresholds are crossed.
 
-use crate::infra::degradation::{DegradationManager, DegradationMode};
+use crate::infra::resilience::degradation::{DegradationManager, DegradationMode};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -89,7 +89,7 @@ impl DiskMonitor {
     /// Link a [`DegradationManager`] to this monitor.
     ///
     /// When the critical disk-space threshold is crossed, the degradation
-    /// manager is automatically set to [`DegradationMode::ReadOnly`](crate::infra::degradation::DegradationMode::ReadOnly)
+    /// manager is automatically set to `DegradationMode::ReadOnly`
     /// so that write operations are rejected until more space becomes available.
     pub fn with_degradation_manager(self, mgr: Arc<DegradationManager>) -> Self {
         *self.inner.degradation_manager.lock().unwrap() = Some(mgr);
