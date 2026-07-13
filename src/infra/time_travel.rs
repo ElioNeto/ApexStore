@@ -127,7 +127,7 @@ impl TimeTravelEngine {
     /// `data` should be a full dump of the column family at this instant.
     /// `label` is an optional human-readable name for the snapshot.
     ///
-    /// If persistence is enabled (via [`new_with_persistence`]), the snapshot
+    /// If persistence is enabled (via `new_with_persistence`), the snapshot
     /// is also written to disk.
     pub fn capture(&mut self, data: HashMap<Vec<u8>, Vec<u8>>, label: &str) -> u128 {
         let timestamp = now_nanos();

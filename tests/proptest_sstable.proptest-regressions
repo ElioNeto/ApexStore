@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 2f98f6cdbe935e92188af6b4ebefb2ae1806e8f98d83253548f9b44b8b3a845e # shrinks to records = [([152], [0]), ([0], [0])]
+cc 7ddcb556433fe9e24a71cba08805c36b69bce2f31940eb59b18b4506726f9f3d # shrinks to records = [([118], [0]), ([118], [0])]

@@ -2,10 +2,9 @@ use crate::infra::config::StorageConfig;
 use crate::storage::cache::{Cache, GlobalBlockCache};
 use crate::storage::encryption::EncryptionConfig;
 use crate::storage::reader::SstableReader;
-use lru::LruCache;
+use moka::sync::Cache as MokaCache;
 use parking_lot::Mutex;
 use std::collections::HashSet;
-use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -26,7 +25,8 @@ pub struct VersionSet<C: Cache> {
     _cache: std::marker::PhantomData<C>,
     /// Key-value cache for table lookups. Caches individual key-value results
     /// so repeated reads for the same key bypass table iteration.
-    kv_cache: Arc<Mutex<LruCache<Vec<u8>, Vec<u8>>>>,
+    /// Uses `moka::sync::Cache` for concurrent, lock-free access.
+    kv_cache: MokaCache<Vec<u8>, Arc<Vec<u8>>>,
     tables: std::collections::HashMap<String, Vec<crate::core::table::Table>>,
     /// Storage configuration used to open SstableReaders for on-disk tables.
     storage_config: StorageConfig,
@@ -59,9 +59,7 @@ impl<C: Cache> VersionSet<C> {
         block_cache: Option<Arc<GlobalBlockCache>>,
     ) -> Self {
         // Derive KV cache capacity from block cache size (rough estimate: entry ~200 bytes)
-        let kv_capacity = (options.block_cache_size_mb * 1024 * 1024 / 200).max(1000);
-        let kv_capacity = NonZeroUsize::new(kv_capacity)
-            .unwrap_or_else(|| NonZeroUsize::new(1000).expect("1000 is non-zero"));
+        let kv_capacity = ((options.block_cache_size_mb * 1024 * 1024) / 200).max(1000) as u64;
         // Build EncryptionConfig from the infra config
         let encryption = if storage_config.encryption_enabled {
             EncryptionConfig::from_key_path(storage_config.encryption_key_path.as_deref())
@@ -72,7 +70,10 @@ impl<C: Cache> VersionSet<C> {
 
         Self {
             _cache: std::marker::PhantomData,
-            kv_cache: Arc::new(Mutex::new(LruCache::new(kv_capacity))),
+            kv_cache: MokaCache::builder()
+                .max_capacity(kv_capacity)
+                .name("version_set_kv_cache")
+                .build(),
             tables: std::collections::HashMap::new(),
             storage_config,
             block_cache,
@@ -86,20 +87,18 @@ impl<C: Cache> VersionSet<C> {
 
     /// Check if a key is cached.
     pub fn get_cached(&self, key: &[u8]) -> Option<Vec<u8>> {
-        let mut cache = self.kv_cache.lock();
-        cache.get(key).cloned()
+        self.kv_cache.get(key).map(|arc| (*arc).clone())
     }
 
     /// Store a key-value pair in the cache.
     pub fn put_cached(&self, key: Vec<u8>, value: Vec<u8>) {
-        let mut cache = self.kv_cache.lock();
-        cache.put(key, value);
+        self.kv_cache.insert(key, Arc::new(value));
     }
 
     /// Clear the entire KV cache. Should be called after compaction or flush
     /// to prevent stale results.
     pub fn clear_cache(&self) {
-        self.kv_cache.lock().clear();
+        self.kv_cache.invalidate_all();
     }
 
     pub fn get(&self, cf: &str, key: &[u8]) -> Option<Vec<u8>> {

@@ -271,7 +271,7 @@ impl EngineMetrics {
 
     /// Format all metrics in Prometheus exposition format.
     ///
-    /// See https://prometheus.io/docs/instrumenting/exposition_formats/
+    /// See <https://prometheus.io/docs/instrumenting/exposition_formats/>
     pub fn format_prometheus(&self) -> String {
         let mut out = String::new();
 

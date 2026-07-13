@@ -324,6 +324,8 @@ impl Default for LeveledCompaction {
 }
 
 impl LeveledCompaction {
+    /// Returns the total byte size (keys + values) of a table.
+    /// Only used from `LeveledCompaction::pick_compaction`.
     #[allow(dead_code)]
     fn get_table_size(table: &Table) -> usize {
         table

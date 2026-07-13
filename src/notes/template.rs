@@ -81,7 +81,7 @@ pub fn render_template(template: &str, variables: &HashMap<String, String>) -> R
 }
 
 /// Extract variable names (non-date, non-time placeholders) from a template string.
-#[allow(dead_code)]
+#[cfg(test)]
 fn extract_variables(template: &str) -> Vec<String> {
     let mut vars = Vec::new();
     let mut rest = template;

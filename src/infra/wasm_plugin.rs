@@ -1,6 +1,6 @@
 //! WebAssembly plugin system — load and call WASM plugins at runtime.
 //!
-//! This module provides a [`WasmPlugin`] struct that can load a WebAssembly
+//! This module provides a [`WasmPlugin`](crate::infra::wasm_plugin::WasmPlugin) struct that can load a WebAssembly
 //! module from a file, call exported functions by name, and unload the module
 //! when no longer needed.
 //!

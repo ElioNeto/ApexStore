@@ -1,13 +1,14 @@
 //! Built-in vector search / embeddings index.
 //!
 //! Provides a [`VectorIndex`] that stores dense vector embeddings alongside
-//! string keys and supports approximate nearest-neighbour (ANN) search.
+//! string keys and supports approximate nearest-neighbour (ANN) search
+//! via brute-force cosine similarity.
 //!
-//! # Stub
+//! # Status
 //!
-//! This is a skeleton implementation. A production version would integrate
-//! HNSW, IVF, or a similar ANN algorithm (e.g. via `pgvector`, `usearch`,
-//! or a custom implementation).
+//! The index is fully functional with brute-force search (O(n) scan). For
+//! large datasets, consider replacing the internal index with an HNSW graph,
+//! IVF, or a dedicated ANN library (e.g. `usearch`).
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

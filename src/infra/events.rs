@@ -109,3 +109,102 @@ impl EventQuery {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infra::cdc::{CdcEventType, CdcPublisher};
+
+    fn make_event(key: &str, event_type: CdcEventType) -> CdcEvent {
+        CdcEvent {
+            event_type,
+            cf: "default".to_string(),
+            key: key.as_bytes().to_vec(),
+            value: Some(b"val".to_vec()),
+            timestamp: 0,
+        }
+    }
+
+    #[test]
+    fn test_event_bus_enable_disable() {
+        let bus = EventBus::new();
+        assert!(!bus.is_enabled());
+        bus.set_enabled(true);
+        assert!(bus.is_enabled());
+        bus.set_enabled(false);
+        assert!(!bus.is_enabled());
+    }
+
+    #[test]
+    fn test_event_bus_subscribe_and_publish() {
+        let bus = EventBus::new();
+        bus.set_enabled(true);
+        let mut rx = bus.subscribe();
+
+        let event = make_event("test_key", CdcEventType::Put);
+        bus.publish(event).unwrap();
+
+        // Should receive the published event
+        let received = rx.try_recv().unwrap();
+        assert_eq!(received.key, b"test_key");
+        assert_eq!(received.event_type, CdcEventType::Put);
+    }
+
+    #[test]
+    fn test_event_bus_disabled_does_not_panic() {
+        let bus = EventBus::new();
+        // Not enabled — publish should succeed without sending
+        let event = make_event("ignored", CdcEventType::Delete);
+        assert!(bus.publish(event).is_ok());
+    }
+
+    #[test]
+    fn test_event_query_prefix_filter() {
+        let query = EventQuery {
+            prefix: Some("users:".to_string()),
+            event_type: None,
+        };
+
+        let matching = make_event("users:123", CdcEventType::Put);
+        let non_matching = make_event("posts:456", CdcEventType::Put);
+
+        assert!(query.matches(&matching));
+        assert!(!query.matches(&non_matching));
+    }
+
+    #[test]
+    fn test_event_query_type_filter() {
+        let query = EventQuery {
+            prefix: None,
+            event_type: Some("put".to_string()),
+        };
+
+        let put_event = make_event("k", CdcEventType::Put);
+        let del_event = make_event("k", CdcEventType::Delete);
+
+        assert!(query.matches(&put_event));
+        assert!(!query.matches(&del_event));
+    }
+
+    #[test]
+    fn test_event_query_combined_filter() {
+        let query = EventQuery {
+            prefix: Some("a:".to_string()),
+            event_type: Some("delete".to_string()),
+        };
+
+        assert!(query.matches(&make_event("a:1", CdcEventType::Delete)));
+        assert!(!query.matches(&make_event("b:1", CdcEventType::Delete)));
+        assert!(!query.matches(&make_event("a:1", CdcEventType::Put)));
+    }
+
+    #[test]
+    fn test_event_query_no_filter_passes_all() {
+        let query = EventQuery {
+            prefix: None,
+            event_type: None,
+        };
+        assert!(query.matches(&make_event("anything", CdcEventType::Put)));
+        assert!(query.matches(&make_event("anything", CdcEventType::Delete)));
+    }
+}

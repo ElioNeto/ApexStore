@@ -16,10 +16,10 @@ fn no_encryption() -> EncryptionConfig {
     }
 }
 
-/// Generate key-value pairs where keys are already sorted.  The
-/// SstableBuilder requires strictly increasing key order (it validates
-/// this internally).  This strategy generates pairs with keys that
-/// are already in the right order.
+/// Generate key-value pairs where keys are strictly increasing.
+/// The SstableBuilder requires strictly increasing key order (it validates
+/// this internally).  This strategy sorts and deduplicates pairs by key
+/// to ensure no duplicate keys appear in the generated input.
 fn sorted_records() -> impl Strategy<Value = Vec<(Vec<u8>, Vec<u8>)>> {
     proptest::collection::vec(
         (
@@ -31,6 +31,8 @@ fn sorted_records() -> impl Strategy<Value = Vec<(Vec<u8>, Vec<u8>)>> {
     .prop_map(|mut pairs| {
         // Sort by key to satisfy SstableBuilder's sorted-key invariant.
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        // Deduplicate by key (keep last value for duplicate keys)
+        pairs.dedup_by(|a, b| a.0 == b.0);
         pairs
     })
 }

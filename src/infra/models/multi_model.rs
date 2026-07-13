@@ -10,7 +10,7 @@
 //! [`InMemoryEngine`] provides a HashMap-backed implementation useful for testing.
 //! To use a real LSM engine, implement the trait for your engine type.
 
-use crate::infra::data_tiering::Tier;
+use crate::infra::models::data_tiering::Tier;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
