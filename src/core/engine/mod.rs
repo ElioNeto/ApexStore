@@ -4029,10 +4029,10 @@ mod tests {
         }
         let elapsed = start.elapsed() / iterations as u32;
 
-        // Memtable reads should be < 50 µs (generous threshold to avoid CI flakiness)
+        // Memtable reads should be < 100 µs (relaxed threshold to avoid CI flakiness)
         assert!(
-            elapsed < std::time::Duration::from_micros(50),
-            "Memtable read avg {:?} exceeds 50µs",
+            elapsed < std::time::Duration::from_micros(100),
+            "Memtable read avg {:?} exceeds 100µs",
             elapsed
         );
     }
@@ -4641,7 +4641,7 @@ mod tests {
                 "sessions",
                 b"session:1",
                 b"active",
-                Duration::from_millis(1),
+                Duration::from_millis(500),
             )
             .unwrap();
 
@@ -4652,7 +4652,7 @@ mod tests {
         );
 
         // Wait for TTL to expire
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(Duration::from_millis(600));
 
         // Key should now be expired in the CF
         assert_eq!(

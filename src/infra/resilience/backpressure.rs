@@ -7,7 +7,7 @@
 //! # Usage
 //!
 //! ```rust
-//! use apexstore::infra::backpressure::CompactionBackpressure;
+//! use apexstore::infra::resilience::backpressure::CompactionBackpressure;
 //!
 //! let bp = CompactionBackpressure::default();
 //! bp.record_write(1024);

@@ -11,7 +11,7 @@
 //! # Usage
 //!
 //! ```rust
-//! use apexstore::infra::watchdog::{Watchdog, HealthStatus};
+//! use apexstore::infra::health::watchdog::{Watchdog, HealthStatus};
 //! use std::time::Duration;
 //! use std::sync::Arc;
 //!
