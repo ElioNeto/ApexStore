@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://elioneto.github.io/ApexStore/"><img src="https://img.shields.io/badge/docs-latest-blue.svg" alt="Documentation"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.70%2B-orange.svg" alt="Rust Version"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.92%2B-orange.svg" alt="Rust Version"></a>
   <a href="https://github.com/ElioNeto/ApexStore/releases"><img src="https://img.shields.io/github/v/release/ElioNeto/ApexStore" alt="Release"></a>
   <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker"></a>
   <a href="https://github.com/ElioNeto/ApexStore/actions/workflows/pr-validation.yml"><img src="https://github.com/ElioNeto/ApexStore/actions/workflows/pr-validation.yml/badge.svg" alt="CI"></a>
@@ -181,7 +181,9 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 > **Hardware note:** results above are conservative — measured on HDD SATA (vs. NVMe). On NVMe, expect 2–4× better throughput for I/O-bound operations.
 
 > **Key Insights:**
-> - `WAL_SYNC_MODE=async` provides 16x throughput vs fsync (trade durability for speed)
+> - Raising the WAL sync interval trades durability for throughput. It is currently a
+>   compile-time constant (`WAL_SYNC_INTERVAL` in `src/storage/wal.rs`, default 4) and is
+>   **not** configurable through the environment — see [issue tracker](https://github.com/elioneto/apexstore/issues).
 > - Cache hit rate > 80% when `block_cache_size_mb > 256`
 > - Bloom filter rejects 99.2% of non-existent key lookups
 > - Optimal `memtable_max_size` is 16-32MB for write-heavy workloads
@@ -189,12 +191,12 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 ## ✨ Key Features
 
 ### 🛠️ Storage Engine
-- **MemTable**: Concurrent `DashMap`-backed in-memory store — lock-free reads and writes to different keys.
-- **Write-Ahead Log (WAL)**: ACID-compliant durability with configurable sync interval and group commit support.
+- **MemTable**: `DashMap`-backed in-memory store. Note that `MemTable`'s mutating methods take `&mut self`, so today the engine serialises access behind its own lock rather than exploiting DashMap's per-shard concurrency.
+- **Write-Ahead Log (WAL)**: CRC32-checksummed, versioned frames with group-commit support. `fsync` is batched every `WAL_SYNC_INTERVAL` records (default 4), so up to 3 acknowledged writes may be lost on power loss — set the interval to 1 for per-write durability.
 - **SSTable V2**: Block-based storage with Sparse Indexing, LZ4 Compression, and AES-GCM encryption.
 - **Bloom Filters**: Drastically reduces unnecessary disk I/O for read operations.
 - **Crash Recovery**: Automatic WAL replay on startup + SSTable auto-repair (truncated files detected and quarantined).
-- **Encryption at Rest**: AES-256-GCM encryption enabled by default with configurable keys.
+- **Encryption at Rest**: AES-256-GCM for SSTable blocks (`LSMSST04`) and WAL frames (V3). ⚠️ Enabled by default, but when no key file is supplied the engine falls back to an **all-zero key**, which provides no confidentiality. Supply a key with the CLI's `--encrypt-key-file`, or disable encryption explicitly.
 - **Range Deletion**: Efficient range tombstone support with compaction-aware filtering.
 
 ### 🔐 Security
@@ -308,15 +310,18 @@ graph TB
 ## 🚀 Quick Start
 
 ### Prerequisites
-- **Rust 1.70+**: Install via [rustup.rs](https://rustup.rs/)
+- **Rust 1.92+**: Install via [rustup.rs](https://rustup.rs/). Required by `wasmtime 44`
+  and the cranelift crates pulled in by the optional `wasm` feature.
+- **Or just Docker**: see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for a containerised
+  toolchain that needs no local Rust install.
 
 ### Installation & Run
 ```bash
 # Clone and enter
-git clone https://github.com/ElioNeto/ApexStore.git && cd ApexStore
+git clone https://github.com/elioneto/apexstore.git && cd apexstore
 
-# Build and Start REPL
-cargo run --release
+# Build and start the REPL
+cargo run --release --bin apexstore-cli
 
 # Available commands:
 # > put user:1 "John Doe"
@@ -330,7 +335,7 @@ cargo run --release
 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
 
 # Start HTTPS server
-TLS_ENABLED=true TLS_CERT_PATH=cert.pem TLS_KEY_PATH=key.pem cargo run --release --bin server
+TLS_ENABLED=true TLS_CERT_PATH=cert.pem TLS_KEY_PATH=key.pem cargo run --release --bin apexstore-server
 ```
 
 ## 🐳 Docker Deployment

@@ -5,4 +5,4 @@ src = "docs"
 title = "ApexStore Documentation"
 
 [output.html]
-git-repository-url = "https://github.com/ElioNeto/ApexStore"
+git-repository-url = "https://github.com/elioneto/apexstore"

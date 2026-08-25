@@ -126,7 +126,7 @@ Authorization: Bearer <admin-token>
 
 These endpoints do NOT require authentication:
 
-- `GET /health` - Health check
+- `GET /health/liveness`, `/health/readiness`, `/health/startup`, `/health/check` - Health probes
 
 ## Protected Endpoints
 

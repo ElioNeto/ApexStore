@@ -35,7 +35,7 @@ source $HOME/.cargo/env
 #### Verify Installation
 
 ```bash
-# Check Rust version (should be 1.70+)
+# Check Rust version (should be 1.92+)
 rustc --version
 # Output: rustc 1.75.0 (or higher)
 

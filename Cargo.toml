@@ -2,12 +2,16 @@
 name = "apex-store-rs"
 version = "2.2.7"
 edition = "2021"
+rust-version = "1.92"
 authors = ["Elio Neto <netoo.elio@hotmail.com>"]
 license = "MIT"
-repository = "https://github.com/ElioNeto/ApexStore"
-homepage = "https://github.com/ElioNeto/ApexStore"
+repository = "https://github.com/elioneto/apexstore"
+homepage = "https://github.com/elioneto/apexstore"
 documentation = "https://elioneto.github.io/ApexStore/"
 readme = "README.md"
+# Without this, `cargo run` fails: the crate exposes four binaries
+# (apex-store-rs, apexstore-cli, apexstore-server, apexstore-tui).
+default-run = "apexstore-server"
 description = "A high-performance, embedded LSM-tree storage engine with SSTable V2 format, LZ4 compression, and Bloom Filters."
 keywords = ["database", "lsm-tree", "key-value", "storage-engine", "embedded"]
 categories = ["database-implementations", "data-structures"]
