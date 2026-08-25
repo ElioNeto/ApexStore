@@ -143,19 +143,35 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             max_concurrent_compactions: 2,
         };
 
-        // Build encryption config from the config
+        // Build encryption config from the config.
+        //
+        // NOTE: a failure here currently falls back to `EncryptionConfig::default()`,
+        // which is `enabled: true` with an all-zero key. That is a known security
+        // defect kept for on-disk compatibility -- changing it would make existing
+        // zero-key SSTables and WAL frames unreadable. Until a migration path
+        // lands, the failure is at least logged loudly instead of being discarded.
         let encryption = if config.storage.encryption_enabled {
-            config
-                .storage
-                .encryption_key_path
-                .as_deref()
-                .map(|path| EncryptionConfig::from_key_path(Some(path)))
-                .unwrap_or_else(|| {
-                    Err(crate::infra::error::LsmError::InvalidArgument(
-                        "Encryption enabled but no key path provided".to_string(),
-                    ))
-                })
-                .unwrap_or_default()
+            match config.storage.encryption_key_path.as_deref() {
+                Some(path) => match EncryptionConfig::from_key_path(Some(path)) {
+                    Ok(cfg) => cfg,
+                    Err(e) => {
+                        tracing::error!(
+                            target: "apexstore::security",
+                            key_path = %path,
+                            error = %e,
+                            "encryption enabled but key file unreadable; using an ALL-ZERO key with no confidentiality"
+                        );
+                        EncryptionConfig::default()
+                    }
+                },
+                None => {
+                    tracing::error!(
+                        target: "apexstore::security",
+                        "encryption enabled but no key path provided; using an ALL-ZERO key with no confidentiality"
+                    );
+                    EncryptionConfig::default()
+                }
+            }
         } else {
             crate::storage::encryption::EncryptionConfig {
                 enabled: false,

@@ -101,8 +101,10 @@ impl From<LogRecordV1> for LogRecord {
 /// `[length: u32 LE][version: u8][payload: bytes][crc32: u32 LE]`
 ///
 /// - `length`: total size of (`version` + `payload`) in bytes.
-/// - `version`: frame format version (`0` = no CF field, `1` = with CF field).
-/// - `payload`: bincode-serialized `LogRecord` (structure depends on version).
+/// - `version`: frame format version (`0` = no CF field, `1` = with CF field,
+///   `2` = with range-tombstone fields, `3` = AES-256-GCM encrypted V2 payload).
+/// - `payload`: postcard-serialized `LogRecord` (see [`crate::infra::codec`];
+///   the exact structure depends on the version byte).
 /// - `crc32`: CRC32 checksum calculated over (`version` + `payload`).
 ///
 /// The CRC32 checksum provides protection against partial writes, bit rot,
@@ -815,7 +817,7 @@ fn deduplicate_records(records: Vec<LogRecord>) -> Vec<LogRecord> {
 ///
 /// To reduce false positives, this function checks not only that the 4-byte
 /// candidate forms a valid length, but also that the **following byte** is
-/// a known WAL frame version (`0x00` for V0 or `0x01` for V1) — payload
+/// a known WAL frame version (`0x00`..=`0x03`, i.e. V0 through V3) — payload
 /// data is very unlikely to match both criteria by chance.
 ///
 /// Returns `true` if a candidate was found (the reader is positioned right
