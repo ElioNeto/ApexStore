@@ -1743,32 +1743,49 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
         let mut cert_reader = BufReader::new(cert_file);
         let mut key_reader = BufReader::new(key_file);
 
-        let raw_certs: Vec<Vec<u8>> = rustls_pemfile::certs(&mut cert_reader).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to parse cert: {}", e),
-            )
-        })?;
-        let certs: Vec<rustls::Certificate> =
-            raw_certs.into_iter().map(rustls::Certificate).collect();
-
-        // Read private key (PKCS#8 format)
-        let mut raw_keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to parse key: {}", e),
-            )
-        })?;
-        if raw_keys.is_empty() {
+        let certs = rustls_pemfile::certs(&mut cert_reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Failed to parse cert: {}", e),
+                )
+            })?;
+        if certs.is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "No private key found in key file (PKCS#8)",
+                format!("No certificates found in '{}'", cert_path),
             ));
         }
-        let key = rustls::PrivateKey(raw_keys.remove(0));
+
+        // `private_key` accepts PKCS#8, PKCS#1 and SEC1. The previous code only
+        // read PKCS#8, so an RSA or EC key in either other encoding was reported
+        // as "no private key found".
+        let key = rustls_pemfile::private_key(&mut key_reader)
+            .map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Failed to parse key: {}", e),
+                )
+            })?
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "No private key found in '{}' (expected PKCS#8, PKCS#1 or SEC1)",
+                        key_path
+                    ),
+                )
+            })?;
+
+        // rustls 0.23 resolves the crypto provider from a process-wide default.
+        // Install it explicitly so the choice is visible here rather than
+        // depending on which provider features happen to be enabled. Already
+        // installed is not an error -- another component may have got there
+        // first.
+        let _ = rustls::crypto::ring::default_provider().install_default();
 
         let tls_server_config = rustls::ServerConfig::builder()
-            .with_safe_defaults()
             .with_no_client_auth()
             .with_single_cert(certs, key)
             .map_err(|e| {
@@ -1881,7 +1898,8 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     .backlog(config.backlog);
 
     if let Some(tls_config) = tls_config {
-        server_builder = server_builder.bind_rustls((host.clone(), config.tls_port), tls_config)?;
+        server_builder =
+            server_builder.bind_rustls_0_23((host.clone(), config.tls_port), tls_config)?;
     } else {
         server_builder = server_builder.bind((host.clone(), port))?;
     }

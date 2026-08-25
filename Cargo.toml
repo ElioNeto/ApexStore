@@ -2,7 +2,8 @@
 name = "apex-store-rs"
 version = "2.2.7"
 edition = "2021"
-rust-version = "1.92"
+# Floor imposed by wasmtime 47 and the cranelift crates under --all-features.
+rust-version = "1.94"
 authors = ["Elio Neto <netoo.elio@hotmail.com>"]
 license = "MIT"
 repository = "https://github.com/ElioNeto/ApexStore"
@@ -47,7 +48,8 @@ chaos = []
 wasm = ["dep:wasmtime"]
 
 [dependencies]
-wasmtime = { version = "44", optional = true }
+# 44.x is affected by RUSTSEC-2026-0222 (stores mix up type indices between engines).
+wasmtime = { version = "47.0.3", optional = true }
 bloomfilter = "3.0"
 crc32fast = "1.4"
 postcard = { version = "1.0", features = ["alloc"] }
@@ -59,10 +61,13 @@ twox-hash = "2.1"
 moka = { version = "0.12", features = ["sync"] }
 rayon = "1.11"
 uuid = { version = "1.22", features = ["v4", "serde"] }
-actix-web = { version = "4.12", features = ["rustls"] }
+# The `rustls` feature is an alias for `rustls-0_20`, which drags in the
+# unmaintained ring 0.16 and rustls-pemfile 1. `rustls-0_23` unifies on the
+# rustls 0.23 already present via reqwest.
+actix-web = { version = "4.15", features = ["rustls-0_23"] }
 actix-http = "3"
-rustls = "0.20"
-rustls-pemfile = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+rustls-pemfile = "2"
 
 actix-rt = "2.11"
 actix-cors = "0.7"

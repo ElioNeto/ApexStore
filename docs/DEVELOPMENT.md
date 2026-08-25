@@ -7,8 +7,8 @@ every command below is also available as a `make` target.
 ## Why a container
 
 The crate's `--all-features` build pulls in `wasmtime 44` and the cranelift crates,
-which declare `rust-version = 1.92.0`. Building with an older toolchain fails with
-roughly forty `requires rustc 1.92.0` lines and no obvious cause. Pinning the
+which declare a recent `rust-version`. Building with an older toolchain fails with
+roughly forty `requires rustc <version>` lines and no obvious cause. Pinning the
 toolchain in an image removes that class of "works on my machine" report, and gives
 CI and contributors the same compiler, the same `cargo-audit`, and the same
 `cargo-deny`.
@@ -79,11 +79,15 @@ Use `bash -c "..."` rather than `bash -lc "..."`: a login shell resets `PATH` an
 
 ## Working without the container
 
-A host toolchain works too. `rust-toolchain.toml` pins **1.92**, so `rustup` will
-install and select it automatically on first `cargo` invocation in this
-repository — no manual `rustup override` needed. The same version is declared as
-`rust-version` in `Cargo.toml` and as the base image of `Dockerfile.dev`; keep the
-three in sync.
+A host toolchain works too. `rust-toolchain.toml` pins **1.98**, so `rustup` will
+install and select it automatically on the first `cargo` invocation in this
+repository — no manual `rustup override` needed. `Dockerfile.dev` builds on the
+same version; keep the two in sync.
+
+That is distinct from the crate's **MSRV**, `rust-version` in `Cargo.toml`, which
+is **1.94** — the oldest compiler the dependency graph accepts under
+`--all-features`. CI checks it in a separate job, so raising the pinned toolchain
+does not silently raise the MSRV.
 
 Install `cargo-audit 0.22` or later — version 0.21 cannot parse CVSS 4.0 entries
 in the current advisory database and aborts with

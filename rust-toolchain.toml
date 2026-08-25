@@ -1,9 +1,10 @@
-# Pinned so CI, the Dockerfile.dev image and every contributor use one compiler.
+# The toolchain CI and every contributor uses. Distinct from the crate's MSRV
+# (`rust-version` in Cargo.toml), which records the oldest compiler the crate
+# supports -- currently 1.94, the floor imposed by wasmtime 47.
 #
-# 1.92 is the floor, not a preference: `cargo build --all-features` pulls in
-# wasmtime 44 and the cranelift crates, which declare rust-version = "1.92.0".
-# Keep this in sync with `rust-version` in Cargo.toml and with Dockerfile.dev.
+# 1.92 was never a deliberate choice: it was whatever wasmtime 44 demanded.
+# Keep this in sync with the base image in Dockerfile.dev.
 [toolchain]
-channel = "1.92"
+channel = "1.98"
 components = ["clippy", "rustfmt"]
 profile = "minimal"

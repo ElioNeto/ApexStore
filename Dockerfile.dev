@@ -8,7 +8,7 @@
 #   docker run --rm -v "$PWD:/app" -v apexstore-cargo:/usr/local/cargo/registry \
 #              -v apexstore-target:/app/target apexstore-dev cargo clippy --all-targets
 
-FROM rust:1.92-bookworm
+FROM rust:1.98-bookworm
 
 LABEL maintainer="Elio Neto <netoo.elio@hotmail.com>"
 LABEL description="ApexStore Rust development and CI toolchain"

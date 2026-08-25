@@ -85,6 +85,11 @@ pub fn extract_token(req: &actix_web::HttpRequest) -> Option<ApiToken> {
 ///     return resp;
 /// }
 /// ```
+// clippy::result_large_err — the `Err` variant is an `HttpResponse` (>=128 bytes).
+// Boxing it would add an allocation on every permission denial and force all 59
+// call sites to dereference, for no benefit: the value is returned straight to
+// the client and never stored or propagated far.
+#[allow(clippy::result_large_err)]
 pub fn require_permission(req: &HttpRequest, expected: Permission) -> Result<(), HttpResponse> {
     // Check if auth is enabled via the flag stored in app_data by start_server.
     // A missing flag means the server was wired incorrectly; fail closed rather

@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://elioneto.github.io/ApexStore/"><img src="https://img.shields.io/badge/docs-latest-blue.svg" alt="Documentation"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.92%2B-orange.svg" alt="Rust Version"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.94%2B-orange.svg" alt="Rust Version"></a>
   <a href="https://github.com/ElioNeto/ApexStore/releases"><img src="https://img.shields.io/github/v/release/ElioNeto/ApexStore" alt="Release"></a>
   <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker"></a>
   <a href="https://github.com/ElioNeto/ApexStore/actions/workflows/pr-validation.yml"><img src="https://github.com/ElioNeto/ApexStore/actions/workflows/pr-validation.yml/badge.svg" alt="CI"></a>
@@ -309,8 +309,10 @@ graph TB
 ## 🚀 Quick Start
 
 ### Prerequisites
-- **Rust 1.92+**: Install via [rustup.rs](https://rustup.rs/). Required by `wasmtime 44`
-  and the cranelift crates pulled in by the optional `wasm` feature.
+- **Rust 1.94+**: Install via [rustup.rs](https://rustup.rs/). This is the MSRV
+  (`rust-version` in `Cargo.toml`), imposed by `wasmtime` and the cranelift crates
+  pulled in by the optional `wasm` feature. CI and `Dockerfile.dev` build on 1.98;
+  `rust-toolchain.toml` selects it automatically.
 - **Or just Docker**: see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for a containerised
   toolchain that needs no local Rust install.
 
