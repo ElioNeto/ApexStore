@@ -29,7 +29,18 @@ module.exports = function (config) {
       ],
     },
     reporters: ['progress', 'kjhtml'],
-    browsers: ['ChromeHeadless'],
+    // Chrome's sandbox needs a non-root user. GitHub-hosted runners provide one,
+    // but a container (the local `node:20` image, or any dockerised CI) usually
+    // runs as root, where ChromeHeadless refuses to start:
+    //   "Running as root without --no-sandbox is not supported"
+    // Use one launcher everywhere so a green local run means a green CI run.
+    customLaunchers: {
+      ChromeHeadlessNoSandbox: {
+        base: 'ChromeHeadless',
+        flags: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+      },
+    },
+    browsers: ['ChromeHeadlessNoSandbox'],
     restartOnFileChange: true,
     singleRun: false,
     failOnEmptyTestSuite: false,

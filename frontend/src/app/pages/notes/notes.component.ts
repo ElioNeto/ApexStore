@@ -1,4 +1,5 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
@@ -14,7 +15,7 @@ import { ToastService } from '../../services/toast.service';
 @Component({
   selector: 'app-notes',
   standalone: true,
-  imports: [FormsModule, HugeiconsIconComponent],
+  imports: [FormsModule, HugeiconsIconComponent, DatePipe],
   templateUrl: './notes.component.html',
   styleUrl: './notes.component.scss'
 })

@@ -1,6 +1,6 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DatePipe } from '@angular/common';
+import { DatePipe, UpperCasePipe } from '@angular/common';
 import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   RefreshIcon,
@@ -25,7 +25,8 @@ interface CircuitBreaker {
 
 interface HealthSummary {
   label: string;
-  status: 'healthy' | 'degraded' | 'unhealthy';
+  /// `unknown` is the state before the first probe returns.
+  status: 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
   message: string;
   icon: typeof RefreshIcon;
 }
@@ -33,7 +34,7 @@ interface HealthSummary {
 @Component({
   selector: 'app-resilience',
   standalone: true,
-  imports: [FormsModule, DatePipe, HugeiconsIconComponent],
+  imports: [FormsModule, DatePipe, HugeiconsIconComponent, UpperCasePipe],
   templateUrl: './resilience.component.html',
   styleUrl: './resilience.component.scss'
 })

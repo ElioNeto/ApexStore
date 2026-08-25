@@ -1,6 +1,6 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DatePipe } from '@angular/common';
+import { DatePipe, NgClass, UpperCasePipe } from '@angular/common';
 import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   RefreshIcon,
@@ -33,7 +33,7 @@ interface ReplicationSummary {
 @Component({
   selector: 'app-replication',
   standalone: true,
-  imports: [FormsModule, DatePipe, HugeiconsIconComponent],
+  imports: [FormsModule, DatePipe, HugeiconsIconComponent, NgClass, UpperCasePipe],
   templateUrl: './replication.component.html',
   styleUrl: './replication.component.scss'
 })
