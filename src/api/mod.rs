@@ -28,7 +28,8 @@ pub mod test_helpers;
 pub mod timeout_middleware;
 
 use self::access_control::AccessControl;
-pub use self::auth::{require_permission, Permission, TokenManager};
+pub use self::access_control::AccessControlEnabled;
+pub use self::auth::{require_permission, AuthEnabled, Permission, TokenManager};
 pub use self::config::ServerConfig;
 use self::connection_guard::IpConnectionGuard;
 pub use self::graphql::AppSchema;
@@ -1822,7 +1823,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     rl_state.set_endpoint_limit("/admin/flush", 5);
     let rate_limiter_state = web::Data::new(rl_state);
     let token_manager = web::Data::new(TokenManager::new_with_engine(engine.clone()));
-    let auth_enabled = web::Data::new(config.auth.enabled);
+    let auth_enabled = web::Data::new(self::auth::AuthEnabled(config.auth.enabled));
     let graphql_schema = web::Data::new(graphql::build_schema(engine.clone()));
     let note_engine = web::Data::new(crate::notes::NoteEngine::new(engine.clone()));
     let time_travel_engine = web::Data::new(Mutex::new(
@@ -1838,7 +1839,9 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
 
     // Shared access control state
     let access_controller = web::Data::new(AccessController::new());
-    let access_control_enabled = web::Data::new(config.access_control_enabled);
+    let access_control_enabled = web::Data::new(self::access_control::AccessControlEnabled(
+        config.access_control_enabled,
+    ));
 
     let mut server_builder = HttpServer::new(move || {
         // CSRF protection is handled by the Bearer token authentication middleware.
