@@ -1,32 +1,55 @@
 name: Auto Release
 
-# Triggers on push to 'main' (i.e., when a PR is merged), or manually via workflow_dispatch
+# Bumps the patch version, tags, creates a GitHub release and publishes to
+# crates.io.
+#
+# Gated on CI. The previous version triggered directly on `push: main` with no
+# dependency on any test job, so a commit that broke the build was still
+# version-bumped, tagged, released and published to crates.io. A crates.io
+# publish is irreversible -- a version can be yanked but never replaced -- so
+# the gate matters more here than anywhere else in the pipeline.
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
-  contents: write  # Required to commit version bump, create tags, and releases
+  contents: read
+
+concurrency:
+  # Never run two releases at once: both would bump from the same base version
+  # and race on `git push origin main`.
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     name: Bump version and create release
     runs-on: ubuntu-latest
-    
-    # Skip if commit was made by github-actions bot (avoid infinite loop)
-    if: github.actor != 'github-actions[bot]'
-    
+    permissions:
+      contents: write
+    # Only release when CI actually passed, and never in response to the bot's
+    # own version-bump commit (which would loop).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.actor.login != 'github-actions[bot]' &&
+       github.event.workflow_run.head_branch == 'main')
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
+          ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # v1
+        with:
+          toolchain: "1.92"
 
       - name: Configure Git
         run: |
@@ -37,6 +60,10 @@ jobs:
         id: current_version
         run: |
           CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          if [ -z "$CURRENT_VERSION" ]; then
+            echo "::error::could not read version from Cargo.toml"
+            exit 1
+          fi
           echo "current=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
           echo "Current version: $CURRENT_VERSION"
 
@@ -53,10 +80,16 @@ jobs:
       - name: Update Cargo.toml with new version
         run: |
           sed -i 's/^version = ".*"/version = "${{ steps.new_version.outputs.version }}"/' Cargo.toml
-          cat Cargo.toml | grep '^version ='
+          grep '^version =' Cargo.toml
 
-      - name: Update Cargo.lock
-        run: cargo update --workspace
+      # Only the package version changes; `cargo update --workspace` would also
+      # move dependency versions, releasing a dependency tree that CI never saw.
+      - name: Update Cargo.lock for the new package version
+        run: cargo update --locked --package apex-store-rs
+
+      # The lockfile is authoritative for the published artifact.
+      - name: Verify the release builds with the locked dependencies
+        run: cargo build --locked --release --all-features
 
       - name: Commit version bump
         run: |
@@ -72,7 +105,7 @@ jobs:
           echo "Created tag: $TAG"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
         with:
           tag_name: v${{ steps.new_version.outputs.version }}
           name: Release v${{ steps.new_version.outputs.version }}
@@ -83,16 +116,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to crates.io
-        run: cargo publish
+        run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   report-status:
+    name: Report status
     if: always()
     needs: [release]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Report job status
         uses: ./.github/actions/ci-issue-manager
         with:

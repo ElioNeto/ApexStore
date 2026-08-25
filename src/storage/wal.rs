@@ -101,8 +101,10 @@ impl From<LogRecordV1> for LogRecord {
 /// `[length: u32 LE][version: u8][payload: bytes][crc32: u32 LE]`
 ///
 /// - `length`: total size of (`version` + `payload`) in bytes.
-/// - `version`: frame format version (`0` = no CF field, `1` = with CF field).
-/// - `payload`: bincode-serialized `LogRecord` (structure depends on version).
+/// - `version`: frame format version (`0` = no CF field, `1` = with CF field,
+///   `2` = with range-tombstone fields, `3` = AES-256-GCM encrypted V2 payload).
+/// - `payload`: postcard-serialized `LogRecord` (see [`crate::infra::codec`];
+///   the exact structure depends on the version byte).
 /// - `crc32`: CRC32 checksum calculated over (`version` + `payload`).
 ///
 /// The CRC32 checksum provides protection against partial writes, bit rot,
@@ -789,9 +791,18 @@ impl WriteAheadLog {
 fn deduplicate_records(records: Vec<LogRecord>) -> Vec<LogRecord> {
     use std::collections::HashMap;
 
-    // Map from (column_family, key_bytes) → index of last occurrence
+    // Range tombstones are exempt. `LogRecord::range_tombstone` stores the range
+    // start in `key`, so a tombstone and a point write to that same key are
+    // indistinguishable here -- deduplicating them together drops whichever came
+    // first. When that was the tombstone, every key it covered came back to life
+    // after a restart.
     let mut last_occurrence: HashMap<(String, Vec<u8>), usize> = HashMap::new();
+    let mut keep: Vec<usize> = Vec::new();
     for (i, record) in records.iter().enumerate() {
+        if record.is_range_tombstone() {
+            keep.push(i);
+            continue;
+        }
         let cf = record
             .column_family
             .as_deref()
@@ -800,10 +811,11 @@ fn deduplicate_records(records: Vec<LogRecord>) -> Vec<LogRecord> {
         last_occurrence.insert((cf, record.key.clone()), i);
     }
 
-    // Collect the last occurrence of each unique key in file order.
-    let mut indices: Vec<usize> = last_occurrence.into_values().collect();
-    indices.sort_unstable();
-    indices.into_iter().map(|i| records[i].clone()).collect()
+    // Every range tombstone plus the last occurrence of each point key, back in
+    // file order so replay applies them in the order they were written.
+    keep.extend(last_occurrence.into_values());
+    keep.sort_unstable();
+    keep.into_iter().map(|i| records[i].clone()).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -815,7 +827,7 @@ fn deduplicate_records(records: Vec<LogRecord>) -> Vec<LogRecord> {
 ///
 /// To reduce false positives, this function checks not only that the 4-byte
 /// candidate forms a valid length, but also that the **following byte** is
-/// a known WAL frame version (`0x00` for V0 or `0x01` for V1) — payload
+/// a known WAL frame version (`0x00`..=`0x03`, i.e. V0 through V3) — payload
 /// data is very unlikely to match both criteria by chance.
 ///
 /// Returns `true` if a candidate was found (the reader is positioned right

@@ -1,0 +1,27 @@
+# yamllint configuration for this repository.
+#
+# The default 80-column limit is not workable for GitHub Actions once actions
+# are pinned to full commit SHAs with a version comment:
+#
+#   - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+#
+# Unpinning to keep lines short would trade a supply-chain control for
+# cosmetics, so the limit is relaxed instead.
+
+extends: default
+
+rules:
+  line-length:
+    max: 120
+    level: warning
+  # GitHub Actions requires the `on:` key, which YAML 1.1 reads as a boolean.
+  truthy:
+    check-keys: false
+  # Workflows and Compose files conventionally omit the `---` marker.
+  document-start: disable
+  comments:
+    min-spaces-from-content: 1
+
+ignore: |
+  frontend/node_modules/
+  target/

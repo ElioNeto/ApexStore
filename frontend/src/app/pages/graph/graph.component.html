@@ -51,88 +51,90 @@
       <span class="spinner" style="width:28px;height:28px;border-width:3px"></span>
       <p>Loading graph data...</p>
     </div>
-  } @else if (fetched() && graphData(); as data) {
-    <div class="graph-results">
-      <div class="graph-summary">
-        <span class="badge badge-info">{{ data.nodes.length }} nodes</span>
-        <span class="badge badge-purple">{{ data.edges.length }} edges</span>
-      </div>
+  } @else if (fetched()) {
+    @if (graphData(); as data) {
+      <div class="graph-results">
+        <div class="graph-summary">
+          <span class="badge badge-info">{{ data.nodes.length }} nodes</span>
+          <span class="badge badge-purple">{{ data.edges.length }} edges</span>
+        </div>
 
-      <!-- Nodes table -->
-      <div class="card">
-        <div class="card-header">
-          <hugeicons-icon [icon]="NodeMoveDownIcon" [size]="16" [strokeWidth]="1.5" />
-          <span class="card-title">Nodes</span>
-        </div>
-        <div class="card-body">
-          @if (data.nodes.length === 0) {
-            <div class="empty-state">No nodes found</div>
-          } @else {
-            <div class="table-wrapper">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Label</th>
-                    <th>Type</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (node of data.nodes; track node.id) {
+        <!-- Nodes table -->
+        <div class="card">
+          <div class="card-header">
+            <hugeicons-icon [icon]="NodeMoveDownIcon" [size]="16" [strokeWidth]="1.5" />
+            <span class="card-title">Nodes</span>
+          </div>
+          <div class="card-body">
+            @if (data.nodes.length === 0) {
+              <div class="empty-state">No nodes found</div>
+            } @else {
+              <div class="table-wrapper">
+                <table class="data-table">
+                  <thead>
                     <tr>
-                      <td class="mono">{{ node.id }}</td>
-                      <td>{{ node.label }}</td>
-                      <td>
-                        @if (node.type) {
-                          <span class="badge badge-info">{{ node.type }}</span>
-                        } @else {
-                          <span class="text-muted">—</span>
-                        }
-                      </td>
+                      <th>ID</th>
+                      <th>Label</th>
+                      <th>Type</th>
                     </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
-          }
+                  </thead>
+                  <tbody>
+                    @for (node of data.nodes; track node.id) {
+                      <tr>
+                        <td class="mono">{{ node.id }}</td>
+                        <td>{{ node.label }}</td>
+                        <td>
+                          @if (node.type) {
+                            <span class="badge badge-info">{{ node.type }}</span>
+                          } @else {
+                            <span class="text-muted">—</span>
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+          </div>
         </div>
-      </div>
 
-      <!-- Edges table -->
-      <div class="card">
-        <div class="card-header">
-          <hugeicons-icon [icon]="Share08Icon" [size]="16" [strokeWidth]="1.5" />
-          <span class="card-title">Edges</span>
-        </div>
-        <div class="card-body">
-          @if (data.edges.length === 0) {
-            <div class="empty-state">No edges found</div>
-          } @else {
-            <div class="table-wrapper">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Source</th>
-                    <th>Target</th>
-                    <th>Label</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (edge of data.edges; track $index) {
+        <!-- Edges table -->
+        <div class="card">
+          <div class="card-header">
+            <hugeicons-icon [icon]="Share08Icon" [size]="16" [strokeWidth]="1.5" />
+            <span class="card-title">Edges</span>
+          </div>
+          <div class="card-body">
+            @if (data.edges.length === 0) {
+              <div class="empty-state">No edges found</div>
+            } @else {
+              <div class="table-wrapper">
+                <table class="data-table">
+                  <thead>
                     <tr>
-                      <td class="mono">{{ edge.source }}</td>
-                      <td class="mono">{{ edge.target }}</td>
-                      <td>{{ edge.label ?? '—' }}</td>
+                      <th>Source</th>
+                      <th>Target</th>
+                      <th>Label</th>
                     </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
-          }
+                  </thead>
+                  <tbody>
+                    @for (edge of data.edges; track $index) {
+                      <tr>
+                        <td class="mono">{{ edge.source }}</td>
+                        <td class="mono">{{ edge.target }}</td>
+                        <td>{{ edge.label ?? '—' }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+          </div>
         </div>
       </div>
-    </div>
-  } @else if (fetched() && !graphData()) {
-    <div class="empty-state">Enter a note path and click "Fetch Graph" to see connections.</div>
+    } @else {
+      <div class="empty-state">Enter a note path and click "Fetch Graph" to see connections.</div>
+    }
   }
 </div>

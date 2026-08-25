@@ -500,7 +500,7 @@ lsm> exit
 ## Related Documentation
 
 - [Configuration Guide](./CONFIGURATION.md) - Engine configuration options
-- [API Reference](./API.md) - REST API endpoints
+- [REST API examples](../README.md#-rest-api-examples) - REST API endpoints (a full reference is tracked in issue #400)
 - [Contributing Guide](./CONTRIBUTING.md) - Development guidelines
 - [README](../README.md) - Project overview
 

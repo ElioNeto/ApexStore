@@ -1,5 +1,50 @@
 [advisories]
-# ring 0.16.20 — Some AES functions may panic when overflow checking is enabled.
-# Pulled in via actix-web's rustls feature (rustls 0.20.9 → ring 0.16.20).
-# Cannot upgrade without upstream actix-web upgrading rustls.
-ignore = ["RUSTSEC-2025-0009", "RUSTSEC-2024-0336"]
+# RUSTSEC-2026-0258 — h2 0.3.27, "unbounded empty DATA frames" (DoS).
+#
+# Not fixable by a version bump. h2 0.3 comes from actix-http, which every
+# actix-web 4.x release depends on:
+#
+#   h2 v0.3.27
+#   └── actix-http v3.13.3
+#       └── actix-web v4.15.0
+#
+# The advisory's fix is h2 >= 0.4.16; no actix-web 4.x has moved to h2 0.4, so
+# resolving it means either actix-web publishing a 4.x that does, or migrating
+# this crate to a different HTTP server. Tracked in #417.
+#
+# Exposure: reachable by any client, since h2 sits directly on the request path
+# when HTTP/2 is negotiated. Mitigations already in place: per-IP connection
+# limits (MAX_CONNECTIONS_PER_IP), request timeouts (REQUEST_TIMEOUT_SECONDS) and
+# rate limiting. Terminating TLS/HTTP2 at a reverse proxy avoids it entirely.
+#
+# Reviewed: 2026-08-25. Re-check when actix-web publishes a release that moves to
+# h2 0.4, and delete this entry.
+ignore = ["RUSTSEC-2026-0258"]
+
+# Previously ignored here and now genuinely fixed, so the entries are gone:
+#
+#   RUSTSEC-2025-0009 / RUSTSEC-2024-0336 — ring 0.16.20 and the rustls 0.20
+#   `complete_io` DoS. Both arrived through actix-web's `rustls` feature, which
+#   is an alias for `rustls-0_20`. The old rationale here claimed the upgrade
+#   was impossible without upstream action; actix-web 4.x has exposed a
+#   `rustls-0_23` feature for some time. Switching to it removed rustls 0.20,
+#   tokio-rustls 0.23, ring 0.16 and rustls-pemfile 1 from the tree.
+#
+# Six warnings remain, all transitive and none ignored here on purpose -- they
+# should stay visible in the job log. CI fails on vulnerabilities, not warnings.
+#
+#   atomic-polyfill 1.0.3   unmaintained   RUSTSEC-2023-0089
+#   paste 1.0.15            unmaintained   RUSTSEC-2024-0436
+#   rustls-pemfile 2.2.0    unmaintained   RUSTSEC-2025-0134
+#   lru 0.12.5              unsound        RUSTSEC-2026-0253, RUSTSEC-2026-0002
+#   rand 0.7.3              unsound        RUSTSEC-2026-0097
+#
+# `cargo update` in this pass also cleared six that were previously listed:
+# spin 0.9.8 (yanked) -> 0.9.9, plus the anyhow, event-listener and memmap2
+# unsoundness advisories, and it collapsed the three simultaneous major versions
+# of rand down to one remaining transitive (0.7.3). Total dependency count went
+# from 573 to 555.
+#
+# rustls-pemfile is unmaintained in both 1.x and 2.x, so moving to rustls 0.23
+# did not clear that one; rustls itself has absorbed PEM parsing, and dropping
+# the dependency is worth doing. Tracked in #417.

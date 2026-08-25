@@ -3,6 +3,7 @@
 use super::error::AuthError;
 use super::manager::TokenManager;
 use super::token::{ApiToken, Permission};
+use super::AuthEnabled;
 use actix_web::dev::ServiceRequest;
 use actix_web::web;
 use actix_web::Error;
@@ -24,11 +25,18 @@ pub async fn bearer_validator(
     req: ServiceRequest,
     credentials: BearerAuth,
 ) -> Result<ServiceRequest, (Error, ServiceRequest)> {
-    // Check if auth is enabled via the flag stored in app_data by start_server
-    let auth_enabled = req
-        .app_data::<web::Data<bool>>()
-        .map(|flag| *flag.as_ref())
-        .unwrap_or(false);
+    // Check if auth is enabled via the flag stored in app_data by start_server.
+    // A missing flag means the server was wired incorrectly; fail closed rather
+    // than silently letting every request through.
+    let auth_enabled = match req.app_data::<web::Data<AuthEnabled>>() {
+        Some(flag) => flag.is_enabled(),
+        None => {
+            return Err((
+                AuthError::Internal("AuthEnabled flag not configured".to_string()).into(),
+                req,
+            ))
+        }
+    };
 
     if !auth_enabled {
         return Ok(req);
@@ -64,7 +72,9 @@ pub fn extract_token(req: &actix_web::HttpRequest) -> Option<ApiToken> {
 
 /// Require a specific permission for the current request.
 ///
-/// When authentication is disabled, all requests pass through.
+/// When authentication is disabled, all requests pass through. When the
+/// [`AuthEnabled`] flag is missing from app data the request is rejected,
+/// because a misconfigured server must not silently grant access.
 /// When enabled, checks that the authenticated token has the required
 /// permission. Returns `AuthError::InsufficientPermissions` as an HTTP
 /// response if the token does not have the required permission.
@@ -75,12 +85,19 @@ pub fn extract_token(req: &actix_web::HttpRequest) -> Option<ApiToken> {
 ///     return resp;
 /// }
 /// ```
+// clippy::result_large_err — the `Err` variant is an `HttpResponse` (>=128 bytes).
+// Boxing it would add an allocation on every permission denial and force all 59
+// call sites to dereference, for no benefit: the value is returned straight to
+// the client and never stored or propagated far.
+#[allow(clippy::result_large_err)]
 pub fn require_permission(req: &HttpRequest, expected: Permission) -> Result<(), HttpResponse> {
-    // Check if auth is enabled via the flag stored in app_data by start_server
-    let auth_enabled = req
-        .app_data::<web::Data<bool>>()
-        .map(|flag| *flag.as_ref())
-        .unwrap_or(false);
+    // Check if auth is enabled via the flag stored in app_data by start_server.
+    // A missing flag means the server was wired incorrectly; fail closed rather
+    // than granting every permission.
+    let auth_enabled = match req.app_data::<web::Data<AuthEnabled>>() {
+        Some(flag) => flag.is_enabled(),
+        None => return Err(AuthError::InsufficientPermissions.error_response()),
+    };
 
     if !auth_enabled {
         return Ok(());

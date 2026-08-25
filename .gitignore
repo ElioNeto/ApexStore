@@ -1,14 +1,31 @@
+# Build output
 target
-.lsm_data
-/local
-credentials
-*.sh
-!scripts/format-benchmarks.sh
-.env
+dist
 node_modules
 .angular
-dist
+
+# Engine data directories.
+# Both spellings appear in the codebase: `src/bin/server.rs` defaults to
+# `./.lsm_data`, while `CoreConfig::default()` uses `./.lsmdata`.
+.lsm_data
+.lsmdata
+
+# Local scratch space
+/local
 .notes/
-.aider*
+
+# Secrets -- never commit these
+.env
 .secrets
+credentials
+*.pem
+*.key
+!scripts/*.sh
+
+# Tool-local config
 .cargo/config.toml
+.aider*
+
+# Agent scratch state (regenerated per run, not source of truth)
+.task-state.json
+.apexstore/

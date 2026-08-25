@@ -1,0 +1,10 @@
+# The toolchain CI and every contributor uses. Distinct from the crate's MSRV
+# (`rust-version` in Cargo.toml), which records the oldest compiler the crate
+# supports -- currently 1.94, the floor imposed by wasmtime 47.
+#
+# 1.92 was never a deliberate choice: it was whatever wasmtime 44 demanded.
+# Keep this in sync with the base image in Dockerfile.dev.
+[toolchain]
+channel = "1.98"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

@@ -1,6 +1,6 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DatePipe } from '@angular/common';
+import { DatePipe, NgClass } from '@angular/common';
 import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   RefreshIcon,
@@ -30,7 +30,7 @@ interface SyncJob {
 @Component({
   selector: 'app-data-sync',
   standalone: true,
-  imports: [FormsModule, DatePipe, HugeiconsIconComponent],
+  imports: [FormsModule, DatePipe, HugeiconsIconComponent, NgClass],
   templateUrl: './data-sync.component.html',
   styleUrl: './data-sync.component.scss'
 })

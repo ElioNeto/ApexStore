@@ -81,7 +81,7 @@ export class PubsubComponent implements OnInit {
     });
   }
 
-  publishMessage(): void {
+  publish(): void {
     const topic = this.publishTopic.trim();
     const message = this.publishMessage.trim();
     if (!topic || !message) return;

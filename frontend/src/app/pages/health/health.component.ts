@@ -1,6 +1,6 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DatePipe } from '@angular/common';
+import { DatePipe, UpperCasePipe } from '@angular/common';
 import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   RefreshIcon,
@@ -24,7 +24,7 @@ interface HealthProbe {
 @Component({
   selector: 'app-health',
   standalone: true,
-  imports: [FormsModule, DatePipe, HugeiconsIconComponent],
+  imports: [FormsModule, DatePipe, HugeiconsIconComponent, UpperCasePipe],
   templateUrl: './health.component.html',
   styleUrl: './health.component.scss'
 })
@@ -45,7 +45,7 @@ export class HealthComponent implements OnInit {
     { name: 'Startup', endpoint: '/health/startup', status: 'unknown', message: 'Checking...', icon: Share08Icon },
   ]);
 
-  overall = signal<'healthy' | 'degraded' | 'unhealthy'>('unknown');
+  overall = signal<'healthy' | 'degraded' | 'unhealthy' | 'unknown'>('unknown');
   loading = signal(false);
   lastCheck = signal<Date | null>(null);
 

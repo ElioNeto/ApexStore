@@ -130,9 +130,21 @@ impl MemTable {
     /// Returns `true` if the key is covered by any range tombstone
     /// (i.e. `start_key <= key < end_key`).
     pub fn contains_range_tombstone(&self, key: &[u8]) -> bool {
+        self.max_covering_range_tombstone(key).is_some()
+    }
+
+    /// Timestamp of the newest range tombstone covering `key`, if any.
+    ///
+    /// Callers need the timestamp, not just a boolean: whether a range
+    /// tombstone hides a point write depends on which came first. Comparing
+    /// timestamps is the only way to order them, because a point write and the
+    /// tombstone that covers it live in different structures.
+    pub fn max_covering_range_tombstone(&self, key: &[u8]) -> Option<u128> {
         self.range_tombstones
             .iter()
-            .any(|rt| rt.start_key.as_slice() <= key && key < rt.end_key.as_slice())
+            .filter(|rt| rt.start_key.as_slice() <= key && key < rt.end_key.as_slice())
+            .map(|rt| rt.timestamp)
+            .max()
     }
 
     pub fn clear(&mut self) -> usize {

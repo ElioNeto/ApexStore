@@ -101,7 +101,7 @@
           @for (note of notes(); track note.path) {
             <div class="note-item">
               <strong>{{ note.path }}</strong>
-              <p>{{ note.content?.substring(0, 200) }}{{ note.content?.length > 200 ? '...' : '' }}</p>
+              <p>{{ note.content?.substring(0, 200) }}{{ note.content.length > 200 ? '...' : '' }}</p>
             </div>
           }
         </div>

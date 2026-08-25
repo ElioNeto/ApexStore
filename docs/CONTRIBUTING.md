@@ -49,7 +49,7 @@ We are committed to providing a welcoming and inspiring community for all. We pl
 
 ### Prerequisites
 
-1. **Rust Toolchain** (1.70 or later)
+1. **Rust Toolchain** (1.94 or later; `rust-toolchain.toml` selects 1.98)
    ```bash
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    ```
