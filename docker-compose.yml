@@ -1,8 +1,6 @@
 # ApexStore - Docker Compose Configuration
 # High-Performance LSM-Tree Key-Value Store
 
-version: '3.8'
-
 services:
   apexstore:
     image: apexstore:latest
@@ -20,12 +18,12 @@ services:
     environment:
       - HOST=${HOST:-0.0.0.0}
       - PORT=${PORT:-8080}
-      - DIR_PATH=/data
+      - DATA_DIR=/data
       - MEMTABLE_MAX_SIZE=${MEMTABLE_MAX_SIZE:-16777216}
       - BLOCK_SIZE=${BLOCK_SIZE:-4096}
       - BLOCK_CACHE_SIZE_MB=${BLOCK_CACHE_SIZE_MB:-64}
       - BLOOM_FALSE_POSITIVE_RATE=${BLOOM_FALSE_POSITIVE_RATE:-0.01}
-      - INDEX_INTERVAL=${INDEX_INTERVAL:-16}
+      - SPARSE_INDEX_INTERVAL=${SPARSE_INDEX_INTERVAL:-16}
       - MAX_JSON_PAYLOAD_SIZE=${MAX_JSON_PAYLOAD_SIZE:-52428800}
       - MAX_RAW_PAYLOAD_SIZE=${MAX_RAW_PAYLOAD_SIZE:-52428800}
       - FEATURE_CACHE_TTL=${FEATURE_CACHE_TTL:-10}
@@ -38,7 +36,7 @@ services:
     
     # Health check
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health/liveness || exit 1"]
       interval: 30s
       timeout: 3s
       retries: 3
