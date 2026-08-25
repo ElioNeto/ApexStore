@@ -2,6 +2,19 @@
 
 This document contains performance benchmarks for the ApexStore LSM-tree storage engine.
 
+## Latest CI results
+
+The block below is rewritten by the nightly `Benchmarks` workflow. Do not edit it
+by hand -- edits are overwritten. The workflow commits only when the numbers
+actually change, and fails rather than publishing an empty table.
+
+<!-- BENCHMARK_RESULTS_START -->
+*No results published yet. The nightly `Benchmarks` workflow fills this in.*
+<!-- BENCHMARK_RESULTS_END -->
+
+Run them locally with `make bench`, or `cargo bench --all-features` for HTML
+reports under `target/criterion/`.
+
 ## Benchmarks Overview
 
 The benchmark suite is located in `benches/` and covers the following categories:

@@ -1,0 +1,48 @@
+version: 2
+
+updates:
+  # Actions are pinned to commit SHAs in the workflows, so this is what keeps
+  # those pins current: without it, pinning silently freezes them forever.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      # One PR for the actix/tokio stack: these versions move together and
+      # splitting them produces PRs that cannot build on their own.
+      web-stack:
+        patterns:
+          - "actix*"
+          - "tokio"
+          - "async-graphql*"
+          - "reqwest"
+          - "rustls*"
+      observability:
+        patterns:
+          - "opentelemetry*"
+          - "tracing*"
+
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(frontend)"
+    groups:
+      angular:
+        patterns:
+          - "@angular*"
+          - "@angular-devkit*"
+          - "zone.js"

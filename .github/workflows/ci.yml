@@ -1,59 +1,198 @@
-name: CI / Workflow Validation
+name: CI
+
+# Single gate for pull requests and for the default branch. This workflow
+# replaces the previous split between `ci.yml` (which ran no tests, no clippy
+# and no build on main) and `pr-validation.yml` (which duplicated the audit job
+# on every push to main).
+#
+# Actions are pinned to full commit SHAs: tags are mutable, so a compromised or
+# retagged release would run here with whatever permissions the job holds.
+# The trailing comment records the human-readable version for Dependabot.
 
 on:
-  workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
 
+# Least privilege by default; jobs that need more request it explicitly.
 permissions:
   contents: read
-  issues: write
-  actions: read
-  checks: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # Fail on warnings everywhere. The toolchain is pinned via rust-toolchain.toml,
+  # so a new stable release cannot turn CI red without a reviewed commit.
+  RUSTFLAGS: "-D warnings"
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  validate-workflows:
+  workflows:
+    name: Workflow lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: rhysd/actionlint@v1.7.12
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca  # v1.7.12
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # v1
+        with:
+          toolchain: "1.92"
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # v1
+        with:
+          toolchain: "1.92"
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+  test:
+    name: Test (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The release profile is tested too: `panic` behaviour and the
+        # optimisation level differ from `dev`, so a dev-only suite exercises
+        # code paths that cannot occur in production.
+        profile: [dev, release]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # v1
+        with:
+          toolchain: "1.92"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+        with:
+          key: ${{ matrix.profile }}
+      - name: Run tests
+        run: |
+          if [ "${{ matrix.profile }}" = "release" ]; then
+            cargo test --locked --release --all-features --workspace
+          else
+            cargo test --locked --all-features --workspace
+          fi
+
+  build:
+    name: Build and docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # v1
+        with:
+          toolchain: "1.92"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      - run: cargo build --locked --release --all-features
+      # Examples are executable documentation; building them stops them rotting.
+      - run: cargo build --locked --examples --all-features
+      - run: cargo doc --locked --no-deps --all-features
+
+  msrv:
+    name: MSRV (rust-version from Cargo.toml)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Read rust-version from Cargo.toml
+        id: msrv
+        run: |
+          MSRV=$(grep '^rust-version = ' Cargo.toml | head -1 | sed 's/rust-version = "\(.*\)"/\1/')
+          if [ -z "$MSRV" ]; then
+            echo "::error::rust-version is missing from Cargo.toml"
+            exit 1
+          fi
+          echo "version=$MSRV" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # v1
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+        with:
+          key: msrv
+      # --all-features is required: the default feature set has a lower floor,
+      # so a default-only check would not catch the real MSRV.
+      - name: Check at the declared MSRV
+        run: cargo check --locked --all-features --all-targets
+        env:
+          # A new lint in the pinned MSRV compiler must not fail the build here;
+          # the `clippy` job is where warnings are policed.
+          RUSTFLAGS: ""
 
   audit:
-    name: Security Audit
+    name: Security audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install cargo-audit
-        uses: taiki-e/install-action@v2
+          toolchain: "1.92"
+      # cargo-audit 0.21 and earlier abort with "unsupported CVSS version: 4.0"
+      # on the current advisory database, so the job reported nothing while two
+      # live advisories sat in Cargo.lock. Pin a version that can parse it.
+      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc  # v2.86.7
         with:
-          tool: cargo-audit
+          tool: cargo-audit@0.22.2,cargo-deny@0.16.4
+      - run: cargo audit --deny warnings
+      - run: cargo deny check
 
-      - name: Run cargo audit
-        run: cargo audit
-
-  benchmark:
-    name: Benchmarks
+  env-example:
+    name: .env.example drift
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Run benchmarks
-        run: cargo bench --all-features --workspace 2>&1 | tail -20
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      # Fails when .env.example drifts from the variables src/ reads, in either
+      # direction. Undocumented variables hide the configuration surface;
+      # documented-but-unread ones silently do nothing when an operator sets them.
+      - run: bash scripts/check-env-example.sh
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test -- --watch=false --browsers=ChromeHeadless
+      # Advisory only for now: the Angular 17 tree is out of support and will
+      # report findings until the upgrade in #422 lands.
+      - run: npm audit --audit-level=high
+        continue-on-error: true
 
   report-status:
-    if: always()
-    needs: [validate-workflows, audit, benchmark]
+    name: Report status
+    if: always() && github.event_name == 'push'
+    needs: [workflows, fmt, clippy, test, build, msrv, audit, env-example, frontend]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Report job status
         uses: ./.github/actions/ci-issue-manager
         with:
-          workflow_name: "CI / Workflow Validation"
+          workflow_name: "CI"
           job_results: ${{ toJSON(needs) }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}

@@ -19,7 +19,8 @@ DOCKER_RUN = docker run --rm \
 	$(DEV_IMAGE)
 
 .PHONY: help dev-image shell fmt fmt-check clippy test test-fast bench audit deny doc \
-        env-check ci ci-local bench-local ci-dry docker-build docker-up docker-down clean-volumes
+        env-check actionlint ci ci-local bench-local ci-dry docker-build docker-up \
+        docker-down clean-volumes
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -69,7 +70,10 @@ doc: ## Build rustdoc without dependencies
 env-check: ## Fail if .env.example drifts from the variables the code reads
 	$(DOCKER_RUN) bash scripts/check-env-example.sh
 
-ci: fmt-check clippy test audit env-check doc ## Everything CI checks, locally
+actionlint: ## Lint the GitHub Actions workflows
+	docker run --rm -v "$(REPO_DIR):/repo" -w /repo rhysd/actionlint:latest -color
+
+ci: actionlint fmt-check clippy test audit env-check doc ## Everything CI checks, locally
 
 # ── Workflow debugging via `act` (runs on the host, needs act installed) ─────
 

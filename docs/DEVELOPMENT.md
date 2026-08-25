@@ -39,6 +39,7 @@ headers `wasmtime` needs). Rebuild it only when `Dockerfile.dev` changes.
 | `make deny` | `cargo deny check` (licences, bans, sources) |
 | `make doc` | `cargo doc --locked --no-deps --all-features` |
 | `make env-check` | verifies `.env.example` matches the variables `src/` reads |
+| `make actionlint` | lints `.github/workflows/` |
 | `make ci` | all of the above, in the order CI runs them |
 | `make shell` | interactive shell in the toolchain image |
 
@@ -78,10 +79,15 @@ Use `bash -c "..."` rather than `bash -lc "..."`: a login shell resets `PATH` an
 
 ## Working without the container
 
-A host toolchain works too, as long as it is **Rust 1.92 or newer**
-(`rust-version` in `Cargo.toml` enforces this). Install `cargo-audit 0.22` or
-later — version 0.21 cannot parse CVSS 4.0 entries in the current advisory
-database and aborts with `unsupported CVSS version: 4.0`.
+A host toolchain works too. `rust-toolchain.toml` pins **1.92**, so `rustup` will
+install and select it automatically on first `cargo` invocation in this
+repository — no manual `rustup override` needed. The same version is declared as
+`rust-version` in `Cargo.toml` and as the base image of `Dockerfile.dev`; keep the
+three in sync.
+
+Install `cargo-audit 0.22` or later — version 0.21 cannot parse CVSS 4.0 entries
+in the current advisory database and aborts with
+`unsupported CVSS version: 4.0`.
 
 ## The four binaries
 
@@ -106,6 +112,23 @@ npm ci
 npm run build
 npm test
 ```
+
+## Benchmarks
+
+```bash
+make bench
+```
+
+All seven benchmarks honour a `CI` environment variable: when it is set they
+reduce the sample count and shrink the datasets, so a full pass takes minutes
+rather than hours.
+
+```bash
+CI=true cargo bench --bench read_bench -- --noplot
+```
+
+Note that `Criterion::sample_size` asserts `n >= 10` and panics below that, so 10
+is the floor for the `CI` branch in each `configure_criterion`.
 
 ## Fuzzing
 

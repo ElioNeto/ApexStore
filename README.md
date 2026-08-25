@@ -45,12 +45,11 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 
 ### 🤖 Latest CI Results
 
-<!-- BENCHMARK_RESULTS_START -->
-> 🤖 Auto-updated by CI on **2026-08-25 03:06 UTC** — [View run](https://github.com/ElioNeto/ApexStore/actions/runs/32803520709)
+Published nightly to **[docs/PERFORMANCE.md](docs/PERFORMANCE.md#latest-ci-results)**
+by the `Benchmarks` workflow.
 
-*No results parsed — check the [run artifacts](https://github.com/ElioNeto/ApexStore/actions/runs/32803520709).*
-
-<!-- BENCHMARK_RESULTS_END -->
+The tables below are a hand-recorded snapshot on known hardware, kept because the
+CI runner is shared and its absolute numbers are not comparable between runs.
 
 
 
@@ -437,30 +436,46 @@ ApexStore uses **trunk-based development** with automated releases:
 
 ```mermaid
 graph LR
-    A[Feature Branch] -->|Open PR| B[CI Validation]
-    B -->|✅ Pass| C[Merge to main]
-    C --> D[Auto Release]
-    D --> E[v2.1.X]
+    A[Feature Branch] -->|Open PR| B[CI]
+    B -->|all jobs pass| C[Merge to main]
+    C --> D[CI on merge commit]
+    D -->|workflow_run: success| E[Auto Release]
+    E --> F[tag + crates.io]
 ```
 
-### PR Validation Pipeline
+### CI Pipeline (`ci.yml`)
 
-| Stage | What it checks |
-|-------|----------------|
-| `Rustfmt` | Code formatting |
-| `Clippy` | Lint warnings (deny by default) |
-| `Build and Docs` | Compilation + documentation generation |
-| `Run Tests` | Full test suite (550+ tests) |
-| `Security Audit` | `cargo audit` for dependency vulnerabilities |
-| `Benchmarks` | Performance regression gates (Write, Read, Scan, Mixed, Stress) |
-| `report-status` | Summary with root cause analysis on failure |
+| Job | What it checks |
+|-----|----------------|
+| `Workflow lint` | `actionlint` over `.github/workflows/` |
+| `Rustfmt` | `cargo fmt --all -- --check` |
+| `Clippy` | `--all-targets --all-features`, warnings denied |
+| `Test (dev)` | full suite, `--locked --all-features --workspace` |
+| `Test (release)` | the same suite under `--release` |
+| `Build and docs` | release build, examples, `cargo doc` |
+| `MSRV` | `cargo check --all-features` at the `rust-version` in `Cargo.toml` |
+| `Security audit` | `cargo audit --deny warnings` + `cargo deny check` |
+| `.env.example drift` | `.env.example` matches the variables `src/` reads |
+| `Frontend` | Angular build and tests |
+| `Report status` | tracking issue on failure (push only) |
+
+Benchmarks run nightly in a separate workflow, not on every commit, and publish
+to [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
+
+Run the same checks locally without a Rust toolchain:
+
+```bash
+make ci
+```
 
 ### Development Flow
 
 1. **Create feature branch** from `main`
-2. **Open PR** → CI runs all stages above
-3. **Merge PR** → Auto-increments version, creates tag & GitHub release
+2. **Open PR** → CI runs every job above
+3. **Merge PR** → CI runs again; a successful run triggers the release, which
+   bumps the patch version, tags, and publishes to crates.io
 
+📖 **Read:** [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for the local toolchain  
 📖 **Read:** [`MIGRATION_GUIDE.md`](MIGRATION_GUIDE.md) for team workflow  
 📂 **Details:** [`.github/workflows/README.md`](.github/workflows/README.md)
 

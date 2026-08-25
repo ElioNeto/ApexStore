@@ -1,35 +1,78 @@
 name: Deploy Documentation
+
 on:
   push:
-    branches:
-      - main  # Ou o nome da sua branch principal
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  MDBOOK_VERSION: '0.4.52'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      # Required by peaceiris/actions-gh-pages to push the built site.
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - name: Install mdBook
+      # Installed through install-action, which resolves and verifies the
+      # release artifact itself. The previous version piped an unverified
+      # `curl` download straight into `tar`. mdBook publishes no checksum file,
+      # so verifying a hand-rolled download is not possible.
+      #
+      # Pinned to the latest 0.4.x: 0.5 is a major bump and upgrading it belongs
+      # in its own change, not in a CI-hardening pass.
+      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc  # v2.86.7
+        with:
+          tool: mdbook@${{ env.MDBOOK_VERSION }}
+
+      - name: Show mdBook version
+        run: mdbook --version
+
+      # mdBook only renders what docs/SUMMARY.md lists, so a document added to
+      # docs/ without a SUMMARY entry is silently unpublished. Catch that here.
+      - name: Check every doc is listed in SUMMARY.md
         run: |
-          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.35/mdbook-v0.4.35-x86_64-unknown-linux-gnu.tar.gz | tar -xz
-          sudo mv mdbook /usr/local/bin/
+          set -euo pipefail
+          missing=0
+          while IFS= read -r doc; do
+            rel="${doc#docs/}"
+            if ! grep -qF "($rel)" docs/SUMMARY.md; then
+              echo "::warning file=$doc::not referenced from docs/SUMMARY.md, so it will not be published"
+              missing=$((missing + 1))
+            fi
+          done < <(find docs -name '*.md' ! -name 'SUMMARY.md' ! -name 'README.md' | sort)
+          echo "$missing document(s) not listed in SUMMARY.md"
 
       - name: Build Book
         run: mdbook build
 
+      # mdBook writes the rendered site to ./book by default.
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453  # v4.1.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./book  # O mdbook gera o site nesta pasta por padrão
+          publish_dir: ./book
 
   report-status:
+    name: Report status
     if: always()
     needs: [deploy]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Report job status
         uses: ./.github/actions/ci-issue-manager
         with:
