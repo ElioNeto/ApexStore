@@ -791,9 +791,18 @@ impl WriteAheadLog {
 fn deduplicate_records(records: Vec<LogRecord>) -> Vec<LogRecord> {
     use std::collections::HashMap;
 
-    // Map from (column_family, key_bytes) → index of last occurrence
+    // Range tombstones are exempt. `LogRecord::range_tombstone` stores the range
+    // start in `key`, so a tombstone and a point write to that same key are
+    // indistinguishable here -- deduplicating them together drops whichever came
+    // first. When that was the tombstone, every key it covered came back to life
+    // after a restart.
     let mut last_occurrence: HashMap<(String, Vec<u8>), usize> = HashMap::new();
+    let mut keep: Vec<usize> = Vec::new();
     for (i, record) in records.iter().enumerate() {
+        if record.is_range_tombstone() {
+            keep.push(i);
+            continue;
+        }
         let cf = record
             .column_family
             .as_deref()
@@ -802,10 +811,11 @@ fn deduplicate_records(records: Vec<LogRecord>) -> Vec<LogRecord> {
         last_occurrence.insert((cf, record.key.clone()), i);
     }
 
-    // Collect the last occurrence of each unique key in file order.
-    let mut indices: Vec<usize> = last_occurrence.into_values().collect();
-    indices.sort_unstable();
-    indices.into_iter().map(|i| records[i].clone()).collect()
+    // Every range tombstone plus the last occurrence of each point key, back in
+    // file order so replay applies them in the order they were written.
+    keep.extend(last_occurrence.into_values());
+    keep.sort_unstable();
+    keep.into_iter().map(|i| records[i].clone()).collect()
 }
 
 // ---------------------------------------------------------------------------

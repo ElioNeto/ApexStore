@@ -821,7 +821,12 @@ impl<C: Cache> Engine<C> {
     /// Replay WAL records to reconstruct memtable state (operates on EngineCore directly).
     fn replay_wal_records_core(core: &mut EngineCore<C>, records: Vec<LogRecord>) -> Result<()> {
         for record in records {
-            let cf = record.column_family.as_deref().unwrap_or("default");
+            // Owned: the record itself is moved into the memtable below.
+            let cf = record
+                .column_family
+                .clone()
+                .unwrap_or_else(|| "default".to_string());
+            let cf = cf.as_str();
             if record.is_range_tombstone() {
                 // Range tombstone records are stored at the EngineCore level
                 // and also added to the current memtable's range tombstone list.
@@ -840,23 +845,21 @@ impl<C: Cache> Engine<C> {
                 }
                 let last = mem.len() - 1;
                 mem[last].add_range_tombstone(range);
-            } else if record.is_deleted {
-                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
-                if mem.is_empty() {
-                    mem.push(MemTable::new_unlimited());
-                }
-                let last = mem.len() - 1;
-                mem[last].delete(record.key.clone());
-                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() += record.key.len();
             } else {
+                // Insert the recovered record as-is. `MemTable::put` and
+                // `MemTable::delete` build a fresh `LogRecord`, which stamps
+                // `SystemTime::now()` and drops `expires_at` -- so replaying
+                // through them silently rewrote every record's timestamp to the
+                // restart time and discarded TTLs. Ordering against range
+                // tombstones, and TTL expiry, both depend on those fields.
+                let bytes = record.key.len() + record.value.len();
                 let mem = core.memtables_mut().entry(cf.to_string()).or_default();
                 if mem.is_empty() {
                     mem.push(MemTable::new_unlimited());
                 }
                 let last = mem.len() - 1;
-                mem[last].put(record.key.clone(), record.value.clone());
-                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
-                    record.key.len() + record.value.len();
+                mem[last].insert(record);
+                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() += bytes;
             }
         }
         Ok(())
@@ -1162,23 +1165,35 @@ impl<C: Cache> Engine<C> {
 
     /// Check if a key falls within any active range tombstone for the given column family.
     fn is_in_range_tombstone(core: &EngineCore<C>, cf: &str, key: &[u8]) -> bool {
-        if let Some(tombstones) = core.range_tombstones().get(cf) {
-            if tombstones
+        Self::covering_range_tombstone_ts(core, cf, key).is_some()
+    }
+
+    /// Timestamp of the newest range tombstone covering `key`, if any.
+    ///
+    /// A boolean is not enough to decide whether a range tombstone hides a
+    /// point write. The two live in different structures -- the write in a
+    /// memtable, the tombstone in a side list -- so only their timestamps say
+    /// which happened last.
+    fn covering_range_tombstone_ts(core: &EngineCore<C>, cf: &str, key: &[u8]) -> Option<u128> {
+        let engine_level = core.range_tombstones().get(cf).and_then(|tombstones| {
+            tombstones
                 .iter()
-                .any(|rt| rt.start_key.as_slice() <= key && key < rt.end_key.as_slice())
-            {
-                return true;
-            }
+                .filter(|rt| rt.start_key.as_slice() <= key && key < rt.end_key.as_slice())
+                .map(|rt| rt.timestamp)
+                .max()
+        });
+
+        let memtable_level = core.memtables().get(cf).and_then(|memtables| {
+            memtables
+                .iter()
+                .filter_map(|mem| mem.max_covering_range_tombstone(key))
+                .max()
+        });
+
+        match (engine_level, memtable_level) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
         }
-        // Also check memtable-level range tombstones
-        if let Some(memtables) = core.memtables().get(cf) {
-            for mem in memtables.iter() {
-                if mem.contains_range_tombstone(key) {
-                    return true;
-                }
-            }
-        }
-        false
     }
 
     pub fn get_cf<K>(&self, cf: &str, key: K) -> Result<Option<Vec<u8>>>
@@ -1190,11 +1205,30 @@ impl<C: Cache> Engine<C> {
         let key_str = String::from_utf8_lossy(key).into_owned();
         let core = self.core.read();
 
-        // First check memtables (newest first) — point writes take precedence
-        // over range tombstones.
+        // Check memtables (newest first). A point write only wins over a range
+        // tombstone that covers it if the write is newer -- comparing
+        // timestamps, not check order. Consulting the memtable first and
+        // returning unconditionally made `delete_range` a no-op for anything
+        // not yet flushed to an SSTable.
+        let covering_tombstone_ts = Self::covering_range_tombstone_ts(&core, cf, key);
         if let Some(memtables) = core.memtables().get(cf) {
             for mem in memtables.iter().rev() {
                 if let Some(v) = mem.data.get(key) {
+                    // A range tombstone written after this record hides it.
+                    if covering_tombstone_ts.is_some_and(|ts| ts > v.timestamp) {
+                        let elapsed_us = start.elapsed().as_micros() as u64;
+                        self.metrics.record_get(elapsed_us);
+                        tracing::debug!(
+                            target: "apexstore::engine",
+                            operation = "get_cf",
+                            cf = cf,
+                            key = %key_str,
+                            found = false,
+                            reason = "range_tombstone",
+                            duration_us = elapsed_us,
+                        );
+                        return Ok(None);
+                    }
                     // Skip tombstones (deleted records)
                     if v.is_deleted {
                         return Ok(None);
@@ -1221,9 +1255,10 @@ impl<C: Cache> Engine<C> {
             }
         }
 
-        // After memtable lookup, check if key falls within a range tombstone.
-        // This is done after memtable check so point writes take precedence.
-        if Self::is_in_range_tombstone(&core, cf, key) {
+        // The key was not in any memtable, so it can only come from the version
+        // set. Those records carry no timestamp on this path, so a covering
+        // tombstone shadows them unconditionally.
+        if covering_tombstone_ts.is_some() {
             let elapsed_us = start.elapsed().as_micros() as u64;
             self.metrics.record_get(elapsed_us);
             tracing::debug!(
