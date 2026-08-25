@@ -183,7 +183,7 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 > **Key Insights:**
 > - Raising the WAL sync interval trades durability for throughput. It is currently a
 >   compile-time constant (`WAL_SYNC_INTERVAL` in `src/storage/wal.rs`, default 4) and is
->   **not** configurable through the environment — see [issue tracker](https://github.com/elioneto/apexstore/issues).
+>   **not** configurable through the environment — see [issue tracker](https://github.com/ElioNeto/ApexStore/issues).
 > - Cache hit rate > 80% when `block_cache_size_mb > 256`
 > - Bloom filter rejects 99.2% of non-existent key lookups
 > - Optimal `memtable_max_size` is 16-32MB for write-heavy workloads
@@ -318,7 +318,7 @@ graph TB
 ### Installation & Run
 ```bash
 # Clone and enter
-git clone https://github.com/elioneto/apexstore.git && cd apexstore
+git clone https://github.com/ElioNeto/ApexStore.git && cd ApexStore
 
 # Build and start the REPL
 cargo run --release --bin apexstore-cli

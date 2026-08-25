@@ -5,8 +5,8 @@ edition = "2021"
 rust-version = "1.92"
 authors = ["Elio Neto <netoo.elio@hotmail.com>"]
 license = "MIT"
-repository = "https://github.com/elioneto/apexstore"
-homepage = "https://github.com/elioneto/apexstore"
+repository = "https://github.com/ElioNeto/ApexStore"
+homepage = "https://github.com/ElioNeto/ApexStore"
 documentation = "https://elioneto.github.io/ApexStore/"
 readme = "README.md"
 # Without this, `cargo run` fails: the crate exposes four binaries
