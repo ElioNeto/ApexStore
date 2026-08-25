@@ -1,0 +1,48 @@
+# ApexStore - Rust development/CI toolchain image
+#
+# Purpose: give contributors (and agents) a reproducible Rust environment for
+# `cargo check`, `clippy`, `test`, `bench`, `audit` and `fmt` without installing
+# a toolchain on the host. Not a runtime image -- see `Dockerfile` for that.
+#
+#   docker build -f Dockerfile.dev -t apexstore-dev .
+#   docker run --rm -v "$PWD:/app" -v apexstore-cargo:/usr/local/cargo/registry \
+#              -v apexstore-target:/app/target apexstore-dev cargo clippy --all-targets
+
+FROM rust:1.92-bookworm
+
+LABEL maintainer="Elio Neto <netoo.elio@hotmail.com>"
+LABEL description="ApexStore Rust development and CI toolchain"
+
+# Build dependencies for the crate graph:
+#   - pkg-config/libssl-dev: transitive native deps
+#   - cmake/clang/llvm-dev/libclang-dev: wasmtime (optional `wasm` feature)
+#   - curl: health-check probes when running the server from this image
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        pkg-config \
+        libssl-dev \
+        cmake \
+        clang \
+        llvm-dev \
+        libclang-dev \
+        curl \
+        git \
+        jq \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rustup component add clippy rustfmt
+
+# Pinned so image rebuilds are reproducible.
+RUN cargo install cargo-audit --version 0.22.2 --locked \
+    && cargo install cargo-deny --version 0.16.4 --locked \
+    && rm -rf /usr/local/cargo/registry
+
+# Keep the shared target dir writable when the host bind-mounts the repo.
+ENV CARGO_TERM_COLOR=always
+ENV CARGO_INCREMENTAL=0
+ENV RUST_BACKTRACE=1
+
+WORKDIR /app
+
+CMD ["bash"]
