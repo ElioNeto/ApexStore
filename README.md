@@ -46,11 +46,12 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 ### 🤖 Latest CI Results
 
 <!-- BENCHMARK_RESULTS_START -->
-> 🤖 Auto-updated by CI on **2026-09-05 06:53 UTC** — [View run](https://github.com/ElioNeto/ApexStore/actions/runs/33950742571)
+> 🤖 Auto-updated by CI on **2026-09-06 07:03 UTC** — [View run](https://github.com/ElioNeto/ApexStore/actions/runs/34017854025)
 
-*No results parsed — check the [run artifacts](https://github.com/ElioNeto/ApexStore/actions/runs/33950742571).*
+*No results parsed — check the [run artifacts](https://github.com/ElioNeto/ApexStore/actions/runs/34017854025).*
 
 <!-- BENCHMARK_RESULTS_END -->
+
 
 
 
