@@ -15,9 +15,26 @@ async fn main() -> std::io::Result<()> {
 
     // Initialise OpenTelemetry tracing + metrics (falls back to console fmt
     // when OTEL_EXPORTER_OTLP_ENDPOINT is not set).
-    telemetry::init_tracing();
-    telemetry::init_metrics();
+    let traces = telemetry::init_tracing().map_err(io::Error::other)?;
+    let metrics = match telemetry::init_metrics() {
+        Ok(metrics) => metrics,
+        Err(error) => {
+            if let Err(shutdown_error) = telemetry::shutdown(traces, None).await {
+                eprintln!("{shutdown_error}");
+            }
+            return Err(io::Error::other(error));
+        }
+    };
 
+    let result = run_server().await;
+    let shutdown_result = telemetry::shutdown(traces, metrics).await;
+    if let Err(error) = &shutdown_result {
+        eprintln!("{error}");
+    }
+    result.and(shutdown_result.map_err(io::Error::other))
+}
+
+async fn run_server() -> std::io::Result<()> {
     println!("╔═══════════════════════════════════════════════════════╗");
     println!("║         LSM-Tree REST API Server                      ║");
     println!("╚═══════════════════════════════════════════════════════╝\n");
