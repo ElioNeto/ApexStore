@@ -8,6 +8,7 @@ pub enum CompactionStrategy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StorageConfig {
     pub block_size: usize,
     pub block_cache_size_mb: usize,
@@ -15,7 +16,7 @@ pub struct StorageConfig {
     pub compaction_strategy: CompactionStrategy,
     pub bloom_false_positive_rate: f64,
     /// Encryption configuration (disabled by default).
-    #[serde(default)]
+    #[serde(skip)]
     pub encryption: EncryptionConfig,
     /// Whether to enable block-level key prefix compression.
     /// When enabled, consecutive keys within a block share their common prefix,

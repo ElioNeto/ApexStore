@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security and reliability updates
 
+- Disable implicit encryption, make invalid key configuration fatal, redact/zeroize runtime keys and expose server encryption environment variables. Add explicit locked migration of legacy zero-key SSTables and WALs into a new directory, and key-aware scrubbing with a distinct skipped state (#411). Breaking library change: EngineOptions configuration conversion is fallible and runtime EncryptionConfig no longer supports serde.
+
 - Preserve the loaded runtime encryption key across all built-in compaction strategies; keep disabled encryption plaintext and verify nonzero-key data through flush, compaction and restart (#411).
 
 - Abort encrypted WAL replay on missing keys, authentication failures and malformed authenticated records; preserve original logs instead of silently returning partial data (#411).

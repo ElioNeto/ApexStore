@@ -30,8 +30,7 @@ pub(crate) fn read(
     file.read_exact(&mut magic)?;
     let encryptor = match &magic {
         b"LSMSST03" => Encryptor::disabled(),
-        b"LSMSST04" if encryption.enabled => Encryptor::new(encryption),
-        b"LSMSST04" => return Err(LsmError::EncryptionKeyRequired),
+        b"LSMSST04" => Encryptor::new(encryption),
         _ => {
             return Err(LsmError::InvalidSstableFormat(
                 "invalid SSTable magic".into(),
@@ -56,7 +55,11 @@ pub(crate) fn read(
     file.seek(SeekFrom::Start(offset))?;
     let mut data = vec![0; size as usize];
     file.read_exact(&mut data)?;
-    let compressed = encryptor.decrypt_block(&data)?;
+    let compressed = if &magic == b"LSMSST04" {
+        encryptor.decrypt_for_recovery(&data)?
+    } else {
+        data
+    };
     let prefix: [u8; 4] = compressed
         .get(..4)
         .and_then(|p| p.try_into().ok())

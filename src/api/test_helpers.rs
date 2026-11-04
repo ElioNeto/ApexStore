@@ -40,11 +40,7 @@ pub fn test_engine() -> (LsmEngine, TempDir) {
     let dir = tempfile::tempdir().expect("tempdir should succeed");
     let mut config = crate::infra::config::LsmConfig::default();
     config.core.dir_path = dir.path().to_path_buf();
-    // Disable encryption to avoid key file requirements in tests.
-    // Note: EncryptionConfig::default() has enabled:true, so we also
-    // set the encryption key to an empty string to ensure proper bypass.
-    config.storage.encryption_enabled = false;
-    config.storage.encryption_key_path = Some("/dev/null".to_string());
+    // The default plaintext configuration needs no key file.
     let engine = LsmEngine::new_from_config(&config, GlobalBlockCache::new(1, 4096))
         .expect("test engine should be created");
     (engine, dir)

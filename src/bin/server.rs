@@ -75,7 +75,23 @@ async fn run_server() -> std::io::Result<()> {
         .parse::<bool>()
         .unwrap_or(false);
 
-    let config = LsmConfig::builder()
+    let encryption_enabled = match env::var("ENCRYPTION_ENABLED") {
+        Ok(value) => value.parse::<bool>().map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "ENCRYPTION_ENABLED must be true or false",
+            )
+        })?,
+        Err(env::VarError::NotPresent) => false,
+        Err(error) => return Err(io::Error::new(io::ErrorKind::InvalidInput, error)),
+    };
+    let encryption_key_path = match env::var("ENCRYPTION_KEY_PATH") {
+        Ok(value) => Some(value).filter(|path| !path.trim().is_empty()),
+        Err(env::VarError::NotPresent) => None,
+        Err(error) => return Err(io::Error::new(io::ErrorKind::InvalidInput, error)),
+    };
+
+    let mut builder = LsmConfig::builder()
         .dir_path(PathBuf::from(&data_dir))
         .memtable_max_size(memtable_max_size)
         .block_size(block_size)
@@ -83,10 +99,13 @@ async fn run_server() -> std::io::Result<()> {
         .sparse_index_interval(sparse_index_interval)
         .bloom_false_positive_rate(bloom_false_positive_rate)
         .prefix_compression(prefix_compression)
-        .build()
-        .map_err(|e: apexstore::LsmError| {
-            io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
-        })?;
+        .encryption_enabled(encryption_enabled);
+    if let Some(path) = encryption_key_path {
+        builder = builder.encryption_key_path(path);
+    }
+    let config = builder.build().map_err(|e: apexstore::LsmError| {
+        io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
+    })?;
 
     // Print LSM configuration
     println!("📋 LSM Engine Configuration:");
@@ -113,7 +132,7 @@ async fn run_server() -> std::io::Result<()> {
         Err(e) => {
             eprintln!("❌ Error initializing LSM Engine: {}", e);
             eprintln!(
-                "💡 Tip: if you don't need to recover unflushed writes, rename/delete wal.log and try again."
+                "Preserve the database and its key files. Verify encryption configuration; legacy zero-key data requires migrate-encryption."
             );
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,

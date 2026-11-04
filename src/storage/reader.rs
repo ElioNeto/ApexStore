@@ -66,7 +66,8 @@ impl SstableReader {
         config: StorageConfig,
         block_cache: Arc<GlobalBlockCache>,
     ) -> Result<Self> {
-        Self::open_with_encryption(path, config, block_cache, &EncryptionConfig::default())
+        let encryption = EncryptionConfig::from_storage_config(&config)?;
+        Self::open_with_encryption(path, config, block_cache, &encryption)
     }
 
     /// Open an SSTable file with optional encryption support.

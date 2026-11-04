@@ -68,6 +68,9 @@ pub enum LsmError {
     #[error("Decompression failed: {0}")]
     DecompressionFailed(String),
 
+    #[error("legacy all-zero encryption key detected; preserve the original database and run: apexstore-cli --db OLD migrate-encryption --legacy-zero-key --output NEW --target-key-file KEY (or --plaintext)")]
+    LegacyEncryptionMigrationRequired,
+
     #[error("encrypted storage requires an explicit encryption key")]
     EncryptionKeyRequired,
 

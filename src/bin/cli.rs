@@ -1,5 +1,11 @@
 use apexstore::cli;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    Ok(cli::main()?)
+fn main() -> std::process::ExitCode {
+    match cli::main() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::ExitCode::FAILURE
+        }
+    }
 }
