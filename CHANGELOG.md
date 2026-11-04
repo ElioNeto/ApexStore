@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security and reliability updates
 
 - Preserve record timestamps and expiry in scans, key listings and counts after flush/restart; compare range deletions consistently in engine and transaction reads. Scans report missing or corrupt SSTables instead of returning incomplete results.
+- Require Write permission for WebSocket sync, revalidate live token permissions on messages, reject reserved keys, and filter broadcasts/replies by per-key Read policies. Report storage errors before acknowledging changes and preserve the winning CRDT value on stale updates.
 
 - Avoid scanning the keyspace for secondary-index schemas when writing non-JSON values; retain WAL durability and verify binary/text data across flush and restart.
 
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve WAL record timestamps, TTLs and range tombstones during recovery; order point reads against range deletions (#415).
 - Restore container data-volume settings, working health probes, frontend builds, pinned CI tools, release-profile tests and environment documentation checks (#426).
 - Measure compaction duration with a monotonic clock and verify exact output metrics without assuming a minimum execution time.
+- Enforce GraphQL Read/Write/Delete permissions on every field, cap scan/key results, and reject excessive query depth and complexity (#432).
 
 - Preserve unselected SSTables when applying multiple compaction groups; cover manual/background compaction and tombstone-only generation updates (#430).
 - Separate authentication and access-control flags and require authentication when configuration is missing (#431).
@@ -30,7 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### API compatibility notes
 
+- `SyncManager::apply_change` now returns `Result<()>`; callers must handle persistence failures. WebSocket clients receive an error response for rejected writes instead of a success acknowledgement. A Write-only token may send updates but needs explicit Read permission to receive values.
+
 - The server uses `HttpAuthentication::with_fn(request_validator)` to honor explicit authentication disablement without a Bearer header. Only `GET /health/liveness` is public; readiness, startup, detailed health and data routes still require authentication. Custom Actix applications can use the same validator.
+- Direct GraphQL schema callers must attach an authenticated `ApiToken` to request data or explicitly opt out with `AuthEnabled(false)`. The HTTP handler supplies authorization from the bearer middleware; missing context denies access.
 
 - `require_permission` now returns `Result<(), Box<HttpResponse>>`; callers returning its error response directly must dereference it (`return *response`).
 - Applications assembling their own Actix app must register `Data<AuthEnabled>` and `Data<AccessControlEnabled>` instead of shared `Data<bool>` values. Missing authentication configuration now requires a valid token.

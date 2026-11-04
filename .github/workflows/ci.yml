@@ -62,7 +62,7 @@ jobs:
         with:
           toolchain: "1.99.1"
           components: clippy
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   test:
@@ -80,7 +80,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # v1
         with:
           toolchain: "1.99.1"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
         with:
           key: ${{ matrix.profile }}
       - name: Run tests
@@ -99,7 +99,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # v1
         with:
           toolchain: "1.99.1"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
       - run: cargo build --locked --release --all-features
       # Examples are executable documentation; building them stops them rotting.
       - run: cargo build --locked --examples --all-features
@@ -122,7 +122,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # v1
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
         with:
           key: msrv
       # --all-features is required: the default feature set has a lower floor,
@@ -145,7 +145,7 @@ jobs:
       # cargo-audit 0.21 and earlier abort with "unsupported CVSS version: 4.0"
       # on the current advisory database, so the job reported nothing while two
       # live advisories sat in Cargo.lock. Pin a version that can parse it.
-      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc  # v2.86.7
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b  # v2.89.0
         with:
           tool: cargo-audit@0.22.2,cargo-deny@0.16.4
       # Fails on vulnerabilities. Warnings (unmaintained / unsound transitives)

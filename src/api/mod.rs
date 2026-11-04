@@ -793,8 +793,20 @@ async fn admin_compact(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl R
 // ── GraphQL handlers ────────────────────────────────────────────────────────
 
 /// GraphQL endpoint — handles all queries and mutations.
-async fn graphql_handler(schema: web::Data<AppSchema>, req: GraphQLRequest) -> GraphQLResponse {
-    let res = schema.execute(req.into_inner()).await;
+async fn graphql_handler(
+    schema: web::Data<AppSchema>,
+    http_req: HttpRequest,
+    req: GraphQLRequest,
+) -> GraphQLResponse {
+    let auth_enabled = http_req
+        .app_data::<web::Data<config::AuthEnabled>>()
+        .map(|flag| flag.get_ref().0)
+        .unwrap_or(true);
+    let mut query = req.into_inner().data(config::AuthEnabled(auth_enabled));
+    if let Some(token) = auth::middleware::extract_token(&http_req) {
+        query = query.data(token);
+    }
+    let res = schema.execute(query).await;
     GraphQLResponse::from(res)
 }
 

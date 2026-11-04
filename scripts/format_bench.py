@@ -6,7 +6,7 @@ Usage (from repo root):
     python3 scripts/format_bench.py
 
 Input:  bench_output.txt  (produced by `cargo bench … | tee bench_output.txt`)
-Output: bench_table.txt   (injected into README by the CI workflow)
+Output: bench_table.txt   (published to docs/PERFORMANCE.md by the CI workflow)
 """
 from __future__ import annotations
 import re
