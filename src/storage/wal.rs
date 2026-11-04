@@ -1,6 +1,6 @@
 use crate::core::log_record::LogRecord;
 use crate::infra::codec::{decode, encode};
-use crate::infra::error::Result;
+use crate::infra::error::{LsmError, Result};
 use crate::storage::encryption::{EncryptionConfig, Encryptor};
 use crc32fast::Hasher;
 use parking_lot::Mutex;
@@ -329,6 +329,11 @@ impl WriteAheadLog {
     /// start up even if the WAL contains a limited amount of bit rot or
     /// partial writes, recovering as many records as possible.
     ///
+    /// Encrypted V3 frames are an exception: a missing key, authentication
+    /// failure, or undecodable authenticated payload aborts replay. These errors
+    /// must not turn a configuration mistake into an empty/partial database.
+    /// The original WAL is never truncated or rewritten by recovery.
+    ///
     /// The expected on-disk format is:
     /// `[length: u32 LE][version: u8][payload: bytes][crc32: u32 LE]`
     ///
@@ -360,6 +365,8 @@ impl WriteAheadLog {
     ///
     /// Like [`WriteAheadLog::recover`], corrupted frames are skipped with
     /// a warning and the method returns as many valid records as possible.
+    /// Encrypted-frame key, authentication and decoded-payload errors propagate
+    /// without returning partial records, as described in [`Self::recover`].
     pub fn recover_locked(&self) -> Result<Vec<LogRecord>> {
         // 1. Lock and flush so all pending data is visible.
         let mut guard = self.file.lock();
@@ -516,28 +523,14 @@ impl WriteAheadLog {
                     }
                 },
                 WAL_FRAME_VERSION_V3_ENCRYPTED => {
-                    // Decrypt the payload first (tolerant on failure)
-                    match self.encryptor.decrypt_block(&payload) {
-                        Ok(decrypted) => match decode::<LogRecord>(&decrypted) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                warn!(
-                                    "WAL recovery: V3 encrypted deserialization failed ({}), skipping corrupted frame",
-                                    e
-                                );
-                                skipped_frames += 1;
-                                continue;
-                            }
-                        },
-                        Err(e) => {
-                            warn!(
-                                "WAL recovery: V3 encrypted decryption failed ({}), skipping corrupted frame",
-                                e
-                            );
-                            skipped_frames += 1;
-                            continue;
-                        }
+                    // A key/configuration failure is not a damaged frame that
+                    // can be skipped: doing so can silently discard every write.
+                    // Return before exposing any partial replay to the engine.
+                    if !self.encryptor.is_enabled() {
+                        return Err(LsmError::EncryptionKeyRequired);
                     }
+                    let decrypted = self.encryptor.decrypt_block(&payload)?;
+                    decode::<LogRecord>(&decrypted)?
                 }
                 other => {
                     warn!(

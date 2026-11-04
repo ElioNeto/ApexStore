@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security and reliability updates
 
+- Abort encrypted WAL replay on missing keys, authentication failures and malformed authenticated records; preserve original logs instead of silently returning partial data (#411).
+
 - Validate SSTable metadata consistently during discovery and snapshot restore; retain readable tables with invalid Bloom filters, preserve quarantine reasons, abort on missing/wrong encryption keys, and expose unreadable-data health counters (#412).
 
 - Migrate to rand 0.10. Generate tokens and AES-GCM nonces directly from operating-system randomness, returning errors if secure entropy is unavailable.
