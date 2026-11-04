@@ -30,7 +30,7 @@
 //! ```
 
 use parking_lot::Mutex;
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -333,8 +333,8 @@ impl ChaosEngine {
         if prob <= 0.0 {
             return false;
         }
-        let mut rng = rand::thread_rng();
-        rng.gen::<f64>() < prob
+        let mut rng = rand::rng();
+        rng.random::<f64>() < prob
     }
 }
 

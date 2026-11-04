@@ -13,8 +13,8 @@
 use apexstore::core::engine::Engine;
 use apexstore::infra::config::LsmConfig;
 use apexstore::storage::cache::GlobalBlockCache;
-use rand::seq::SliceRandom;
-use rand::Rng;
+use rand::seq::IndexedRandom;
+use rand::RngExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -44,13 +44,13 @@ fn create_engine() -> (TempDir, Engine<Arc<GlobalBlockCache>>) {
     (dir, engine)
 }
 
-fn random_key(rng: &mut impl Rng, len: usize) -> Vec<u8> {
+fn random_key(rng: &mut impl RngExt, len: usize) -> Vec<u8> {
     let mut key = vec![0u8; len];
     rng.fill(&mut key[..]);
     key
 }
 
-fn random_value(rng: &mut impl Rng, len: usize) -> Vec<u8> {
+fn random_value(rng: &mut impl RngExt, len: usize) -> Vec<u8> {
     let mut val = vec![0u8; len];
     rng.fill(&mut val[..]);
     val
@@ -61,24 +61,24 @@ fn random_value(rng: &mut impl Rng, len: usize) -> Vec<u8> {
 #[test]
 fn test_random_ops_linearizability() {
     let (_dir, engine) = create_engine();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut model = HashMap::new(); // reference model of expected state
 
     let start = Instant::now();
     for i in 0..OPS_COUNT {
-        match rng.gen_range(0..100) {
+        match rng.random_range(0..100) {
             // 60% writes
             0..=59 => {
-                let len: usize = rng.gen_range(1..64);
+                let len: usize = rng.random_range(1..64);
                 let key = random_key(&mut rng, len);
-                let val_len: usize = rng.gen_range(1..256);
+                let val_len: usize = rng.random_range(1..256);
                 let val = random_value(&mut rng, val_len);
                 engine.set(key.clone(), val.clone()).unwrap();
                 model.insert(key, val);
             }
             // 30% reads
             60..=89 => {
-                if rng.gen_bool(0.3) {
+                if rng.random_bool(0.3) {
                     // 30% read existing key
                     let keys: Vec<&Vec<u8>> = model.keys().collect();
                     if let Some(key) = keys.choose(&mut rng).cloned() {
@@ -93,7 +93,7 @@ fn test_random_ops_linearizability() {
                     }
                 } else {
                     // 70% read random key (may or may not exist)
-                    let len: usize = rng.gen_range(1..64);
+                    let len: usize = rng.random_range(1..64);
                     let key = random_key(&mut rng, len);
                     let expected = model.get(&key).cloned();
                     let got = engine.get(key.as_slice()).unwrap();
@@ -105,7 +105,7 @@ fn test_random_ops_linearizability() {
             }
             // 10% deletes
             90..=99 => {
-                if rng.gen_bool(0.5) && !model.is_empty() {
+                if rng.random_bool(0.5) && !model.is_empty() {
                     // Delete existing key
                     let delete_key = {
                         let keys: Vec<&Vec<u8>> = model.keys().collect();
@@ -117,7 +117,7 @@ fn test_random_ops_linearizability() {
                     }
                 } else {
                     // Delete random key
-                    let len: usize = rng.gen_range(1..64);
+                    let len: usize = rng.random_range(1..64);
                     let key = random_key(&mut rng, len);
                     model.remove(&key);
                     let _ = engine.delete(key);
@@ -178,16 +178,16 @@ fn test_concurrent_random_ops() {
     for thread_id in 0..CONCURRENT_THREADS {
         let engine = engine.clone();
         let handle = std::thread::spawn(move || {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             let mut local_keys: Vec<Vec<u8>> = Vec::new();
             let mut errors = 0u64;
 
             for _i in 0..ops_per_thread {
-                match rng.gen_range(0..100) {
+                match rng.random_range(0..100) {
                     0..=59 => {
-                        let len: usize = rng.gen_range(1..32);
+                        let len: usize = rng.random_range(1..32);
                         let key = random_key(&mut rng, len);
-                        let val_len: usize = rng.gen_range(0..128);
+                        let val_len: usize = rng.random_range(0..128);
                         let val = random_value(&mut rng, val_len);
                         if engine.set(key.clone(), val.clone()).is_ok() {
                             local_keys.push(key);
@@ -196,18 +196,18 @@ fn test_concurrent_random_ops() {
                         }
                     }
                     60..=89 => {
-                        if rng.gen_bool(0.5) && !local_keys.is_empty() {
-                            let idx = rng.gen_range(0..local_keys.len());
+                        if rng.random_bool(0.5) && !local_keys.is_empty() {
+                            let idx = rng.random_range(0..local_keys.len());
                             let _ = engine.get(&local_keys[idx]);
                         } else {
-                            let len: usize = rng.gen_range(1..32);
+                            let len: usize = rng.random_range(1..32);
                             let key = random_key(&mut rng, len);
                             let _ = engine.get(key.as_slice());
                         }
                     }
                     90..=99 => {
                         if !local_keys.is_empty() {
-                            let idx = rng.gen_range(0..local_keys.len());
+                            let idx = rng.random_range(0..local_keys.len());
                             let key = local_keys.remove(idx);
                             let _ = engine.delete(key);
                         }
@@ -321,9 +321,9 @@ fn test_edge_case_fuzzing() {
 
     // 3f: Maximum key length
     eprintln!("  Edge: Maximum uniqueness...");
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     for i in 0..1000 {
-        let key = format!("uniq_{}_{}", i, rng.gen::<u64>());
+        let key = format!("uniq_{}_{}", i, rng.random::<u64>());
         engine
             .set(key.as_bytes().to_vec(), b"unique".to_vec())
             .unwrap();
@@ -352,7 +352,7 @@ fn test_edge_case_fuzzing() {
 #[test]
 fn test_random_scan_consistency() {
     let (_dir, engine) = create_engine();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Insert known keys in sorted order
     let keys: Vec<String> = (0..500).map(|i| format!("{:04}", i)).collect();
@@ -364,15 +364,15 @@ fn test_random_scan_consistency() {
 
     // Randomly delete some
     for key in &keys {
-        if rng.gen_bool(0.2) {
+        if rng.random_bool(0.2) {
             engine.delete(key.as_bytes()).unwrap();
         }
     }
 
     // Scan and verify ordering
     for _ in 0..50 {
-        let lower_i = rng.gen_range(0..450);
-        let upper_i = rng.gen_range(lower_i + 1..500);
+        let lower_i = rng.random_range(0..450);
+        let upper_i = rng.random_range(lower_i + 1..500);
         let lower = keys[lower_i].as_bytes();
         let upper = keys[upper_i].as_bytes();
 
@@ -426,7 +426,7 @@ fn test_flush_compaction_stress() {
     let start = Instant::now();
     for i in 0..5000 {
         let key = format!("stress_{}", i);
-        let val_len: usize = rng.gen_range(10..1000);
+        let val_len: usize = rng.random_range(10..1000);
         let val = random_value(&mut rng, val_len);
         engine.set(key.as_bytes().to_vec(), val.clone()).unwrap();
         model.insert(key.as_bytes().to_vec(), val);
@@ -507,7 +507,7 @@ fn test_flush_compaction_stress() {
 fn test_recovery_after_random_ops() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().to_path_buf();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut model: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
 
     // Phase 1: Random operations
@@ -519,8 +519,8 @@ fn test_recovery_after_random_ops() {
         let engine = Engine::new_from_config(&config, GlobalBlockCache::new(1, 4096)).unwrap();
 
         for i in 0..2000 {
-            let op = rng.gen_range(0..100);
-            let key = format!("recover_{}", rng.gen_range(0..500));
+            let op = rng.random_range(0..100);
+            let key = format!("recover_{}", rng.random_range(0..500));
             match op {
                 0..=79 => {
                     // write
@@ -592,16 +592,16 @@ fn test_recovery_after_random_ops() {
 #[test]
 fn test_long_sequence_stability() {
     let (_dir, engine) = create_engine();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let start = Instant::now();
     let long_ops = 50_000;
 
     eprintln!("  Running {} operations (stability test)...", long_ops);
     for i in 0..long_ops {
-        let key = format!("stability_{}", rng.gen_range(0..1000));
-        let val_len: usize = rng.gen_range(0..100);
+        let key = format!("stability_{}", rng.random_range(0..1000));
+        let val_len: usize = rng.random_range(0..100);
         let val = random_value(&mut rng, val_len);
-        match rng.gen_range(0..10) {
+        match rng.random_range(0..10) {
             0..=6 => {
                 engine.set(key.as_bytes().to_vec(), val).unwrap();
             }
@@ -630,7 +630,7 @@ fn test_long_sequence_stability() {
 #[test]
 fn test_performance_baseline() {
     let (_dir, engine) = create_engine();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Sequential write throughput
     let count = 10_000;
@@ -646,7 +646,7 @@ fn test_performance_baseline() {
     // Sequential read throughput
     let start = Instant::now();
     for _i in 0..count {
-        let key = format!("perf_{}", rng.gen_range(0..count));
+        let key = format!("perf_{}", rng.random_range(0..count));
         let _ = engine.get(key.as_bytes());
     }
     let read_time = start.elapsed();
@@ -655,7 +655,7 @@ fn test_performance_baseline() {
     // Sequential delete throughput
     let start = Instant::now();
     for _i in 0..count {
-        let key = format!("perf_{}", rng.gen_range(0..count));
+        let key = format!("perf_{}", rng.random_range(0..count));
         let _ = engine.delete(key.as_bytes());
     }
     let del_time = start.elapsed();
@@ -664,10 +664,10 @@ fn test_performance_baseline() {
     // Scan throughput
     let start = Instant::now();
     for _ in 0..100 {
-        let lower = format!("perf_{}", rng.gen_range(0..(count - 100)));
+        let lower = format!("perf_{}", rng.random_range(0..(count - 100)));
         let upper = format!(
             "perf_{}",
-            rng.gen_range(0..(count - 100))
+            rng.random_range(0..(count - 100))
                 .max((count as u32).saturating_sub(50) as usize)
         );
         let _ = engine.scan_range("default", lower.as_bytes(), upper.as_bytes(), Some(50));

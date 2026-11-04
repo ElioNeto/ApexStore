@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security and reliability updates
 
+- Migrate to rand 0.10. Generate tokens and AES-GCM nonces directly from operating-system randomness, returning errors if secure entropy is unavailable.
+
 - Require Write permission for WebSocket sync, revalidate live token permissions on messages, reject reserved keys, and filter broadcasts/replies by per-key Read policies. Report storage errors before acknowledging changes and preserve the winning CRDT value on stale updates.
 
 - Avoid scanning the keyspace for secondary-index schemas when writing non-JSON values; retain WAL durability and verify binary/text data across flush and restart.
@@ -30,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Make compaction stress input reproducible and correct the property-test reference model for repeated keys.
 
 ### API compatibility notes
+
+- **Breaking:** `api::auth::token::generate_token()` now returns `Result<String, AuthError>` instead of `String`. Direct callers must propagate or handle entropy-source failures (for example, `let token = generate_token()?;`). `TokenManager::create_token` keeps its existing result type; token encoding and encrypted storage formats remain unchanged.
 
 - `SyncManager::apply_change` now returns `Result<()>`; callers must handle persistence failures. WebSocket clients receive an error response for rejected writes instead of a success acknowledgement. A Write-only token may send updates but needs explicit Read permission to receive values.
 

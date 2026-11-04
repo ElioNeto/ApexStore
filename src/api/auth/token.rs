@@ -2,6 +2,7 @@
 
 use super::AuthError;
 use base64::{engine::general_purpose, Engine as _};
+use rand::{rngs::SysRng, TryCryptoRng};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
@@ -96,13 +97,22 @@ impl ApiToken {
     }
 }
 
-/// Generate a new random token
-pub fn generate_token() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let random_bytes: Vec<u8> = (0..32).map(|_| rng.gen::<u8>()).collect();
+/// Generate a new token from 32 bytes of operating-system randomness.
+///
+/// Returns an error if the operating system cannot supply secure randomness.
+pub fn generate_token() -> Result<String, AuthError> {
+    generate_token_with_rng(&mut SysRng)
+}
 
-    format!("apx_{}", general_purpose::STANDARD.encode(&random_bytes))
+fn generate_token_with_rng(rng: &mut impl TryCryptoRng) -> Result<String, AuthError> {
+    let mut random_bytes = [0u8; 32];
+    rng.try_fill_bytes(&mut random_bytes)
+        .map_err(|e| AuthError::Internal(format!("Secure token randomness unavailable: {e}")))?;
+
+    Ok(format!(
+        "apx_{}",
+        general_purpose::STANDARD.encode(random_bytes)
+    ))
 }
 
 impl FromStr for Permission {
@@ -141,11 +151,46 @@ fn constant_time_compare(a: &str, b: &str) -> bool {
 mod tests {
     use super::*;
 
+    struct FailingRng;
+
+    impl rand::TryRng for FailingRng {
+        type Error = std::io::Error;
+
+        fn try_next_u32(&mut self) -> std::io::Result<u32> {
+            Err(std::io::Error::other("entropy unavailable"))
+        }
+
+        fn try_next_u64(&mut self) -> std::io::Result<u64> {
+            Err(std::io::Error::other("entropy unavailable"))
+        }
+
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> std::io::Result<()> {
+            // A failed source may have partially written the destination.
+            dest[0] = 0xAB;
+            Err(std::io::Error::other("entropy unavailable"))
+        }
+    }
+
+    impl rand::TryCryptoRng for FailingRng {}
+
+    #[test]
+    fn test_token_generation_rejects_entropy_failure() {
+        let error = generate_token_with_rng(&mut FailingRng).unwrap_err();
+        assert!(
+            matches!(error, AuthError::Internal(message) if message.contains("entropy unavailable"))
+        );
+    }
+
     #[test]
     fn test_token_generation() {
-        let token = generate_token();
+        let token = generate_token().unwrap();
         assert!(token.starts_with("apx_"));
-        assert!(token.len() > 40);
+        assert_eq!(token.len(), 48);
+        assert_eq!(
+            general_purpose::STANDARD.decode(&token[4..]).unwrap().len(),
+            32
+        );
+        assert_ne!(token, generate_token().unwrap());
     }
 
     #[test]
@@ -159,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_token_validation() {
-        let raw_token = generate_token();
+        let raw_token = generate_token().unwrap();
         let api_token =
             ApiToken::new("test".to_string(), &raw_token, None, vec![Permission::Read]).unwrap();
         assert!(api_token.validate_token(&raw_token));
