@@ -24,8 +24,9 @@ async fn test_begin_transaction() {
         body.get("txn_id").is_some(),
         "Response should contain 'txn_id'"
     );
-    let txn_id = body["txn_id"].as_u64().expect("txn_id should be a u64");
-    assert!(txn_id > 0, "txn_id should be positive");
+    let txn_id =
+        uuid::Uuid::parse_str(body["txn_id"].as_str().expect("txn_id should be a string")).unwrap();
+    assert_eq!(txn_id.get_version_num(), 4);
 }
 
 #[actix_web::test]
@@ -36,7 +37,7 @@ async fn test_transaction_put_and_commit() {
 
     // Begin a transaction
     let (_, txn_resp) = test_helpers::post_json(&mut app, "/txn", &json!({})).await;
-    let txn_id = txn_resp["txn_id"].as_u64().expect("valid txn_id");
+    let txn_id = txn_resp["txn_id"].as_str().expect("valid txn_id");
 
     // Stage a put
     let (status, _body) = test_helpers::post_json(
@@ -74,7 +75,7 @@ async fn test_transaction_rollback() {
 
     // Begin a transaction
     let (_, txn_resp) = test_helpers::post_json(&mut app, "/txn", &json!({})).await;
-    let txn_id = txn_resp["txn_id"].as_u64().expect("valid txn_id");
+    let txn_id = txn_resp["txn_id"].as_str().expect("valid txn_id");
 
     // Stage a put
     test_helpers::post_json(
@@ -105,7 +106,7 @@ async fn test_transaction_multiple_keys() {
 
     // Begin a transaction
     let (_, txn_resp) = test_helpers::post_json(&mut app, "/txn", &json!({})).await;
-    let txn_id = txn_resp["txn_id"].as_u64().expect("valid txn_id");
+    let txn_id = txn_resp["txn_id"].as_str().expect("valid txn_id");
 
     // Stage multiple puts
     for i in 0..3 {
@@ -143,7 +144,7 @@ async fn test_transaction_commit_empty() {
 
     // Begin a transaction
     let (_, txn_resp) = test_helpers::post_json(&mut app, "/txn", &json!({})).await;
-    let txn_id = txn_resp["txn_id"].as_u64().expect("valid txn_id");
+    let txn_id = txn_resp["txn_id"].as_str().expect("valid txn_id");
 
     // Commit without staging any writes
     let (status, commit_body) =
@@ -165,7 +166,7 @@ async fn test_transaction_delete() {
 
     // Begin a transaction
     let (_, txn_resp) = test_helpers::post_json(&mut app, "/txn", &json!({})).await;
-    let txn_id = txn_resp["txn_id"].as_u64().expect("valid txn_id");
+    let txn_id = txn_resp["txn_id"].as_str().expect("valid txn_id");
 
     // Stage a delete
     let (status, _body) = test_helpers::post_json(

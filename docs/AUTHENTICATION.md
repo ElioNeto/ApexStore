@@ -350,3 +350,30 @@ curl -X GET "http://localhost:8080/keys/user:1" \
 ---
 
 **Security Contact**: For security issues, please email security@apexstore.io (or create a private issue)
+
+
+## Transaction ownership
+
+`POST /txn` returns a random UUID v4 string in `txn_id`. Send that string in
+`/txn/{txn_id}/put`, `/delete`, `/commit` and `/rollback`. Each transaction belongs
+to the authenticated token that created it; another token, including another
+administrator, receives the same HTTP 404 response as an unknown transaction.
+Normal Write/Delete permission checks still apply, and revoked or expired tokens
+cannot continue using their transactions.
+
+Transactions have an absolute five-minute lifetime. Requests do not renew it.
+The server allows 32 open transactions per token and 1024 in total; further begin
+requests receive HTTP 429 until a transaction finishes or expires. Every transaction
+operation removes expired entries, dropping staged writes without committing them.
+No timer is needed to admit new work: begin also prunes expired entries before
+checking capacity. Idle expired entries may remain allocated until the next
+transaction request, within the same capacity bound.
+
+When authentication is explicitly disabled, all requests share an anonymous owner
+and its quota. This mode provides no isolation between clients. Embedding applications
+can pass `TransactionManager::with_limits(lifetime, per_owner, total)` as Actix app
+data to choose tighter limits. Setting any limit or the lifetime to zero rejects
+new transactions.
+
+Clients upgrading from numeric transaction IDs must read the JSON string instead;
+active transactions are process-local and do not survive server restarts.
