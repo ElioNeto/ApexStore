@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security and reliability updates
 
 - Store API credentials in an isolated, atomically persisted private snapshot shared by the server and offline CLI. Fail startup on corrupt credential storage, reject reserved keys in public APIs, and hide legacy metadata from scans. Legacy user-keyspace tokens must be rotated; they are never automatically trusted.
+- Require Write permission for WebSocket sync, revalidate live token permissions on messages, reject reserved keys, and filter broadcasts/replies by per-key Read policies. Report storage errors before acknowledging changes and preserve the winning CRDT value on stale updates.
 
 - Avoid scanning the keyspace for secondary-index schemas when writing non-JSON values; retain WAL durability and verify binary/text data across flush and restart.
 
@@ -32,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### API compatibility notes
 
 - `TokenManager::new_with_engine` now returns `Result`; handle credential-loading failures. Existing deployments must create replacement credentials with the upgraded offline CLI before enabling the server. See `docs/AUTHENTICATION.md`.
+- `SyncManager::apply_change` now returns `Result<()>`; callers must handle persistence failures. WebSocket clients receive an error response for rejected writes instead of a success acknowledgement. A Write-only token may send updates but needs explicit Read permission to receive values.
 
 - The server uses `HttpAuthentication::with_fn(request_validator)` to honor explicit authentication disablement without a Bearer header. Only `GET /health/liveness` is public; readiness, startup, detailed health and data routes still require authentication. Custom Actix applications can use the same validator.
 - Direct GraphQL schema callers must attach an authenticated `ApiToken` to request data or explicitly opt out with `AuthEnabled(false)`. The HTTP handler supplies authorization from the bearer middleware; missing context denies access.
