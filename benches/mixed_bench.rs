@@ -2,7 +2,7 @@ mod common;
 
 use apexstore::infra::config::LsmConfig;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use rand::Rng;
+use rand::RngExt;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -77,16 +77,16 @@ fn bench_ycsb_type_a(c: &mut Criterion) {
 
                 common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
 
                 b.iter(|| {
                     for _ in 0..1000 {
-                        if rng.gen::<f32>() < 0.5 {
-                            let index = rng.gen_range(0..nk);
+                        if rng.random::<f32>() < 0.5 {
+                            let index = rng.random_range(0..nk);
                             let _ = engine.get(&keys[index]).unwrap();
                         } else {
-                            let index = rng.gen_range(0..nk);
-                            let new_value = generate_value(rng.gen_range(0..10_000), 100);
+                            let index = rng.random_range(0..nk);
+                            let new_value = generate_value(rng.random_range(0..10_000), 100);
                             engine.set(keys[index].clone(), new_value).unwrap();
                         }
                     }
@@ -136,16 +136,16 @@ fn bench_ycsb_type_b(c: &mut Criterion) {
 
                 engine.flush_memtable().unwrap();
 
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
 
                 b.iter(|| {
                     for _ in 0..1000 {
-                        if rng.gen::<f32>() < 0.95 {
-                            let index = rng.gen_range(0..nk);
+                        if rng.random::<f32>() < 0.95 {
+                            let index = rng.random_range(0..nk);
                             let _ = engine.get(&keys[index]).unwrap();
                         } else {
-                            let index = rng.gen_range(0..nk);
-                            let new_value = generate_value(rng.gen_range(0..10_000), 100);
+                            let index = rng.random_range(0..nk);
+                            let new_value = generate_value(rng.random_range(0..10_000), 100);
                             engine.set(keys[index].clone(), new_value).unwrap();
                         }
                     }
@@ -200,11 +200,11 @@ fn bench_ycsb_type_c(c: &mut Criterion) {
                     let _ = engine.get(key.as_str()).unwrap();
                 }
 
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
 
                 b.iter(|| {
                     for _ in 0..1000 {
-                        let index = rng.gen_range(0..nk);
+                        let index = rng.random_range(0..nk);
                         let _ = engine.get(&keys[index]).unwrap();
                     }
                 });
@@ -252,16 +252,16 @@ fn bench_workload_balanced(c: &mut Criterion) {
 
                 engine.flush_memtable().unwrap();
 
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
 
                 b.iter(|| {
                     for _ in 0..1000 {
-                        if rng.gen::<f32>() < 0.5 {
-                            let index = rng.gen_range(0..nk);
+                        if rng.random::<f32>() < 0.5 {
+                            let index = rng.random_range(0..nk);
                             let _ = engine.get(&keys[index]).unwrap();
                         } else {
-                            let index = rng.gen_range(0..nk);
-                            let new_value = generate_value(rng.gen_range(0..10_000), 100);
+                            let index = rng.random_range(0..nk);
+                            let new_value = generate_value(rng.random_range(0..10_000), 100);
                             engine.set(keys[index].clone(), new_value).unwrap();
                         }
                     }
@@ -316,16 +316,16 @@ fn bench_workload_read_heavy(c: &mut Criterion) {
 
                 engine.flush_memtable().unwrap();
 
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
 
                 b.iter(|| {
                     for _ in 0..1000 {
-                        if rng.gen::<f32>() < 0.9 {
-                            let index = rng.gen_range(0..nk);
+                        if rng.random::<f32>() < 0.9 {
+                            let index = rng.random_range(0..nk);
                             let _ = engine.get(&keys[index]).unwrap();
                         } else {
-                            let index = rng.gen_range(0..nk);
-                            let new_value = generate_value(rng.gen_range(0..10_000), 100);
+                            let index = rng.random_range(0..nk);
+                            let new_value = generate_value(rng.random_range(0..10_000), 100);
                             engine.set(keys[index].clone(), new_value).unwrap();
                         }
                     }
@@ -377,16 +377,16 @@ fn bench_workload_write_heavy(c: &mut Criterion) {
                 )
                 .unwrap();
 
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
 
                 b.iter(|| {
                     for _ in 0..1000 {
-                        if rng.gen::<f32>() < 0.1 {
-                            let index = rng.gen_range(0..nk);
+                        if rng.random::<f32>() < 0.1 {
+                            let index = rng.random_range(0..nk);
                             let _ = engine.get(&keys[index]).unwrap();
                         } else {
-                            let index = rng.gen_range(0..nk);
-                            let new_value = generate_value(rng.gen_range(0..10_000), 100);
+                            let index = rng.random_range(0..nk);
+                            let new_value = generate_value(rng.random_range(0..10_000), 100);
                             engine.set(keys[index].clone(), new_value).unwrap();
                         }
                     }

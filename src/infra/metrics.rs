@@ -73,10 +73,11 @@ pub struct EngineMetrics {
 }
 
 impl EngineMetrics {
-    /// Create a new `EngineMetrics` with all counters initialised to zero.
+    /// Create counters and attach the global OTel meter when initialized.
+    /// Initialize telemetry before constructing an engine to export its metrics.
     pub fn new() -> Self {
         Self {
-            otel_instruments: None,
+            otel_instruments: OtelInstruments::try_register(),
             ..Self::default()
         }
     }
