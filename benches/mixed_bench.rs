@@ -1,3 +1,5 @@
+mod common;
+
 use apexstore::infra::config::LsmConfig;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use rand::Rng;
@@ -70,9 +72,7 @@ fn bench_ycsb_type_a(c: &mut Criterion) {
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
                 let values: Vec<Vec<u8>> = (0..nk).map(|i| generate_value(i, 100)).collect();
 
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
                 let mut rng = rand::thread_rng();
 
@@ -129,9 +129,7 @@ fn bench_ycsb_type_b(c: &mut Criterion) {
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
                 let values: Vec<Vec<u8>> = (0..nk).map(|i| generate_value(i, 100)).collect();
 
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
                 engine.flush_memtable().unwrap();
 
@@ -190,9 +188,7 @@ fn bench_ycsb_type_c(c: &mut Criterion) {
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
                 let values: Vec<Vec<u8>> = (0..nk).map(|i| generate_value(i, 100)).collect();
 
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
                 engine.flush_memtable().unwrap();
 
@@ -249,9 +245,7 @@ fn bench_workload_balanced(c: &mut Criterion) {
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
                 let values: Vec<Vec<u8>> = (0..nk).map(|i| generate_value(i, 100)).collect();
 
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
                 engine.flush_memtable().unwrap();
 
@@ -309,10 +303,13 @@ fn bench_workload_read_heavy(c: &mut Criterion) {
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
 
-                for (i, key) in keys.iter().enumerate() {
-                    let value = generate_value(i, 100);
-                    engine.set(key.clone(), value).unwrap();
-                }
+                common::populate(
+                    &engine,
+                    keys.iter()
+                        .enumerate()
+                        .map(|(i, key)| (key, generate_value(i, 100))),
+                )
+                .unwrap();
 
                 engine.flush_memtable().unwrap();
 
@@ -369,10 +366,13 @@ fn bench_workload_write_heavy(c: &mut Criterion) {
 
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
 
-                for (i, key) in keys.iter().enumerate() {
-                    let value = generate_value(i, 100);
-                    engine.set(key.clone(), value).unwrap();
-                }
+                common::populate(
+                    &engine,
+                    keys.iter()
+                        .enumerate()
+                        .map(|(i, key)| (key, generate_value(i, 100))),
+                )
+                .unwrap();
 
                 let mut rng = rand::thread_rng();
 

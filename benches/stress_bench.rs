@@ -1,3 +1,5 @@
+mod common;
+
 use apexstore::infra::config::LsmConfig;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::path::PathBuf;
@@ -63,11 +65,12 @@ fn bench_large_dataset_1m(c: &mut Criterion) {
 
         let keys_per_batch = 100_000;
         for batch in 0..10 {
-            for i in batch * keys_per_batch..(batch + 1) * keys_per_batch {
-                let key = generate_key(i, 10);
-                let value = generate_value(i, 100);
-                engine.set(key, value).unwrap();
-            }
+            common::populate(
+                &engine,
+                (batch * keys_per_batch..(batch + 1) * keys_per_batch)
+                    .map(|i| (generate_key(i, 10), generate_value(i, 100))),
+            )
+            .unwrap();
             engine.flush_memtable().unwrap();
         }
 
@@ -111,11 +114,11 @@ fn bench_concurrent_access(c: &mut Criterion) {
             )
             .unwrap();
 
-            for i in 0..10_000 {
-                let key = generate_key(i, 10);
-                let value = generate_value(i, 100);
-                engine.set(key, value).unwrap();
-            }
+            common::populate(
+                &engine,
+                (0..10_000).map(|i| (generate_key(i, 10), generate_value(i, 100))),
+            )
+            .unwrap();
 
             let engine = Arc::new(engine);
             let keys: Vec<String> = (0..10_000).map(|i| generate_key(i, 10)).collect();
@@ -173,11 +176,11 @@ fn bench_memory_pressure(c: &mut Criterion) {
             )
             .unwrap();
 
-            for i in 0..num_keys {
-                let key = generate_key(i, 10);
-                let value = generate_value(i, 100);
-                engine.set(key, value).unwrap();
-            }
+            common::populate(
+                &engine,
+                (0..num_keys).map(|i| (generate_key(i, 10), generate_value(i, 100))),
+            )
+            .unwrap();
 
             let read_keys_count = if std::env::var("CI").is_ok() {
                 1_000
@@ -228,12 +231,12 @@ fn bench_many_sstables(c: &mut Criterion) {
 
                 let records_per_sstable = 1_000;
                 for sstable in 0..sstable_count {
-                    for i in (sstable * records_per_sstable)..((sstable + 1) * records_per_sstable)
-                    {
-                        let key = generate_key(i, 10);
-                        let value = generate_value(i, 100);
-                        engine.set(key, value).unwrap();
-                    }
+                    common::populate(
+                        &engine,
+                        ((sstable * records_per_sstable)..((sstable + 1) * records_per_sstable))
+                            .map(|i| (generate_key(i, 10), generate_value(i, 100))),
+                    )
+                    .unwrap();
                     engine.flush_memtable().unwrap();
                 }
 
@@ -283,11 +286,11 @@ fn bench_cache_thrashing(c: &mut Criterion) {
             } else {
                 100_000
             };
-            for i in 0..total_keys {
-                let key = generate_key(i, 10);
-                let value = generate_value(i, 100);
-                engine.set(key, value).unwrap();
-            }
+            common::populate(
+                &engine,
+                (0..total_keys).map(|i| (generate_key(i, 10), generate_value(i, 100))),
+            )
+            .unwrap();
             engine.flush_memtable().unwrap();
 
             let keys: Vec<String> = (0..total_keys).map(|i| generate_key(i, 10)).collect();
@@ -325,10 +328,11 @@ fn bench_key_updates(c: &mut Criterion) {
 
         let initial_keys: Vec<String> = (0..10_000).map(|i| generate_key(i, 10)).collect();
 
-        for key in initial_keys.iter() {
-            let value = generate_value(0, 100);
-            engine.set(key.clone(), value).unwrap();
-        }
+        common::populate(
+            &engine,
+            initial_keys.iter().map(|key| (key, generate_value(0, 100))),
+        )
+        .unwrap();
 
         b.iter(|| {
             for (i, key) in initial_keys.iter().enumerate() {
@@ -363,10 +367,11 @@ fn bench_delete_operations(c: &mut Criterion) {
 
         let keys: Vec<String> = (0..10_000).map(|i| generate_key(i, 10)).collect();
 
-        for key in keys.iter() {
-            let value = generate_value(0, 100);
-            engine.set(key.clone(), value).unwrap();
-        }
+        common::populate(
+            &engine,
+            keys.iter().map(|key| (key, generate_value(0, 100))),
+        )
+        .unwrap();
 
         b.iter(|| {
             for key in keys.iter() {
