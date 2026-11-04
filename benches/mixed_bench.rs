@@ -8,7 +8,7 @@ fn configure_criterion() -> Criterion {
     let mut c = Criterion::default();
     if std::env::var("CI").is_ok() {
         c = c
-            .sample_size(5)
+            .sample_size(10)
             .warm_up_time(std::time::Duration::from_millis(500))
             .measurement_time(std::time::Duration::from_secs(1));
     }
