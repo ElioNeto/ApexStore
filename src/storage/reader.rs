@@ -18,10 +18,6 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-const SST_MAGIC_V2: &[u8; 8] = b"LSMSST03";
-const SST_MAGIC_V2_ENCRYPTED: &[u8; 8] = b"LSMSST04";
-const FOOTER_SIZE: u64 = 8;
-
 /// SSTable V2 Reader with sparse index, Bloom filter, and shared global block caching
 ///
 /// # Thread Safety
@@ -42,7 +38,7 @@ const FOOTER_SIZE: u64 = 8;
 #[derive(Debug)]
 pub struct SstableReader {
     metadata: MetaBlock,
-    bloom_filter: Bloom<[u8]>,
+    bloom_filter: Option<Bloom<[u8]>>,
     file: Mutex<File>,
     block_cache: Arc<GlobalBlockCache>,
     path: PathBuf,
@@ -85,42 +81,8 @@ impl SstableReader {
         encryption: &EncryptionConfig,
     ) -> Result<Self> {
         let mut file = File::open(&path)?;
-        let encryptor = Encryptor::new(encryption);
-
-        // Verify magic number
-        let mut magic = [0u8; 8];
-        file.read_exact(&mut magic)?;
-
-        // Check if this is an encrypted SSTable
-        let is_encrypted = if &magic == SST_MAGIC_V2_ENCRYPTED {
-            true
-        } else if &magic == SST_MAGIC_V2 {
-            false
-        } else {
-            return Err(LsmError::InvalidSstableFormat(format!(
-                "Invalid magic number: expected {:?} or {:?}, found {:?}",
-                SST_MAGIC_V2, SST_MAGIC_V2_ENCRYPTED, magic
-            )));
-        };
-
-        // If the file is encrypted but the encryptor is disabled, fail early
-        if is_encrypted && !encryptor.is_enabled() {
-            return Err(LsmError::InvalidSstableFormat(
-                "SSTable is encrypted but no encryption key was provided".to_string(),
-            ));
-        }
-
-        // Read footer to get metadata offset
-        let meta_offset = Self::read_footer(&mut file)?;
-
-        // Read, decrypt (if needed), and decompress metadata block
-        let metadata = Self::read_meta_block(&mut file, meta_offset, &encryptor)?;
-
-        // Deserialize Bloom filter from stored bytes (clone to avoid moving)
-        let bloom_filter =
-            Bloom::<[u8]>::from_bytes(metadata.bloom_filter_data.clone()).map_err(|e| {
-                LsmError::CompactionFailed(format!("Bloom filter deserialization failed: {}", e))
-            })?;
+        let (metadata, encryptor) = super::metadata::read(&mut file, encryption)?;
+        let bloom_filter = super::metadata::bloom(metadata.bloom_filter_data.clone());
 
         // Generate table ID from path for cache
         let mut hasher = DefaultHasher::new();
@@ -160,7 +122,9 @@ impl SstableReader {
     /// This method is lock-free and very fast. It should be called before `get()`
     /// to avoid unnecessary I/O for keys that definitely don't exist.
     pub fn might_contain(&self, key: &[u8]) -> bool {
-        self.bloom_filter.check(key)
+        self.bloom_filter
+            .as_ref()
+            .is_none_or(|filter| filter.check(key))
     }
 
     /// Retrieve a value by key using sparse index and Bloom filter
@@ -388,45 +352,6 @@ impl SstableReader {
     }
 
     // Private helper methods
-
-    fn read_footer(file: &mut File) -> Result<u64> {
-        // Seek to the last 8 bytes (footer)
-        file.seek(SeekFrom::End(-(FOOTER_SIZE as i64)))?;
-
-        let mut footer_bytes = [0u8; 8];
-        file.read_exact(&mut footer_bytes)?;
-
-        let meta_offset = u64::from_le_bytes(footer_bytes);
-        Ok(meta_offset)
-    }
-
-    fn read_meta_block(file: &mut File, offset: u64, encryptor: &Encryptor) -> Result<MetaBlock> {
-        // Seek to metadata block
-        file.seek(SeekFrom::Start(offset))?;
-
-        // Read compressed (and possibly encrypted) metadata until footer
-        let file_len = file.metadata()?.len();
-        let meta_size = (file_len - offset - FOOTER_SIZE) as usize;
-
-        let mut encrypted_or_compressed = vec![0u8; meta_size];
-        file.read_exact(&mut encrypted_or_compressed)?;
-
-        // Decrypt first if encryption is enabled
-        let compressed = if encryptor.is_enabled() {
-            encryptor.decrypt_block(&encrypted_or_compressed)?
-        } else {
-            encrypted_or_compressed
-        };
-
-        // Decompress metadata
-        let decompressed = decompress_size_prepended(&compressed).map_err(|e| {
-            LsmError::DecompressionFailed(format!("Metadata decompression failed: {}", e))
-        })?;
-
-        // Deserialize metadata
-        let metadata: MetaBlock = decode(&decompressed)?;
-        Ok(metadata)
-    }
 
     /// Read and decompress a block by its metadata.
     /// Results are cached in the shared `GlobalBlockCache`.

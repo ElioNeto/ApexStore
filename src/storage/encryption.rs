@@ -195,12 +195,9 @@ impl Encryptor {
         let (nonce_bytes, encrypted) = data.split_at(12);
         let nonce = Nonce::from_slice(nonce_bytes);
 
-        let plaintext = cipher.decrypt(nonce, encrypted).map_err(|e| {
-            LsmError::CorruptedData(format!(
-                "AES-256-GCM decryption failed (wrong key or corrupted data): {}",
-                e
-            ))
-        })?;
+        let plaintext = cipher
+            .decrypt(nonce, encrypted)
+            .map_err(|_| LsmError::EncryptionAuthenticationFailed)?;
 
         Ok(plaintext)
     }

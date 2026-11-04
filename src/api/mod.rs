@@ -689,6 +689,9 @@ async fn get_stats(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Respo
                 "mem_kb": stats.mem_kb,
                 "wal_kb": stats.wal_kb,
                 "total_records": stats.total_records,
+                "quarantined_sstables": stats.quarantined_sstables,
+                "unreadable_sstables": stats.unreadable_sstables,
+                "degraded_bloom_sstables": stats.degraded_bloom_sstables,
                 "max_levels_reached": stats.max_levels_reached,
             })),
         Err(e) => {
@@ -872,6 +875,9 @@ async fn get_stats_all(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl R
                 "sst_files": stats.sst_files,
                 "wal_kb": stats.wal_kb,
                 "total_records": stats.total_records,
+                "quarantined_sstables": stats.quarantined_sstables,
+                "unreadable_sstables": stats.unreadable_sstables,
+                "degraded_bloom_sstables": stats.degraded_bloom_sstables,
             }})),
         Err(e) => {
             tracing::error!(target: "apexstore::api", "Failed to get stats/all: {:?}", e);

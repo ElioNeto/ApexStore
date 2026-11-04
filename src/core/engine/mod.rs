@@ -27,6 +27,7 @@
 //! families, controlled by a semaphore.
 
 pub mod compaction;
+mod recovery;
 pub mod transaction;
 pub mod version_set;
 
@@ -88,6 +89,8 @@ pub struct LsmStats {
     // Crash recovery stats
     pub quarantined_sstables: usize,
     pub recovered_sstables: usize,
+    pub unreadable_sstables: usize,
+    pub degraded_bloom_sstables: usize,
 }
 
 /// Engine options.
@@ -2026,6 +2029,12 @@ impl<C: Cache> Engine<C> {
         // Crash recovery stats
         stats.quarantined_sstables = core.version_set().startup_quarantine_count() as usize;
         stats.recovered_sstables = core.version_set().recovered_count() as usize;
+        stats.unreadable_sstables =
+            core.version_set().unreadable_count.load(Ordering::Relaxed) as usize;
+        stats.degraded_bloom_sstables = core
+            .version_set()
+            .degraded_bloom_count
+            .load(Ordering::Relaxed) as usize;
 
         // WAL stats — sum across all per-CF WALs
         stats.wal_kb = core
@@ -2062,6 +2071,12 @@ impl<C: Cache> Engine<C> {
         // Crash recovery stats (same across all CFs)
         combined.quarantined_sstables = core.version_set().startup_quarantine_count() as usize;
         combined.recovered_sstables = core.version_set().recovered_count() as usize;
+        combined.unreadable_sstables =
+            core.version_set().unreadable_count.load(Ordering::Relaxed) as usize;
+        combined.degraded_bloom_sstables = core
+            .version_set()
+            .degraded_bloom_count
+            .load(Ordering::Relaxed) as usize;
 
         combined.wal_kb = core
             .wals
@@ -2893,76 +2908,73 @@ impl<C: Cache> Engine<C> {
         std::fs::create_dir_all(data_dir)?;
         std::fs::create_dir_all(sst_dir)?;
 
-        // Track which SSTable filenames we copy from the snapshot
-        let mut copied_sst_files: Vec<String> = Vec::new();
-
-        for entry in std::fs::read_dir(snapshot_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
+        let manifest = Self::load_snapshot_manifest(snapshot_dir)?;
+        let mut paths = Vec::new();
+        if let Some(ref manifest) = manifest {
+            for (cf, names) in &manifest.column_families {
+                for name in names {
+                    paths.push((cf.clone(), recovery::table_path(snapshot_dir, name)?));
+                }
             }
-            if path.extension().is_some_and(|ext| ext == "sst") {
-                let Some(fname) = path.file_name() else {
-                    continue;
-                };
-                let fname_str = fname.to_string_lossy().to_string();
-                let dest = sst_dir.join(&fname_str);
-                std::fs::copy(&path, &dest)?;
-                copied_sst_files.push(fname_str);
-            } else if path.file_name().is_some_and(|n| n == "wal.log") {
-                let dest = data_dir.join("wal.log");
-                std::fs::copy(&path, &dest)?;
-            } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                // Copy per-CF WAL files: wal-{cf}.log
-                if name.starts_with("wal-") && name.ends_with(".log") {
-                    let dest = data_dir.join(name);
-                    std::fs::copy(&path, &dest)?;
+        } else {
+            for entry in std::fs::read_dir(snapshot_dir)? {
+                let entry = entry?;
+                if entry.file_type()?.is_file()
+                    && entry.path().extension().is_some_and(|ext| ext == "sst")
+                {
+                    paths.push(("default".into(), entry.path()));
                 }
             }
         }
-
-        // Load the manifest and register SSTables in the engine's VersionSet
-        let manifest = Self::load_snapshot_manifest(snapshot_dir)?;
-
-        // Write the disk manifest for new_generic() to discover on startup
-        if let Some(ref m) = manifest {
-            let disk_manifest_path = data_dir.join("disk.sst.manifest");
-            let json = serde_json::to_string(m).map_err(|e| {
-                crate::LsmError::InvalidArgument(format!(
-                    "Failed to serialize disk manifest: {}",
-                    e
-                ))
+        let mut candidates = recovery::inspect(paths, &self.options.encryption)?;
+        // Never replace a live SSTable with different bytes under the same name.
+        for candidate in &candidates {
+            let name = candidate.path.file_name().ok_or_else(|| {
+                crate::LsmError::InvalidArgument("missing SSTable filename".into())
             })?;
-            std::fs::write(&disk_manifest_path, &json)?;
+            let target = sst_dir.join(name);
+            if target.exists() && std::fs::read(&target)? != std::fs::read(&candidate.path)? {
+                return Err(crate::LsmError::InvalidArgument(format!(
+                    "snapshot conflicts with existing SSTable {}",
+                    target.display()
+                )));
+            }
         }
-
-        // Register SSTables in the running engine's VersionSet
-        if let Some(m) = manifest {
-            let mut core = self.core.write();
-            let sst_dir = sst_dir.clone();
-            let enc = &self.options.encryption;
-            for (cf, filenames) in &m.column_families {
-                for fname in filenames {
-                    let sst_path = sst_dir.join(fname);
-                    if sst_path.exists() {
-                        match Table::from_sstable_path(&sst_path, Some(enc)) {
-                            Ok(table) => {
-                                core.version_set_mut().add_table(cf, table);
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    "restore_snapshot: failed to load SSTable {} for CF {}: {:?}",
-                                    fname,
-                                    cf,
-                                    e
-                                );
-                            }
-                        }
+        for candidate in &mut candidates {
+            let name = candidate.path.file_name().ok_or_else(|| {
+                crate::LsmError::InvalidArgument("missing SSTable filename".into())
+            })?;
+            let target = sst_dir.join(name);
+            if !target.exists() {
+                std::fs::copy(&candidate.path, &target)?;
+            }
+            candidate.path = target.clone();
+            match &mut candidate.outcome {
+                crate::core::table::TableLoad::Healthy(table)
+                | crate::core::table::TableLoad::DegradedBloom(table) => table.path = Some(target),
+                crate::core::table::TableLoad::Corrupt(_) => {}
+            }
+        }
+        for entry in std::fs::read_dir(snapshot_dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name == "wal.log" || (name.starts_with("wal-") && name.ends_with(".log")) {
+                        std::fs::copy(entry.path(), data_dir.join(name))?;
                     }
                 }
             }
         }
+        if let Some(ref manifest) = manifest {
+            let mut temporary = tempfile::NamedTempFile::new_in(data_dir)?;
+            serde_json::to_writer(temporary.as_file_mut(), manifest)?;
+            temporary.as_file().sync_all()?;
+            temporary
+                .persist(data_dir.join("disk.sst.manifest"))
+                .map_err(|e| crate::LsmError::Io(e.error))?;
+        }
+        let mut core = self.core.write();
+        recovery::apply(&mut core, candidates, sst_dir)?;
 
         Ok(())
     }
@@ -2978,104 +2990,40 @@ impl<C: Cache> Engine<C> {
         data_dir: &Path,
         sst_dir: &Path,
     ) -> Result<()> {
-        let enc = core.encryption.clone();
+        let quarantined = recovery::count_quarantined(sst_dir)?;
+        core.version_set()
+            .quarantined_count
+            .store(quarantined, Ordering::Relaxed);
+        core.version_set()
+            .unreadable_count
+            .store(quarantined, Ordering::Relaxed);
         let manifest_path = data_dir.join("disk.sst.manifest");
+        let mut paths = Vec::new();
         if manifest_path.exists() {
-            // Use the manifest written by restore_snapshot()
-            let json_str = std::fs::read_to_string(&manifest_path).map_err(|e| {
-                crate::LsmError::InvalidArgument(format!("Failed to read disk manifest: {}", e))
-            })?;
-            let manifest: SnapshotManifest = serde_json::from_str(&json_str).map_err(|e| {
-                crate::LsmError::InvalidArgument(format!("Failed to parse disk manifest: {}", e))
-            })?;
-            for (cf, filenames) in &manifest.column_families {
-                for fname in filenames {
-                    let sst_path = sst_dir.join(fname);
-                    if sst_path.exists() {
-                        match Table::from_sstable_path(&sst_path, Some(&enc)) {
-                            Ok(table) => {
-                                core.version_set_mut().add_table(cf, table);
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    target: "apexstore::crash_recovery",
-                                    "discover_sstables: failed to load {} for CF {}: {:?} — quarantining",
-                                    fname,
-                                    cf,
-                                    e
-                                );
-                                let quarantine_dir = sst_dir.join("quarantine");
-                                let _ = std::fs::create_dir_all(&quarantine_dir);
-                                let dest = quarantine_dir.join(fname);
-                                if let Err(move_err) = std::fs::rename(&sst_path, &dest) {
-                                    tracing::error!(
-                                        "discover_sstables: failed to quarantine {}: {:?}",
-                                        fname,
-                                        move_err
-                                    );
-                                } else {
-                                    tracing::info!(
-                                        "discover_sstables: quarantined corrupted SSTable {}",
-                                        fname
-                                    );
-                                }
-                                core.version_set()
-                                    .quarantined_count
-                                    .fetch_add(1, Ordering::Relaxed);
-                            }
-                        }
+            let manifest: SnapshotManifest =
+                serde_json::from_slice(&std::fs::read(manifest_path)?)?;
+            for (cf, names) in manifest.column_families {
+                for name in names {
+                    let path = recovery::table_path(sst_dir, &name)?;
+                    if !path.exists() && sst_dir.join("quarantine").join(&name).is_file() {
+                        continue; // Already quarantined: retain the unhealthy startup signal.
                     }
+                    paths.push((cf.clone(), path));
                 }
             }
         } else {
-            // Fallback: scan for .sst files and add them to default CF
-            if let Ok(entries) = std::fs::read_dir(sst_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|ext| ext == "sst") {
-                        if let Some(fname) = path.file_name() {
-                            let fname_str = fname.to_string_lossy();
-                            tracing::info!(
-                                "discover_sstables: loading orphaned SSTable {} into default CF",
-                                fname_str
-                            );
-                            match Table::from_sstable_path(&path, Some(&enc)) {
-                                Ok(table) => {
-                                    core.version_set_mut().add_table("default", table);
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        target: "apexstore::crash_recovery",
-                                        "discover_sstables: failed to load {}: {:?} — quarantining",
-                                        fname_str,
-                                        e
-                                    );
-                                    let quarantine_dir = sst_dir.join("quarantine");
-                                    let _ = std::fs::create_dir_all(&quarantine_dir);
-                                    let dest = quarantine_dir.join(fname);
-                                    if let Err(move_err) = std::fs::rename(&path, &dest) {
-                                        tracing::error!(
-                                            "discover_sstables: failed to quarantine {}: {:?}",
-                                            fname_str,
-                                            move_err
-                                        );
-                                    } else {
-                                        tracing::info!(
-                                            "discover_sstables: quarantined corrupted SSTable {}",
-                                            fname_str
-                                        );
-                                    }
-                                    core.version_set()
-                                        .quarantined_count
-                                        .fetch_add(1, Ordering::Relaxed);
-                                }
-                            }
-                        }
-                    }
+            for entry in std::fs::read_dir(sst_dir)? {
+                let entry = entry?;
+                if entry.file_type()?.is_file()
+                    && entry.path().extension().is_some_and(|ext| ext == "sst")
+                {
+                    paths.push(("default".into(), entry.path()));
                 }
             }
         }
-        Ok(())
+        paths.sort_by(|a, b| a.1.cmp(&b.1));
+        let candidates = recovery::inspect(paths, &core.encryption)?;
+        recovery::apply(core, candidates, sst_dir)
     }
 
     /// Reconcile in-memory table state with `.sst` files on disk.

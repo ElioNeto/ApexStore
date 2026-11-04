@@ -235,6 +235,11 @@ impl SstableBuilder {
         };
 
         let meta_encoded = encode(&meta_block)?;
+        if meta_encoded.len() > super::metadata::MAX_METADATA_BYTES {
+            return Err(LsmError::InvalidArgument(
+                "SSTable metadata exceeds the 64 MiB supported limit".into(),
+            ));
+        }
         let meta_compressed = compress_prepend_size(&meta_encoded);
 
         // Encrypt meta block if encryption is enabled

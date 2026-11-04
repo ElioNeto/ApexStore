@@ -5,8 +5,8 @@
 //! | Path                     | Purpose      | Returns 200 when …                        |
 //! |--------------------------|--------------|-------------------------------------------|
 //! | `GET /health/liveness`   | Liveness     | Always (server is alive)                  |
-//! | `GET /health/readiness`  | Readiness    | Engine stats are accessible               |
-//! | `GET /health/startup`    | Startup      | Engine fully initialized with default CF  |
+//! | `GET /health/readiness`  | Readiness    | Engine stats accessible, no unreadable SSTables               |
+//! | `GET /health/startup`    | Startup      | Engine initialized, no unreadable SSTables  |
 
 use crate::LsmEngine;
 use actix_web::{get, web, HttpResponse, Responder};
@@ -35,10 +35,23 @@ pub async fn liveness() -> impl Responder {
 /// accept requests.
 ///
 /// Verifies engine stats are accessible (implies WAL is available, memtable is
-/// initialised, etc.). Returns 503 if the engine is closing or unreachable.
+/// initialised, etc.). Returns 503 if stats are unavailable or recovery left unreadable SSTables.
 #[get("/health/readiness")]
 pub async fn readiness(engine: web::Data<LsmEngine>) -> impl Responder {
     match engine.stats("default") {
+        Ok(stats) if stats.unreadable_sstables > 0 || stats.quarantined_sstables > 0 => {
+            HttpResponse::ServiceUnavailable().json(json!({
+                "status": "error",
+                "service": "apexstore",
+                "endpoint": "readiness",
+                "reason": "recovery left unreadable SSTables; inspect the quarantine reasons",
+                "details": {
+                    "quarantined_sstables": stats.quarantined_sstables,
+                    "unreadable_sstables": stats.unreadable_sstables,
+                    "degraded_bloom_sstables": stats.degraded_bloom_sstables,
+                }
+            }))
+        }
         Ok(stats) => HttpResponse::Ok()
             .content_type("application/json")
             .json(json!({
@@ -47,6 +60,9 @@ pub async fn readiness(engine: web::Data<LsmEngine>) -> impl Responder {
                 "endpoint": "readiness",
                 "details": {
                     "sst_files": stats.sst_files,
+                    "quarantined_sstables": stats.quarantined_sstables,
+                    "unreadable_sstables": stats.unreadable_sstables,
+                    "degraded_bloom_sstables": stats.degraded_bloom_sstables,
                     "wal_kb": stats.wal_kb,
                     "mem_records": stats.mem_records,
                 }
@@ -70,6 +86,19 @@ pub async fn readiness(engine: web::Data<LsmEngine>) -> impl Responder {
 #[get("/health/startup")]
 pub async fn startup(engine: web::Data<LsmEngine>) -> impl Responder {
     match engine.stats("default") {
+        Ok(stats) if stats.unreadable_sstables > 0 || stats.quarantined_sstables > 0 => {
+            HttpResponse::ServiceUnavailable().json(json!({
+                "status": "error",
+                "service": "apexstore",
+                "endpoint": "startup",
+                "reason": "recovery left unreadable SSTables; inspect the quarantine reasons",
+                "details": {
+                    "quarantined_sstables": stats.quarantined_sstables,
+                    "unreadable_sstables": stats.unreadable_sstables,
+                    "degraded_bloom_sstables": stats.degraded_bloom_sstables,
+                }
+            }))
+        }
         Ok(stats) => {
             // Confirm the default CF is present via column_families()
             let cf_ok = {
@@ -89,6 +118,9 @@ pub async fn startup(engine: web::Data<LsmEngine>) -> impl Responder {
                         "endpoint": "startup",
                         "details": {
                             "sst_files": stats.sst_files,
+                    "quarantined_sstables": stats.quarantined_sstables,
+                    "unreadable_sstables": stats.unreadable_sstables,
+                    "degraded_bloom_sstables": stats.degraded_bloom_sstables,
                             "wal_kb": stats.wal_kb,
                             "mem_records": stats.mem_records,
                         }
@@ -121,6 +153,19 @@ pub async fn startup(engine: web::Data<LsmEngine>) -> impl Responder {
 #[get("/health/check")]
 pub async fn health_check(engine: web::Data<LsmEngine>) -> impl Responder {
     match engine.stats("default") {
+        Ok(stats) if stats.unreadable_sstables > 0 || stats.quarantined_sstables > 0 => {
+            HttpResponse::ServiceUnavailable().json(json!({
+                "status": "error",
+                "service": "apexstore",
+                "endpoint": "check",
+                "reason": "recovery left unreadable SSTables; inspect the quarantine reasons",
+                "details": {
+                    "quarantined_sstables": stats.quarantined_sstables,
+                    "unreadable_sstables": stats.unreadable_sstables,
+                    "degraded_bloom_sstables": stats.degraded_bloom_sstables,
+                }
+            }))
+        }
         Ok(stats) => HttpResponse::Ok()
             .content_type("application/json")
             .json(json!({
@@ -131,6 +176,9 @@ pub async fn health_check(engine: web::Data<LsmEngine>) -> impl Responder {
                 "details": {
                     "memtable_records": stats.mem_records,
                     "sstable_files": stats.sst_files,
+                    "quarantined_sstables": stats.quarantined_sstables,
+                    "unreadable_sstables": stats.unreadable_sstables,
+                    "degraded_bloom_sstables": stats.degraded_bloom_sstables,
                     "wal_size_kb": stats.wal_kb,
                     "total_records": stats.total_records,
                 }
