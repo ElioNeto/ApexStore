@@ -5,6 +5,10 @@
 //! thread can be restarted. Maintains a history of recent panics for
 //! observability.
 //!
+//! Recovery requires an unwinding panic strategy, which the project's release
+//! profile enables explicitly. Embedders overriding it with `panic = "abort"`
+//! cannot recover panics; process aborts and termination signals are not panics.
+//!
 //! # Usage
 //!
 //! ```rust
@@ -178,7 +182,6 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
-    use std::time::Duration;
 
     #[test]
     fn test_spawn_protected_no_panic() {
@@ -217,8 +220,7 @@ mod tests {
         let handle = recovery.spawn_protected(Some("callback_test"), || {
             panic!("another intentional panic");
         });
-        let _ = handle.join();
-        std::thread::sleep(Duration::from_millis(50));
+        handle.join().unwrap();
 
         assert!(invoked.load(Ordering::SeqCst));
     }

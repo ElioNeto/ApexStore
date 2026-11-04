@@ -121,7 +121,9 @@ proptest = "1.6"
 opt-level = 3
 lto = true
 codegen-units = 1
-panic = "abort"
+# Worker recovery uses catch_unwind. Accept unwind metadata and its binary-size
+# and runtime cost so a worker panic does not abort the entire server.
+panic = "unwind"
 
 [[bench]]
 name = "write_bench"
