@@ -876,6 +876,17 @@ cargo run --release --features api --bin apexstore-server
 <li><strong>Low-latency</strong>: Set <code>SERVER_KEEP_ALIVE</code> to 5-15</li>
 <li><strong>Memory-constrained</strong>: Reduce <code>SERVER_MAX_CONNECTIONS</code> to 5000-10000</li>
 </ul>
+<h3 id="request-rate-limits"><a class="header" href="#request-rate-limits">Request Rate Limits</a></h3>
+<p><code>RATE_LIMIT_REQUESTS_PER_MINUTE</code> defaults to <code>100</code> accepted requests per client
+IP in a sliding 60-second window, shared across routes. <code>0</code> disables this global
+cap while keeping configured endpoint caps active. The server additionally
+limits <code>/admin/compact</code> and <code>/admin/flush</code> to five accepted requests each per
+window. Rejected requests do not extend the window or consume another cap.</p>
+<p>Applications configuring <code>RateLimiterState::set_endpoint_limit</code> must use the
+registered route pattern, including its scope (for example <code>/api/keys/{key}</code>),
+not a concrete key URL. A zero endpoint cap disables only that additional cap.
+The admin rate-limit summary reports both per-IP and per-route accepted counts
+in the last 60 seconds; requests with both caps disabled are not tracked.</p>
 <h2 id="lsm-engine-configuration"><a class="header" href="#lsm-engine-configuration">LSM Engine Configuration</a></h2>
 <h3 id="storage-settings"><a class="header" href="#storage-settings">Storage Settings</a></h3>
 <div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
