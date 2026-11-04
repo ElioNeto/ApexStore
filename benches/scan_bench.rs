@@ -1,3 +1,5 @@
+mod common;
+
 use apexstore::infra::config::LsmConfig;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::path::PathBuf;
@@ -7,7 +9,7 @@ fn configure_criterion() -> Criterion {
     let mut c = Criterion::default();
     if std::env::var("CI").is_ok() {
         c = c
-            .sample_size(5)
+            .sample_size(10)
             .warm_up_time(std::time::Duration::from_millis(500))
             .measurement_time(std::time::Duration::from_secs(1));
     }
@@ -69,9 +71,7 @@ fn bench_full_scan(c: &mut Criterion) {
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
                 let values: Vec<Vec<u8>> = (0..nk).map(|i| generate_value(i, 100)).collect();
 
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
                 b.iter(|| {
                     let results = engine.scan_cf("default", None, None, Some(nk)).unwrap();
@@ -118,9 +118,7 @@ fn bench_range_scan(c: &mut Criterion) {
                 let values: Vec<Vec<u8>> =
                     (0..total_keys).map(|i| generate_value(i, 100)).collect();
 
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
                 let start_idx = total_keys / 2;
                 let end_idx = start_idx + scan_size;
@@ -175,11 +173,16 @@ fn bench_prefix_scan(c: &mut Criterion) {
                 )
                 .unwrap();
 
-                for i in 0..total_keys {
-                    let key = format!("user:{}:data:{}", i / 100, i);
-                    let value = generate_value(i, 100);
-                    engine.set(key, value).unwrap();
-                }
+                common::populate(
+                    &engine,
+                    (0..total_keys).map(|i| {
+                        (
+                            format!("user:{}:data:{}", i / 100, i),
+                            generate_value(i, 100),
+                        )
+                    }),
+                )
+                .unwrap();
 
                 let prefix = "user:5:data:";
 
@@ -227,9 +230,7 @@ fn bench_iteration_sorted(c: &mut Criterion) {
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
                 let values: Vec<Vec<u8>> = (0..nk).map(|i| generate_value(i, 100)).collect();
 
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
                 b.iter(|| {
                     let results = engine.scan_cf("default", None, None, Some(nk)).unwrap();
@@ -275,9 +276,7 @@ fn bench_scan_with_limit(c: &mut Criterion) {
             let keys: Vec<String> = (0..total_keys).map(|i| generate_key(i, 10)).collect();
             let values: Vec<Vec<u8>> = (0..total_keys).map(|i| generate_value(i, 100)).collect();
 
-            for (key, value) in keys.iter().zip(values.iter()) {
-                engine.set(key.clone(), value.clone()).unwrap();
-            }
+            common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
             b.iter(|| {
                 let results = engine.scan_cf("default", None, None, Some(limit)).unwrap();
@@ -324,9 +323,7 @@ fn bench_scan_pagination(c: &mut Criterion) {
                 let values: Vec<Vec<u8>> =
                     (0..total_keys).map(|i| generate_value(i, 100)).collect();
 
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
                 b.iter(|| {
                     let mut cursor: Option<String> = None;
@@ -384,11 +381,16 @@ fn bench_sstable_layer_scan(c: &mut Criterion) {
                 .unwrap();
 
                 for layer in 0..layer_count {
-                    for i in 0..keys_per_layer {
-                        let key = format!("layer{}_key{:08x}", layer, i);
-                        let value = generate_value(i, 100);
-                        engine.set(key, value).unwrap();
-                    }
+                    common::populate(
+                        &engine,
+                        (0..keys_per_layer).map(|i| {
+                            (
+                                format!("layer{}_key{:08x}", layer, i),
+                                generate_value(i, 100),
+                            )
+                        }),
+                    )
+                    .unwrap();
                     engine.flush_memtable().unwrap();
                 }
 

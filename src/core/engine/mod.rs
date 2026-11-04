@@ -511,29 +511,28 @@ fn compact_cf_core<C: Cache>(
     let rt = core.range_tombstones().get(cf).cloned().unwrap_or_default();
 
     let mut all_metrics = CompactionMetrics::default();
+    let mut replacements = Vec::new();
     for indices in &groups {
         let (new_tables, metrics) = core
             .compaction_mut()
             .compact(indices, &tables, options, &rt)?;
-        let removed_paths = core
-            .version_set_mut()
-            .atomic_replace(cf, indices, new_tables);
-        // Delete orphaned SSTable files from disk
-        for path in &removed_paths {
-            if path.exists() {
-                if let Err(e) = std::fs::remove_file(path) {
-                    tracing::warn!(
-                        "compact_cf_core: failed to remove orphaned SSTable {:?}: {:?}",
-                        path,
-                        e
-                    );
-                }
-            }
-        }
+        replacements.push((indices.clone(), new_tables));
         all_metrics.bytes_read += metrics.bytes_read;
         all_metrics.bytes_written += metrics.bytes_written;
         all_metrics.files_merged += metrics.files_merged;
         all_metrics.duration_ms += metrics.duration_ms;
+    }
+    let removed_paths = core
+        .version_set_mut()
+        .atomic_replace_groups(cf, replacements);
+    for path in &removed_paths {
+        if let Err(e) = std::fs::remove_file(path) {
+            tracing::warn!(
+                "compact_cf_core: failed to remove SSTable {:?}: {:?}",
+                path,
+                e
+            );
+        }
     }
 
     Ok(Some(all_metrics))
@@ -1751,14 +1750,9 @@ impl<C: Cache> Engine<C> {
     pub fn compact(&self) -> Result<Vec<(String, CompactionMetrics)>> {
         let start = std::time::Instant::now();
         let mut results = Vec::new();
-        // Hold the lock continuously to prevent background compaction threads
-        // from applying stale plans (with obsolete table indices) between
-        // individual CF compactions.  All CFs are compacted under a single
-        // lock acquisition to avoid the race where maybe_compact() builds a
-        // plan with table indices that become invalid after compact_cf_core()
-        // replaces tables.  The three-phase background path in maybe_compact()
-        // is inherently racy because it builds a plan snapshot, drops the lock
-        // for I/O, then re-acquires it to apply potentially-stale indices.
+        // Hold the lock across all CF compactions. Each replacement advances
+        // the VersionSet generation, so background plans built before this
+        // operation are rejected when they reacquire the lock.
         let mut core = self.core.write();
         let column_families = core.version_set().column_families();
         for cf in column_families {
@@ -1875,7 +1869,7 @@ impl<C: Cache> Engine<C> {
 
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         // ── Phase 2: Execute compaction I/O without holding the lock ──
-                        let mut results: Vec<(String, Vec<usize>, Vec<Table>)> = Vec::new();
+                        let mut results: Vec<(Vec<usize>, Vec<Table>)> = Vec::new();
                         for group_indices in &plan.groups {
                             match plan.compaction.compact(
                                 group_indices,
@@ -1884,11 +1878,7 @@ impl<C: Cache> Engine<C> {
                                 &plan.range_tombstones,
                             ) {
                                 Ok((new_tables, _metrics)) => {
-                                    results.push((
-                                        plan.cf.clone(),
-                                        group_indices.clone(),
-                                        new_tables,
-                                    ));
+                                    results.push((group_indices.clone(), new_tables));
                                 }
                                 Err(e) => {
                                     tracing::error!(
@@ -1917,24 +1907,16 @@ impl<C: Cache> Engine<C> {
                                 core.version_set().compaction_generation(),
                             );
                         } else {
-                            for (cf, group_indices, new_tables) in results {
-                                let removed_paths = core.version_set_mut().atomic_replace(
-                                    &cf,
-                                    &group_indices,
-                                    new_tables,
-                                );
-                                // Delete orphaned SSTable files from disk
-                                for path in &removed_paths {
-                                    if path.exists() {
-                                        if let Err(e) = std::fs::remove_file(path) {
-                                            tracing::warn!(
-                                                "background compaction: failed to remove orphaned \
-                                             SSTable {:?}: {:?}",
-                                                path,
-                                                e
-                                            );
-                                        }
-                                    }
+                            let removed_paths = core.version_set_mut().atomic_replace_groups(
+                                &plan.cf,
+                                results,
+                            );
+                            for path in &removed_paths {
+                                if let Err(e) = std::fs::remove_file(path) {
+                                    tracing::warn!(
+                                        "background compaction: failed to remove SSTable {:?}: {:?}",
+                                        path, e
+                                    );
                                 }
                             }
                         }
@@ -3451,6 +3433,76 @@ mod tests {
 
         // Should group small tables together
         assert!(!groups.is_empty(), "Should group tables by size");
+    }
+
+    #[test]
+    fn test_compaction_preserves_tables_outside_multiple_buckets() {
+        for background in [false, true] {
+            let (engine, _dir) = crate::api::test_helpers::test_engine();
+            let mut expected = std::collections::BTreeMap::new();
+            {
+                let mut core = engine.core.write();
+                // Two eligible buckets followed by a table that must remain untouched.
+                for (table_id, entries) in [1, 1, 70, 70, 300].into_iter().enumerate() {
+                    let mut data = std::collections::BTreeMap::new();
+                    for entry in 0..entries {
+                        let key = format!("table_{table_id}_{entry:03}").into_bytes();
+                        let value = vec![table_id as u8 + 1; 1024];
+                        expected.insert(key.clone(), value.clone());
+                        data.insert(key, value);
+                    }
+                    core.version_set_mut()
+                        .add_table("default", Table::build(data, &engine.options));
+                }
+            }
+            if background {
+                engine.maybe_compact();
+                let handles = std::mem::take(&mut *engine.compaction_threads.lock());
+                assert!(!handles.is_empty());
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+            } else {
+                let metrics = engine.compact_cf("default").unwrap().unwrap();
+                assert_eq!(metrics.files_merged, 4);
+            }
+            assert_eq!(engine.lock_core().version_set().table_count("default"), 3);
+            for (key, value) in expected {
+                assert_eq!(engine.get(&key).unwrap(), Some(value), "missing {key:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_compaction_group_replacement_keeps_snapshot_positions() {
+        let (engine, _dir) = crate::api::test_helpers::test_engine();
+        let table = |id: u8| {
+            Table::build(
+                std::collections::BTreeMap::from([(vec![id], vec![id])]),
+                &engine.options,
+            )
+        };
+        let mut core = engine.core.write();
+        let versions = core.version_set_mut();
+        for id in 0..5 {
+            versions.add_table("default", table(id));
+        }
+        let generation = versions.compaction_generation();
+        // Interleaved groups and a newer, unselected table.
+        versions.atomic_replace_groups(
+            "default",
+            vec![(vec![0, 2], vec![table(10)]), (vec![1, 3], vec![table(11)])],
+        );
+        let keys: Vec<_> = versions
+            .get_tables("default")
+            .iter()
+            .map(|t| t.min_key.clone())
+            .collect();
+        assert_eq!(keys, vec![vec![10], vec![11], vec![4]]);
+        assert_eq!(versions.compaction_generation(), generation + 1);
+        versions.atomic_replace("default", &[0, 1], Vec::new());
+        assert_eq!(versions.compaction_generation(), generation + 2);
+        assert_eq!(versions.get_tables("default")[0].min_key, vec![4]);
     }
 
     #[test]

@@ -17,6 +17,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import YAML from 'yaml';
+import { shellCommand } from './shell-command.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -88,16 +89,15 @@ async function runStepInDocker(opts: {
   env: Record<string, string>;
 }): Promise<number> {
   const relDir = path.relative(opts.projectRoot, opts.stepWorkingDir) || '.';
-  const wrappedCommand = `cd ${JSON.stringify(relDir)} && ${opts.command}`;
 
   const args = [
     'run', '--rm',
     '--network', 'none',
     '-v', `${opts.projectRoot}:/workspace`,
-    '-w', '/workspace',
+    '-w', path.posix.join('/workspace', relDir),
     ...Object.entries(opts.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
     opts.image,
-    opts.shell, '-lc', wrappedCommand,
+    ...shellCommand(opts.shell, opts.command),
   ];
 
   return new Promise<number>((resolve, reject) => {
@@ -139,6 +139,12 @@ async function runJob(
   emit({ type: 'job_started', job: jobId, name: job.name ?? jobId, image, shell });
 
   const steps = (job.steps ?? []).filter((s) => s.run);
+
+  if (steps.length === 0) {
+    emit({ type: 'job_finished', job: jobId, status: 'failed',
+      reason: 'No runnable steps: uses actions are not executed by this runner' });
+    return 1;
+  }
 
   if (dryRun) {
     for (const [i, step] of steps.entries()) {

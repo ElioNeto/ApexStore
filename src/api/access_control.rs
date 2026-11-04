@@ -77,8 +77,8 @@ where
     fn call(&self, req: ServiceRequest) -> Self::Future {
         // Check if access control is enabled (stored in app_data by start_server)
         let enabled = req
-            .app_data::<Data<bool>>()
-            .map(|flag| *flag.as_ref())
+            .app_data::<Data<crate::api::config::AccessControlEnabled>>()
+            .map(|flag| flag.get_ref().0)
             .unwrap_or(false);
 
         if !enabled {

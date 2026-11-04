@@ -83,11 +83,16 @@ proptest! {
 
         let engine = LsmEngine::new_from_config(&config, GlobalBlockCache::new(100, 4096)).unwrap();
 
+        let mut expected = std::collections::BTreeMap::new();
         for (k, v) in &pairs {
             engine.put_cf("default", k.clone(), v.clone()).unwrap();
+            expected.insert(k.clone(), v.clone());
+            prop_assert_eq!(engine.get_cf("default", k).unwrap(), Some(v.clone()));
         }
 
-        for (k, v) in &pairs {
+        // Repeated keys overwrite earlier values; retain them in the generated
+        // workload and compare against a last-write-wins reference model.
+        for (k, v) in &expected {
             let result = engine.get_cf("default", k).unwrap();
             prop_assert_eq!(result, Some(v.clone()), "key {:?} should have value {:?}", k, v);
         }

@@ -78,8 +78,8 @@ pub async fn test_app(
     event_bus.set_enabled(true);
     let sync_manager = web::Data::new(SyncManager::new());
     let time_travel_engine = web::Data::new(Mutex::new(TimeTravelEngine::new(100)));
-    let auth_enabled = web::Data::new(false);
-    let access_control_enabled = web::Data::new(false);
+    let auth_enabled = web::Data::new(crate::api::config::AuthEnabled(false));
+    let access_control_enabled = web::Data::new(crate::api::config::AccessControlEnabled(false));
     let access_controller = web::Data::new(AccessController::new());
     let idempotency = web::Data::new(IdempotencyMiddleware::new(std::time::Duration::from_secs(
         3600,

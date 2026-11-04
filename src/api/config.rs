@@ -1,6 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 
+/// Authentication switch stored separately from policy access control in app data.
+#[derive(Debug, Clone, Copy)]
+pub struct AuthEnabled(pub bool);
+
+/// Policy access control switch stored separately from authentication in app data.
+#[derive(Debug, Clone, Copy)]
+pub struct AccessControlEnabled(pub bool);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub host: String,

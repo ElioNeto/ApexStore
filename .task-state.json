@@ -1008,7 +1008,7 @@
       "id": "T210",
       "description": "Issue #210: Create DataTieringConfig struct with promote/demote/get_tier stub methods",
       "status": "done",
-      "files": ["src/infra/data_tiering.rs", "src/infra/mod.rs", "src/lib.rs"],
+      "files": ["src/infra/models/data_tiering.rs", "src/infra/mod.rs", "src/lib.rs"],
       "depends_on": [],
       "notes": "Created data_tiering.rs with hot/warm/cold tiering, auto-promotion, age-out, tests."
     },
@@ -1016,7 +1016,7 @@
       "id": "T211",
       "description": "Issue #211: Create MultiModelEngine wrapper with query_document/query_time_series/query_graph stubs",
       "status": "done",
-      "files": ["src/infra/multi_model.rs", "src/infra/mod.rs", "src/lib.rs"],
+      "files": ["src/infra/models/multi_model.rs", "src/infra/mod.rs", "src/lib.rs"],
       "depends_on": [],
       "notes": "Created multi_model.rs with multi-model dispatcher, toggleable models, tests."
     },

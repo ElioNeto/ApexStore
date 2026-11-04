@@ -30,7 +30,7 @@ pub async fn ws_events(
 ) -> Result<HttpResponse, actix_web::Error> {
     // Permission check
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return Ok(e);
+        return Ok(*e);
     }
 
     if !event_bus.is_enabled() {
@@ -168,7 +168,7 @@ pub async fn sse_events(
     query: web::Query<EventQuery>,
 ) -> HttpResponse {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
 
     if !event_bus.is_enabled() {
