@@ -11,7 +11,7 @@
 //!   apexstore-cli --db `PATH` flush
 //!   apexstore-cli --db `PATH` compact
 
-use crate::api::auth::token::{ApiToken, Permission};
+use crate::api::auth::token::Permission;
 use crate::api::auth::TokenManager;
 use crate::core::engine::{Engine, MAX_SCAN_LIMIT};
 use crate::infra::cdc::CdcConfig;
@@ -46,8 +46,6 @@ struct Cli {
     command: Command,
 }
 
-/// Token prefix used for storing API tokens in the engine
-const TOKEN_PREFIX: &str = "__token:";
 const FIXTURE_PREFIX: &str = "__fixture:";
 
 #[derive(Parser, Debug)]
@@ -499,39 +497,9 @@ fn cmd_export(
 
 // ── Token command implementations ──────────────────────────────────────────
 
-/// Load all tokens from the engine (persisted under `__token:*` keys).
-fn load_tokens_from_engine(engine: &CliEngine) -> crate::infra::error::Result<Vec<ApiToken>> {
-    let (results, _cursor) = engine.search_prefix(TOKEN_PREFIX, None, MAX_SCAN_LIMIT)?;
-    let mut tokens = Vec::new();
-    for (_key, value) in &results {
-        if let Ok(token) = serde_json::from_slice::<ApiToken>(value) {
-            tokens.push(token);
-        }
-    }
-    Ok(tokens)
-}
-
-/// Save a list of tokens to the engine (replaces all existing token entries).
-fn save_tokens_to_engine(
-    engine: &CliEngine,
-    tokens: &[ApiToken],
-) -> crate::infra::error::Result<()> {
-    // Remove all existing __token:* keys
-    let existing = load_tokens_from_engine(engine)?;
-    for token in &existing {
-        let key = format!("{}{}", TOKEN_PREFIX, token.id);
-        engine.delete_cf("default", key.as_bytes())?;
-    }
-    // Write all tokens
-    for token in tokens {
-        let key = format!("{}{}", TOKEN_PREFIX, token.id);
-        let value = serde_json::to_vec(token)?;
-        engine.put_cf("default", key.as_bytes().to_vec(), value)?;
-    }
-    Ok(())
-}
-
 fn cmd_token(engine: &CliEngine, sub: TokenCommand) -> crate::infra::error::Result<()> {
+    let manager = TokenManager::open_persistent(engine)
+        .map_err(|error| crate::LsmError::InvalidArgument(error.to_string()))?;
     match sub {
         TokenCommand::Create { name, permissions } => {
             let parsed_perms: Vec<Permission> = permissions
@@ -542,15 +510,9 @@ fn cmd_token(engine: &CliEngine, sub: TokenCommand) -> crate::infra::error::Resu
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            let manager = TokenManager::new();
             let (raw_token, api_token) = manager
                 .create_token(name, None, parsed_perms)
                 .map_err(|e| crate::infra::error::LsmError::InvalidArgument(e.to_string()))?;
-
-            // Persist the token
-            let mut tokens = load_tokens_from_engine(engine)?;
-            tokens.push(api_token.clone());
-            save_tokens_to_engine(engine, &tokens)?;
 
             println!("Token created successfully!");
             println!("  ID:    {}", api_token.id);
@@ -561,7 +523,9 @@ fn cmd_token(engine: &CliEngine, sub: TokenCommand) -> crate::infra::error::Resu
             Ok(())
         }
         TokenCommand::List => {
-            let tokens = load_tokens_from_engine(engine)?;
+            let tokens = manager
+                .list_tokens()
+                .map_err(|error| crate::LsmError::InvalidArgument(error.to_string()))?;
             if tokens.is_empty() {
                 println!("No tokens found.");
                 return Ok(());
@@ -593,14 +557,9 @@ fn cmd_token(engine: &CliEngine, sub: TokenCommand) -> crate::infra::error::Resu
             Ok(())
         }
         TokenCommand::Revoke { id } => {
-            let mut tokens = load_tokens_from_engine(engine)?;
-            let before = tokens.len();
-            tokens.retain(|t| t.id != id);
-            if tokens.len() == before {
-                println!("Token not found: {}", id);
-                return Ok(());
-            }
-            save_tokens_to_engine(engine, &tokens)?;
+            manager
+                .delete_token(&id)
+                .map_err(|error| crate::LsmError::InvalidArgument(error.to_string()))?;
             println!("Token revoked: {}", id);
             Ok(())
         }

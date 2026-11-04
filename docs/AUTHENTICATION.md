@@ -6,7 +6,7 @@ ApexStore API supports Bearer Token authentication to protect endpoints from una
 
 - **Type**: Bearer Token
 - **Algorithm**: SHA-256 hashing
-- **Storage**: In-memory (tokens lost on restart)
+- **Storage**: Private, durable snapshot at `<DATA_DIR>/.apex-auth/tokens.json`; only token hashes and metadata are stored
 - **Permissions**: Read, Write, Delete, Admin
 
 ## Quick Start
@@ -19,17 +19,28 @@ API_AUTH_ENABLED=true
 API_TOKEN_EXPIRY_DAYS=30
 ```
 
-### 2. Start the Server
+### 2. Create an Administrator Offline
+
+Stop the server before using the CLI against its database directory. Create the first administrator locally and save the printed token securely:
 
 ```bash
-cargo run --features api --bin apexstore-server
+apexstore-cli --db ./apexstore_data token create local-admin --permissions admin
 ```
 
-### 3. Create a Token
+Use the same directory as the server's `DATA_DIR`. The CLI and server share the private credential store; a database lock prevents simultaneous offline administration and server access.
+
+### 3. Start the Server
+
+```bash
+DATA_DIR=./apexstore_data cargo run --features api --bin apexstore-server
+```
+
+### 4. Create an Application Token
 
 **Request:**
 ```bash
 curl -X POST http://localhost:8080/admin/tokens \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "production-api",
@@ -55,7 +66,7 @@ curl -X POST http://localhost:8080/admin/tokens \
 
 ⚠️ **Important**: Save the token immediately! It will not be shown again.
 
-### 4. Use the Token
+### 5. Use the Token
 
 Include the token in the `Authorization` header:
 
@@ -66,13 +77,27 @@ curl -X POST http://localhost:8080/keys \
   -d '{"key": "user:1", "value": "Alice"}'
 ```
 
+## Credential Storage and Upgrades
+
+Credentials are isolated from the public LSM keyspace. Each update writes and syncs a temporary snapshot, atomically replaces the credential file, then syncs its directory on Unix. The directory is mode `0700` and the snapshot mode `0600` on Unix. Token hashes and metadata are protected by filesystem permissions; this file is not encrypted by SSTable/WAL encryption. Include `.apex-auth` when backing up or relocating the complete data directory, and restrict access to that backup. An LSM-only snapshot does not include credentials.
+
+Loading malformed, unsupported or inaccessible credential storage fails server startup. It never falls back to an empty credential set. Concurrent owners of the credential store are rejected. `TokenManager::new_with_engine` now returns `Result<TokenManager, AuthError>`; library callers must handle the error.
+
+Versions that stored credentials as `__token:*` records allowed public data writes to impersonate administrators. Those legacy records cannot be distinguished from forged credentials and are **never imported automatically**. Before upgrading an existing deployment:
+
+1. Stop the server and retain a backup for investigation/recovery.
+2. Use the upgraded offline CLI against the same database directory to create a replacement administrator, as shown above.
+3. Restart with authentication enabled, create replacement application tokens and update clients. Old public-keyspace tokens no longer authenticate.
+
+Do not copy legacy token JSON into the private file. Public key-value routes reject keys beginning with `__` (including `__token:`, `__ttl:`, `__index:` and `__idx:`), and public scans/searches hide legacy metadata. Batch and transaction key operations enforce the same boundary. Prefix deletion also rejects `_`, because that range includes reserved keys. GraphQL returns no reserved-key value and refuses reserved-key mutations.
+
 ## Permission Levels
 
 | Permission | Description | Grants Access To |
 |------------|-------------|------------------|
 | `Read` | Read-only access | GET endpoints |
-| `Write` | Write access (includes Read) | POST, GET endpoints |
-| `Delete` | Delete access (includes Read) | DELETE, GET endpoints |
+| `Write` | Write access; grant Read separately when needed | PUT, POST and mutation endpoints |
+| `Delete` | Delete access; grant Read separately when needed | DELETE endpoints |
 | `Admin` | Full access | All endpoints including `/admin/*` |
 
 ## API Endpoints
@@ -126,7 +151,7 @@ Authorization: Bearer <admin-token>
 
 These endpoints do NOT require authentication:
 
-- `GET /health/liveness`, `/health/readiness`, `/health/startup`, `/health/check` - Health probes
+- `GET /health/liveness` — other health endpoints require authentication
 
 ## Protected Endpoints
 

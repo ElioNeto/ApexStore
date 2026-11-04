@@ -1995,6 +1995,11 @@ impl<C: Cache> Engine<C> {
         }
     }
 
+    /// Credential files are isolated from all user-visible column families.
+    pub(crate) fn token_storage_directory(&self) -> PathBuf {
+        self.core.read().dir_path.join(".apex-auth")
+    }
+
     /// Close the engine gracefully.
     ///
     /// 1. Signals the compaction thread to stop and waits for it to finish.
