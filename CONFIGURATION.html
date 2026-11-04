@@ -246,6 +246,13 @@ registered route pattern, including its scope (for example <code>/api/keys/{key}
 not a concrete key URL. A zero endpoint cap disables only that additional cap.
 The admin rate-limit summary reports both per-IP and per-route accepted counts
 in the last 60 seconds; requests with both caps disabled are not tracked.</p>
+<p>The current rate limiter identifies clients by the TCP peer address, matching
+the concurrent connection guard. It ignores <code>X-Forwarded-For</code> and <code>Forwarded</code>,
+including malformed values. Clients cannot reset their budget by changing a
+header. Behind a reverse proxy, clients share that proxy's peer-address budget;
+apply individual client limits at the proxy as well. Configurable trusted-proxy
+CIDRs and right-to-left forwarding-chain resolution are not implemented yet.
+Do not rely on the old leftmost <code>X-Forwarded-For</code> behavior for attribution.</p>
 <h2 id="lsm-engine-configuration"><a class="header" href="#lsm-engine-configuration">LSM Engine Configuration</a></h2>
 <h3 id="storage-settings"><a class="header" href="#storage-settings">Storage Settings</a></h3>
 <div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
@@ -515,7 +522,7 @@ stop startup; there is no fallback key. The CLI uses <code>--encrypt-key-file</c
 <code>LsmEngine::new_from_config</code>. Runtime keys are redacted in Debug and zeroized on
 drop; they are not serialized into layout configuration.</p>
 <p>Legacy zero-key databases require the explicit offline <code>migrate-encryption</code>
-command documented in <a href="../MIGRATION_GUIDE.html">the migration guide</a>. Do not delete
+command documented in <a href="https://github.com/ElioNeto/ApexStore/blob/main/MIGRATION_GUIDE.md">the migration guide</a>. Do not delete
 WALs or SSTables to work around a key/configuration error.</p>
 
                     </main>
