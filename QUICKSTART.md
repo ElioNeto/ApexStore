@@ -10,10 +10,10 @@ For development, testing, and interactive data exploration.
 
 ```bash
 # Start the interactive CLI
-cargo run --bin cli
+cargo run --bin apexstore-cli
 
 # Or in release mode (faster)
-cargo run --release --bin cli
+cargo run --release --bin apexstore-cli
 ```
 
 **Features:**
@@ -68,7 +68,7 @@ DATA_DIR=./data MEMTABLE_MAX_SIZE=16777216 cargo run --bin apexstore-server
 
 **Default Server:**
 - URL: `http://0.0.0.0:8080`
-- Health Check: `curl http://localhost:8080/health`
+- Health Check: `curl http://localhost:8080/health/liveness`
 
 **Example API Calls:**
 ```bash
@@ -93,7 +93,7 @@ curl http://localhost:8080/stats/all
 
 ```bash
 # Build CLI
-cargo build --bin cli
+cargo build --bin apexstore-cli
 
 # Build server
 cargo build --bin apexstore-server
@@ -106,7 +106,7 @@ cargo build --bins
 
 ```bash
 # Build CLI (optimized)
-cargo build --release --bin cli
+cargo build --release --bin apexstore-cli
 
 # Build server (optimized)
 cargo build --release --bin apexstore-server
@@ -215,7 +215,7 @@ cargo run
 
 # ✅ Correct (specify binary)
 cargo run --bin apexstore-server  # For API server
-cargo run --bin cli               # For CLI REPL
+cargo run --bin apexstore-cli               # For CLI REPL
 ```
 
 ### Issue: "Address already in use"
@@ -268,13 +268,13 @@ lsm> HELP
 - [README.md](README.md) - Project overview and architecture
 - [CLI Guide](docs/CLI_GUIDE.md) - Complete CLI reference
 - [Configuration Guide](docs/CONFIGURATION.md) - All configuration options
-- [API Documentation](docs/API.md) - REST API endpoints
+- [REST API examples](README.md#-rest-api-examples) - REST API endpoints (a full reference is tracked in issue #400)
 - [Contributing Guide](docs/CONTRIBUTING.md) - Development guidelines
 
 ## 🎯 Next Steps
 
 ### For Development:
-1. Start CLI: `cargo run --bin cli`
+1. Start CLI: `cargo run --bin apexstore-cli`
 2. Try commands: `SET`, `GET`, `SEARCH`, `STATS ALL`
 3. Import sample data: `BATCH SET examples/batch_data.txt`
 4. Explore: See [CLI Guide](docs/CLI_GUIDE.md)

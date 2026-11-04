@@ -1,6 +1,6 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DatePipe } from '@angular/common';
+import { DatePipe, NgClass } from '@angular/common';
 import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   RefreshIcon,
@@ -29,7 +29,7 @@ interface WasmPlugin {
 @Component({
   selector: 'app-wasm-plugins',
   standalone: true,
-  imports: [FormsModule, DatePipe, HugeiconsIconComponent],
+  imports: [FormsModule, DatePipe, NgClass, HugeiconsIconComponent],
   templateUrl: './wasm-plugins.component.html',
   styleUrl: './wasm-plugins.component.scss'
 })

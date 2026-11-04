@@ -132,6 +132,9 @@ fn bench_write_amplification_size_tiered(c: &mut Criterion) {
 fn configure_criterion() -> Criterion {
     let mut c = Criterion::default();
     if std::env::var("CI").is_ok() {
+        // 10 is Criterion's hard floor: `Criterion::sample_size` asserts
+        // `n >= 10` and panics otherwise, which aborted every benchmark before
+        // it produced a single measurement whenever CI was set.
         c = c
             .sample_size(10)
             .warm_up_time(std::time::Duration::from_millis(500))

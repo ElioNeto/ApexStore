@@ -1,6 +1,6 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe, NgClass } from '@angular/common';
 import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   RefreshIcon,
@@ -32,7 +32,7 @@ interface SearchResult {
 @Component({
   selector: 'app-vector-search',
   standalone: true,
-  imports: [FormsModule, DatePipe, HugeiconsIconComponent],
+  imports: [FormsModule, DatePipe, DecimalPipe, NgClass, HugeiconsIconComponent],
   templateUrl: './vector-search.component.html',
   styleUrl: './vector-search.component.scss'
 })

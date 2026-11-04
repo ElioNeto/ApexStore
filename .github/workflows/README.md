@@ -1,167 +1,167 @@
 # ApexStore CI/CD Workflows
 
-## 🎯 Overview
+## Overview
 
-This repository uses a **trunk-based development** workflow with automated releases. All features are developed in short-lived branches and merged directly into `main`.
+Trunk-based development: features land in short-lived branches and merge directly
+into `main`. Four workflows cover validation, benchmarking, release and docs.
 
-## 📦 Workflow Architecture
+## Workflow architecture
 
+```text
+feature/xyz
+     |
+     |  open PR to main
+     v
+  CI (ci.yml) ........... every job below must pass
+     |
+     |  merge to main
+     v
+  CI (ci.yml) ........... runs again on the merge commit
+     |
+     |  workflow_run: CI concluded successfully
+     v
+  Auto Release (release.yml)
+     - verify the validated commit is still main and dependencies are publishable
+     - bump patch version in Cargo.toml
+     - verify the release builds with the locked dependencies
+     - tag, GitHub release, `cargo publish --locked`
+
+  Deploy Documentation (deploy-docs.yml) .... on push to main
+  Benchmarks (benchmarks.yml) ............... on PRs, nightly at 02:00 UTC
 ```
-feature/xyz branch
-       ↓
-   (open PR to main)
-       ↓
-  ✅ PR Validation (pr-validation.yml)
-     - cargo fmt --check
-     - cargo clippy
-     - cargo test
-     - cargo build --release
-       ↓
-   (merge to main)
-       ↓
-  🚀 Auto Release (release.yml)
-     - Bump Cargo.toml version (patch)
-     - Commit version change
-     - Create git tag (v2.1.X)
-     - Create GitHub Release
+
+The release gate is the important edge. `release.yml` used to trigger directly on
+`push: main` with no dependency on any test job, so a commit that broke the build
+was still version-bumped, tagged, released and published to crates.io. A
+crates.io publish cannot be replaced, only yanked, so it now waits for a
+successful `CI` run via `workflow_run`.
+
+## Active workflows
+
+### `ci.yml` — CI
+
+**Trigger:** `pull_request` to `main`, `push` to `main`, `workflow_dispatch`, and `workflow_call`.
+
+| Job | What it checks |
+|-----|----------------|
+| `Workflow lint` | `actionlint` over `.github/workflows/` |
+| `Rustfmt` | `cargo fmt --all -- --check` |
+| `Clippy` | `cargo clippy --locked --all-targets --all-features -- -D warnings` |
+| `Test (dev)` | `cargo test --locked --all-features --workspace` |
+| `Test (release)` | the same suite under `--release` |
+| `Build and docs` | release build, examples, `cargo doc` |
+| `MSRV` | `cargo check --all-features` at the `rust-version` in `Cargo.toml` |
+| `Security audit` | `cargo audit` (no advisory suppressions) |
+| `.env.example drift` | `scripts/check-env-example.sh` |
+| `Frontend` | `npm ci`, build, test, `npm audit --audit-level=high` |
+| `Container persistence and health` | Build the image, wait for its health check, write/flush/recreate and read the persisted value |
+| `CI script regression tests` | Python and Node regression suites |
+| `Report status` | opens/updates a tracking issue on failure (push only) |
+
+Notes on specific jobs:
+
+- **`Test (release)`** exists because the `release` profile changes `panic`
+  behaviour and the optimisation level. A dev-only suite exercises code paths
+  that cannot occur in production.
+- **`MSRV`** must use `--all-features`: the default feature set has a lower
+  floor, so a default-only check would not detect the real MSRV. It clears
+  `RUSTFLAGS` so a new lint in the pinned compiler cannot fail it — warnings are
+  the `Clippy` job's business.
+- **`Security audit`** pins `cargo-audit@0.22.2`. Versions before 0.22 abort with
+  `unsupported CVSS version: 4.0` on the current advisory database, which is how
+  two live advisories sat unreported in `Cargo.lock`.
+
+### `release.yml` — Auto Release
+
+**Trigger:** `workflow_run` on a successful `CI` run for `main`, or manual
+dispatch.
+
+Before any version bump, the workflow checks out the validated SHA, verifies it
+is still the head of `main`, and runs `scripts/check_release_dependencies.py`.
+Manual dispatch first runs the reusable CI workflow. Publication remains blocked
+while the root Actix patches are present; Cargo consumers do not inherit them.
+
+1. Read the current version from `Cargo.toml`.
+2. Increment the **patch** component.
+3. `cargo update --offline --package apex-store-rs` — only the package version
+   moves. The previous `cargo update --workspace` also bumped dependencies,
+   releasing a tree CI never compiled.
+4. `cargo build --locked --release --all-features` as a final gate.
+5. Commit `chore: bump version to X.Y.Z [skip ci]`, tag `vX.Y.Z`.
+6. GitHub release with generated notes, then `cargo publish --locked`.
+
+Concurrency group `release` with `cancel-in-progress: false`: two concurrent runs
+would bump from the same base version and race on `git push origin main`.
+
+### `deploy-docs.yml` — Deploy Documentation
+
+**Trigger:** push to `main`, or manual dispatch.
+
+Builds the mdBook from `docs/` and publishes to GitHub Pages. mdBook is installed
+through `taiki-e/install-action` rather than a raw `curl | tar`, because mdBook
+publishes no checksum file and an unverified download cannot be validated.
+
+A warning step lists any file under `docs/` that `docs/SUMMARY.md` does not
+reference — mdBook renders only what `SUMMARY.md` lists, so an unlisted document
+is silently unpublished.
+
+### `benchmarks.yml` — Benchmarks
+
+**Trigger:** pull requests to `main`, nightly at 02:00 UTC, or manual dispatch.
+Pull requests run measurements and upload artifacts without publishing results.
+
+The matrix covers all seven declared benchmarks. `latency_bench` and
+`write_amplification` were declared in `Cargo.toml` but missing from the matrix,
+so they had never run.
+
+Results are published to `docs/PERFORMANCE.md`, not `README.md`: generated
+content in a hand-maintained file is what created the commit churn. The publish
+job commits only when the rendered table actually changed.
+
+Failure handling is strict. The run step has no `continue-on-error`, a benchmark
+that emits no `time:` lines fails the job, and an empty rendered table fails the
+publish job with the raw input dumped into the log. The previous version masked
+failures and wrote a `*No results parsed*` placeholder instead.
+
+## Pinning
+
+Every third-party action is pinned to a full commit SHA, with the version in a
+trailing comment:
+
+```yaml
+- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 ```
 
-## 📝 Active Workflows
+Tags are mutable, so a retagged or compromised release would otherwise execute
+with whatever permissions the job holds. `.github/dependabot.yml` keeps the pins
+current through reviewable PRs — without it, pinning freezes them forever.
 
-### 1. `pr-validation.yml`
-**Trigger:** Pull requests targeting `main`, or `workflow_call` from CI and release
-**Purpose:** Run the same required checks before merge and publication
-**Steps:**
-- Format check (`cargo fmt --check`)
-- Linting (`cargo clippy -- -D warnings`)
-- Tests (`cargo test --all-features`)
-- Build (`cargo build --locked --release`)
-- Security audit (failures block publication)
-- CI script regression tests (Python and Node.js)
+The Rust toolchain is pinned to 1.99.1 in `rust-toolchain.toml`, the development
+image and CI. The independent MSRV check uses Rust 1.96, required by Wasmtime 49.
 
-### 2. `release.yml`
-**Trigger:** Push to `main` (i.e., PR merged)  
-**Purpose:** Automatic versioning and release creation  
-**Steps:**
-1. Read current version from `Cargo.toml`
-2. Increment **patch** version (e.g., `2.1.0` → `2.1.1`)
-3. Update `Cargo.toml` and `Cargo.lock`
-4. Commit with message: `chore: bump version to X.Y.Z [skip ci]`
-5. Create git tag `vX.Y.Z`
-6. Create GitHub Release with auto-generated notes
+`permissions` defaults to `contents: read` at workflow level, and jobs that need
+more request it explicitly.
 
-**Anti-loop protection:** Skips execution if actor is `github-actions[bot]`
+## Running the pipeline locally
 
-### 3. `deploy-docs.yml`
-**Trigger:** Push to `main`  
-**Purpose:** Deploy Rustdoc to GitHub Pages  
-*(unchanged from previous workflow)*
-
-## 🔄 Development Workflow
-
-### Creating a feature
+`make ci` runs the same checks inside the toolchain image, so a red CI is
+reproducible without pushing. See [`docs/DEVELOPMENT.md`](../../docs/DEVELOPMENT.md).
 
 ```bash
-# 1. Create feature branch from main
-git checkout main
-git pull origin main
-git checkout -b feat/awesome-feature
-
-# 2. Develop and commit
-git add .
-git commit -m "feat: add awesome feature"
-git push origin feat/awesome-feature
-
-# 3. Open PR to 'main' on GitHub
-# - pr-validation.yml runs automatically
-# - Fix any CI failures
-# - Get code review approval
-
-# 4. Merge PR
-# - release.yml triggers automatically
-# - Version bumps from 2.1.0 → 2.1.1
-# - Tag v2.1.1 created
-# - Release v2.1.1 published
+make ci          # fmt-check, clippy, test, audit, env-check, doc
+make bench       # all seven benchmarks
+make ci-local    # the CI workflow itself, via act
 ```
 
-## ⚠️ Important Notes
+## Development flow
 
-### Version Bumping Strategy
-- **Patch bump** (default): All merges to `main` increment the patch version
-- For **minor/major** bumps: manually edit `Cargo.toml` before opening the PR
+1. Branch from `main`.
+2. Open a PR — `CI` runs every job above.
+3. Merge — `CI` runs again on the merge commit, and a successful run triggers
+   `Auto Release`.
 
-### Skipping CI
-Commits with `[skip ci]` in the message won't trigger workflows (used by the bot to avoid loops)
+See [`MIGRATION_GUIDE.md`](../../MIGRATION_GUIDE.md) for the team workflow.
 
-### Permissions
-The `release.yml` workflow requires `contents: write` permission (already configured)
-
-## 🛠️ Removed Workflows
-
-The following Gitflow-based workflows were removed:
-- `develop-to-release.yml`
-- `feature-fix-workflow.yml`
-- `release-workflow.yml`
-- `test.yml`
-
-They are replaced by the simpler trunk-based approach above.
-
-## 📚 Resources
-
-- [Trunk-Based Development](https://trunkbaseddevelopment.com/)
-- [GitHub Actions - Workflow syntax](https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions)
-- [Semantic Versioning](https://semver.org/)
-
-## Validation guarantees
-
-`ci.yml` calls `pr-validation.yml` on pushes to main. `release.yml` also
-requires that reusable validation to succeed before the release job starts.
-The benchmark workflow propagates benchmark failures and retains diagnostic
-artifacts. Its README formatter rejects empty or malformed measurements; it
-does not install or invoke an external AI formatter.
-
-The local `workflow-agent.ts` runs only `run:` steps via Docker. It cannot
-execute GitHub Actions (`uses:`) or reusable workflows, and jobs with no
-runnable commands now fail instead of reporting success. A local script run
-is not a substitute for the hosted workflow.
-
-Run the script regression tests from the repository root:
-
-```bash
-npm ci --prefix scripts
-python3 -m unittest discover -s scripts -p 'test_*.py'
-node --import ./scripts/node_modules/tsx/dist/loader.mjs --test scripts/workflow-agent.test.ts
-```
-
-The compaction stress data can be replayed with:
-
-```bash
-APEXSTORE_STRESS_SEED=430 cargo test --locked --all-features --test randomized_competitive test_flush_compaction_stress -- --exact --nocapture
-```
-
-The seed fixes the generated operations; background-thread scheduling remains
-concurrent. A separate deterministic unit regression covers the multi-bucket
-replacement defect without depending on thread timing.
-
-## Temporary HTTP/2 dependency integration
-
-The application enables `actix-web/http2-native` from upstream
-[Actix PR #4321](https://github.com/actix/actix-web/pull/4321), pinned to revision
-`4537c9f5b407c6f7c0e8037b87b8bebbf6388d80`. This PR is not yet merged or released.
-Both Actix crates are patched to the same revision. The GraphQL adapter's
-legacy `http2` feature is disabled because it forwards to Actix's old
-compatibility feature; HTTP/2 itself remains enabled through the native backend.
-Other previously enabled Actix features remain explicit in Cargo.toml.
-
-`cargo tree --all-features -i h2` must resolve only h2 0.4.20 or newer.
-`tests/http2.rs` checks real HTTP/2 key/value requests and sends raw empty DATA
-frames against a server holding an unread body. The connection must terminate
-with GOAWAY/ENHANCE_YOUR_CALM. TLS tests independently verify HTTP/1.1 and HTTP/2
-with a trusted test certificate.
-
-Cargo `[patch]` overrides are not inherited by downstream library consumers.
-Consequently `check_release_dependencies.py` deliberately blocks publication
-before any version bump or tag while these overrides exist. Remove the patches
-only after native HTTP/2 is available in a published Actix version, update the
-normal dependency constraints and lockfile, and rerun tests and audit. Do not
-remove the release guard to publish an untested dependency graph.
+The local `scripts/workflow-agent.ts` only executes shell steps through Docker.
+It cannot validate reusable/action-only jobs and reports those as failures.
+Direct local commands and hosted checks provide validation for those jobs.

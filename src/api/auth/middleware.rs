@@ -13,6 +13,29 @@ use actix_web::HttpResponse;
 use actix_web::ResponseError;
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 
+/// Authenticate requests after checking explicit disablement and the public probe.
+///
+/// Use `HttpAuthentication::with_fn(request_validator)` so missing credentials
+/// reach this policy instead of being rejected by the mandatory Bearer extractor.
+/// Only GET on the exact liveness path is public; other health endpoints expose
+/// engine details and retain authentication.
+pub async fn request_validator(
+    req: ServiceRequest,
+    credentials: Option<BearerAuth>,
+) -> Result<ServiceRequest, (Error, ServiceRequest)> {
+    if (req.method() == actix_web::http::Method::GET && req.path() == "/health/liveness")
+        || req
+            .app_data::<web::Data<AuthEnabled>>()
+            .is_some_and(|flag| !flag.get_ref().0)
+    {
+        return Ok(req);
+    }
+    match credentials {
+        Some(credentials) => bearer_validator(req, credentials).await,
+        None => Err((AuthError::MissingToken.into(), req)),
+    }
+}
+
 /// Bearer token validator for HTTP authentication middleware.
 ///
 /// Compatible with `actix-web-httpauth::HttpAuthentication::bearer`.

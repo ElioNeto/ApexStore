@@ -1,0 +1,24 @@
+# Normalise line endings so the same checkout works on Windows, macOS and Linux.
+* text=auto
+
+# Anything executed by a POSIX shell must keep LF endings. With core.autocrlf=true
+# (the Windows default) a CRLF checkout makes bash fail with `\r: command not found`.
+*.sh          text eol=lf
+Makefile      text eol=lf
+Dockerfile    text eol=lf
+Dockerfile.*  text eol=lf
+*.yml         text eol=lf
+*.yaml        text eol=lf
+
+# Rust sources and Cargo metadata: LF, matching rustfmt's output.
+*.rs    text eol=lf
+*.toml  text eol=lf
+
+# Generated / vendored files that should not be diffed by default.
+Cargo.lock              linguist-generated=true
+frontend/package-lock.json  linguist-generated=true
+scripts/package-lock.json   linguist-generated=true
+
+# Binary assets
+*.png binary
+*.sst binary

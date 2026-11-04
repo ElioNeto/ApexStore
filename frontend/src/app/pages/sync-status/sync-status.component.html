@@ -28,7 +28,7 @@
     <div class="status-row">
       <span class="status-label">Status</span>
       <span class="status-value" [style.color]="statusColor(syncStatus())">
-        <app-hugeicons-icon [icon]="statusIcon(syncStatus())" size="18" />
+        <hugeicons-icon [icon]="statusIcon(syncStatus())" [size]="18" [strokeWidth]="1.5" />
         {{ syncStatus() }}
       </span>
     </div>
@@ -45,7 +45,7 @@
 
     @if (lastError(); as err) {
       <div class="error-row">
-        <app-hugeicons-icon [icon]="CancelCircleIcon" size="16" />
+        <hugeicons-icon [icon]="CancelCircleIcon" [size]="16" [strokeWidth]="1.5" />
         {{ err }}
       </div>
     }

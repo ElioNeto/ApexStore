@@ -1,5 +1,6 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
-import { FormsModule, DatePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { DatePipe, SlicePipe } from '@angular/common';
 import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   RefreshIcon,
@@ -11,7 +12,7 @@ import { ToastService } from '../../services/toast.service';
 @Component({
   selector: 'app-tags',
   standalone: true,
-  imports: [FormsModule, DatePipe, HugeiconsIconComponent],
+  imports: [FormsModule, DatePipe, SlicePipe, HugeiconsIconComponent],
   templateUrl: './tags.component.html',
   styleUrl: './tags.component.scss'
 })

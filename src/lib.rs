@@ -18,7 +18,7 @@
 //! | Flag | Description |
 //! |------|-------------|
 //! | `api` | HTTP API server (default) |
-//! | `chai` | Chaos engineering fault injection |
+//! | `chaos` | Chaos engineering fault injection |
 //! | `wasm` | WebAssembly plugin system |
 
 pub mod api;

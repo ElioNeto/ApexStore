@@ -1787,7 +1787,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
             ))
             .wrap(self::audit_middleware::AuditMiddleware)
             .wrap(build_cors(&cors_origins, cors_enabled))
-            .wrap(HttpAuthentication::bearer(self::auth::bearer_validator));
+            .wrap(HttpAuthentication::with_fn(self::auth::request_validator));
 
         app.app_data(engine_data.clone())
             .app_data(rate_limiter_state.clone())

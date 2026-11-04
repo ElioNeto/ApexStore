@@ -31,7 +31,7 @@
           <textarea [(ngModel)]="publishMessage" placeholder="Message payload..."></textarea>
         </div>
       </div>
-      <button class="btn btn-primary" style="margin-top:14px" [disabled]="!publishTopic.trim() || !publishMessage.trim() || publishing()" (click)="publishMessage()">
+      <button class="btn btn-primary" style="margin-top:14px" [disabled]="!publishTopic.trim() || !publishMessage.trim() || publishing()" (click)="publish()">
         @if (publishing()) {
           <span class="spinner"></span>
         } @else {

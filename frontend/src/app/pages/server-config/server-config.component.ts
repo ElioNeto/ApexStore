@@ -77,6 +77,13 @@ export class ServerConfigComponent implements OnInit {
     return Array.from(groups).sort();
   }
 
+  /// Entries of one group. Templates cannot contain arrow functions -- Angular's
+  /// parser reads `=>` as an assignment and rejects the binding -- so the
+  /// per-group filter lives here rather than inline in the `@for`.
+  configsInGroup(group: string): ConfigEntry[] {
+    return this.filtered().filter(c => c.group === group);
+  }
+
   updateConfig(entry: ConfigEntry, newValue: string): void {
     if (!entry.mutable) return;
     this.saving.set(true);

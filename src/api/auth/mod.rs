@@ -13,5 +13,5 @@ pub mod token;
 
 pub use error::{AuthError, AuthResult};
 pub use manager::TokenManager;
-pub use middleware::{bearer_validator, require_permission};
+pub use middleware::{bearer_validator, request_validator, require_permission};
 pub use token::{ApiToken, Permission};

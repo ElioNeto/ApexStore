@@ -33,6 +33,20 @@ pub struct EncryptionConfig {
 }
 
 impl Default for EncryptionConfig {
+    /// # Warning
+    ///
+    /// The default is `enabled: true` with an **all-zero key**. An all-zero
+    /// AES-256 key is publicly known, so data encrypted with it is readable by
+    /// anyone: the default provides obfuscation, not confidentiality.
+    ///
+    /// Callers that genuinely want encryption off must construct
+    /// `EncryptionConfig { enabled: false, ..Default::default() }` explicitly
+    /// rather than relying on `default()`.
+    ///
+    /// Note also that `StorageConfig` disagrees with itself about the default:
+    /// `StorageConfig::default()` sets `encryption_enabled: true`, while
+    /// `#[serde(default)]` yields `false` when the field is absent from a
+    /// deserialised config file.
     fn default() -> Self {
         Self {
             key: [0u8; 32],
@@ -46,7 +60,10 @@ impl EncryptionConfig {
     ///
     /// * `Some(path)` — reads the file, trims whitespace, hex-decodes the
     ///   contents to obtain the 32-byte AES-256 key, and enables encryption.
-    /// * `None` — returns a default (disabled) config.
+    /// * `None` — returns [`EncryptionConfig::default()`], which has
+    ///   `enabled: true` and an **all-zero key**. That key provides no
+    ///   confidentiality whatsoever; see the warning on
+    ///   [`EncryptionConfig::default`].
     pub fn from_key_path(path: Option<&str>) -> Result<Self> {
         match path {
             Some(p) => {

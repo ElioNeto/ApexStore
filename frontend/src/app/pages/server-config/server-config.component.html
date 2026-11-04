@@ -42,7 +42,7 @@
                 <tr><th>Key</th><th>Value</th><th>Type</th><th>Description</th><th>Mutable</th></tr>
               </thead>
               <tbody>
-                @for (entry of filtered().filter(c => c.group === group); track entry.key) {
+                @for (entry of configsInGroup(group); track entry.key) {
                   <tr>
                     <td class="mono key-cell">{{ entry.key }}</td>
                     <td class="mono">

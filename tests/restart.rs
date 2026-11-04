@@ -385,3 +385,151 @@ fn test_sstable_corruption() {
         other => panic!("Expected CorruptedData error, got: {:?}", other),
     }
 }
+
+// ── Range tombstones across a restart (issue #415) ─────────────────────────
+//
+// `LogRecord::range_tombstone(start, end)` stores `start` in `key`, so a range
+// tombstone and a point write to the same start key are indistinguishable to a
+// deduplication pass keyed on `(column_family, key)`.
+
+/// A range tombstone must survive WAL recovery even when a later point write
+/// reuses its start key.
+#[test]
+fn restart_preserves_range_tombstone_when_start_key_is_rewritten() {
+    let dir = tempdir().unwrap();
+    let cfg = LsmConfig::builder()
+        // Large enough that nothing flushes: the records must come back through
+        // WAL replay, which is where the deduplication runs.
+        .memtable_max_size(64 * 1024 * 1024)
+        .dir_path(dir.path().to_path_buf())
+        .build()
+        .unwrap();
+
+    {
+        let engine = LsmEngine::new_from_config(
+            &cfg,
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+        engine.set("mango".to_string(), b"before".to_vec()).unwrap();
+        engine.delete_range(b"apple", b"zebra").unwrap();
+        // Same key as the tombstone's start, written afterwards.
+        engine.set("apple".to_string(), b"kept".to_vec()).unwrap();
+    }
+
+    let engine = LsmEngine::new_from_config(
+        &cfg,
+        apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+    )
+    .unwrap();
+
+    assert_eq!(
+        engine.get("apple").unwrap(),
+        Some(b"kept".to_vec()),
+        "the point write after the range delete must win for its own key"
+    );
+    assert_eq!(
+        engine.get("mango").unwrap(),
+        None,
+        "the range tombstone must still cover the rest of its range after recovery"
+    );
+}
+
+/// Two range tombstones sharing a start key are distinct deletions; neither may
+/// be dropped in favour of the other.
+#[test]
+fn restart_preserves_overlapping_range_tombstones_sharing_a_start_key() {
+    let dir = tempdir().unwrap();
+    let cfg = LsmConfig::builder()
+        .memtable_max_size(64 * 1024 * 1024)
+        .dir_path(dir.path().to_path_buf())
+        .build()
+        .unwrap();
+
+    {
+        let engine = LsmEngine::new_from_config(
+            &cfg,
+            apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+        )
+        .unwrap();
+        engine.set("b_inner".to_string(), b"v".to_vec()).unwrap();
+        engine.set("p_outer".to_string(), b"v".to_vec()).unwrap();
+        // Wide range first, then a narrow one with the same start key. Keeping
+        // only the last would un-delete everything between "c" and "zebra".
+        engine.delete_range(b"a", b"zebra").unwrap();
+        engine.delete_range(b"a", b"c").unwrap();
+    }
+
+    let engine = LsmEngine::new_from_config(
+        &cfg,
+        apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+    )
+    .unwrap();
+
+    assert_eq!(
+        engine.get("b_inner").unwrap(),
+        None,
+        "covered by both ranges"
+    );
+    assert_eq!(
+        engine.get("p_outer").unwrap(),
+        None,
+        "covered by the wider range, which must not be lost to the narrower one"
+    );
+}
+
+/// A range delete must remove keys that are still in the memtable, not only
+/// keys already flushed to an SSTable.
+#[test]
+fn delete_range_removes_unflushed_memtable_keys() {
+    let dir = tempdir().unwrap();
+    let cfg = LsmConfig::builder()
+        .memtable_max_size(64 * 1024 * 1024)
+        .dir_path(dir.path().to_path_buf())
+        .build()
+        .unwrap();
+
+    let engine = LsmEngine::new_from_config(
+        &cfg,
+        apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+    )
+    .unwrap();
+
+    engine.set("mango".to_string(), b"before".to_vec()).unwrap();
+    engine.delete_range(b"apple", b"zebra").unwrap();
+
+    assert_eq!(
+        engine.get("mango").unwrap(),
+        None,
+        "a range delete must cover memtable keys written before it"
+    );
+}
+
+/// A point write *after* a range delete wins for its own key. This is the
+/// counterpart to the test above: precedence is by timestamp, not by which
+/// structure is consulted first.
+#[test]
+fn point_write_after_delete_range_wins_for_its_key() {
+    let dir = tempdir().unwrap();
+    let cfg = LsmConfig::builder()
+        .memtable_max_size(64 * 1024 * 1024)
+        .dir_path(dir.path().to_path_buf())
+        .build()
+        .unwrap();
+
+    let engine = LsmEngine::new_from_config(
+        &cfg,
+        apexstore::storage::cache::GlobalBlockCache::new(100, 4096),
+    )
+    .unwrap();
+
+    engine.set("mango".to_string(), b"before".to_vec()).unwrap();
+    engine.delete_range(b"apple", b"zebra").unwrap();
+    engine.set("mango".to_string(), b"after".to_vec()).unwrap();
+
+    assert_eq!(
+        engine.get("mango").unwrap(),
+        Some(b"after".to_vec()),
+        "a write after the range delete must survive it"
+    );
+}

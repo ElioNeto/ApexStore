@@ -73,14 +73,12 @@ impl FullTextSearch {
         for ch in content.chars() {
             if ch.is_alphanumeric() {
                 current.push(ch);
-            } else {
-                if !current.is_empty() {
-                    let term = current.to_lowercase();
-                    if term.len() >= 2 && term.len() <= 50 && !STOP_WORDS.contains(&term.as_str()) {
-                        terms.push(term);
-                    }
-                    current.clear();
+            } else if !current.is_empty() {
+                let term = current.to_lowercase();
+                if term.len() >= 2 && term.len() <= 50 && !STOP_WORDS.contains(&term.as_str()) {
+                    terms.push(term);
                 }
+                current.clear();
             }
         }
 

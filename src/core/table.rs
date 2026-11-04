@@ -84,8 +84,11 @@ impl Table {
     /// Create a table from an SSTable file path.
     ///
     /// `encryption` controls how the meta block is decrypted on read.
-    /// Pass `EncryptionConfig::default()` (or `None`) when encryption
-    /// is not needed.
+    ///
+    /// Do **not** pass `EncryptionConfig::default()` (or `None`) to mean "no
+    /// encryption": the default has `enabled: true` with an all-zero key, so it
+    /// will attempt to decrypt. To read a plaintext SSTable, pass a config with
+    /// `enabled: false`.
     pub fn from_sstable_path(
         path: &std::path::Path,
         encryption: Option<&crate::storage::encryption::EncryptionConfig>,

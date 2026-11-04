@@ -1,6 +1,6 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DatePipe } from '@angular/common';
+import { DatePipe, NgClass } from '@angular/common';
 import { HugeiconsIconComponent } from '@hugeicons/angular';
 import {
   RefreshIcon,
@@ -28,7 +28,7 @@ interface ChaosExperiment {
 @Component({
   selector: 'app-chaos',
   standalone: true,
-  imports: [FormsModule, DatePipe, HugeiconsIconComponent],
+  imports: [FormsModule, DatePipe, HugeiconsIconComponent, NgClass],
   templateUrl: './chaos.component.html',
   styleUrl: './chaos.component.scss'
 })

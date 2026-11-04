@@ -143,19 +143,35 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             max_concurrent_compactions: 2,
         };
 
-        // Build encryption config from the config
+        // Build encryption config from the config.
+        //
+        // NOTE: a failure here currently falls back to `EncryptionConfig::default()`,
+        // which is `enabled: true` with an all-zero key. That is a known security
+        // defect kept for on-disk compatibility -- changing it would make existing
+        // zero-key SSTables and WAL frames unreadable. Until a migration path
+        // lands, the failure is at least logged loudly instead of being discarded.
         let encryption = if config.storage.encryption_enabled {
-            config
-                .storage
-                .encryption_key_path
-                .as_deref()
-                .map(|path| EncryptionConfig::from_key_path(Some(path)))
-                .unwrap_or_else(|| {
-                    Err(crate::infra::error::LsmError::InvalidArgument(
-                        "Encryption enabled but no key path provided".to_string(),
-                    ))
-                })
-                .unwrap_or_default()
+            match config.storage.encryption_key_path.as_deref() {
+                Some(path) => match EncryptionConfig::from_key_path(Some(path)) {
+                    Ok(cfg) => cfg,
+                    Err(e) => {
+                        tracing::error!(
+                            target: "apexstore::security",
+                            key_path = %path,
+                            error = %e,
+                            "encryption enabled but key file unreadable; using an ALL-ZERO key with no confidentiality"
+                        );
+                        EncryptionConfig::default()
+                    }
+                },
+                None => {
+                    tracing::error!(
+                        target: "apexstore::security",
+                        "encryption enabled but no key path provided; using an ALL-ZERO key with no confidentiality"
+                    );
+                    EncryptionConfig::default()
+                }
+            }
         } else {
             crate::storage::encryption::EncryptionConfig {
                 enabled: false,
@@ -804,7 +820,12 @@ impl<C: Cache> Engine<C> {
     /// Replay WAL records to reconstruct memtable state (operates on EngineCore directly).
     fn replay_wal_records_core(core: &mut EngineCore<C>, records: Vec<LogRecord>) -> Result<()> {
         for record in records {
-            let cf = record.column_family.as_deref().unwrap_or("default");
+            // Owned: the record itself is moved into the memtable below.
+            let cf = record
+                .column_family
+                .clone()
+                .unwrap_or_else(|| "default".to_string());
+            let cf = cf.as_str();
             if record.is_range_tombstone() {
                 // Range tombstone records are stored at the EngineCore level
                 // and also added to the current memtable's range tombstone list.
@@ -823,23 +844,21 @@ impl<C: Cache> Engine<C> {
                 }
                 let last = mem.len() - 1;
                 mem[last].add_range_tombstone(range);
-            } else if record.is_deleted {
-                let mem = core.memtables_mut().entry(cf.to_string()).or_default();
-                if mem.is_empty() {
-                    mem.push(MemTable::new_unlimited());
-                }
-                let last = mem.len() - 1;
-                mem[last].delete(record.key.clone());
-                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() += record.key.len();
             } else {
+                // Insert the recovered record as-is. `MemTable::put` and
+                // `MemTable::delete` build a fresh `LogRecord`, which stamps
+                // `SystemTime::now()` and drops `expires_at` -- so replaying
+                // through them silently rewrote every record's timestamp to the
+                // restart time and discarded TTLs. Ordering against range
+                // tombstones, and TTL expiry, both depend on those fields.
+                let bytes = record.key.len() + record.value.len();
                 let mem = core.memtables_mut().entry(cf.to_string()).or_default();
                 if mem.is_empty() {
                     mem.push(MemTable::new_unlimited());
                 }
                 let last = mem.len() - 1;
-                mem[last].put(record.key.clone(), record.value.clone());
-                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() +=
-                    record.key.len() + record.value.len();
+                mem[last].insert(record);
+                *core.memtable_bytes_mut().entry(cf.to_string()).or_default() += bytes;
             }
         }
         Ok(())
@@ -1145,23 +1164,35 @@ impl<C: Cache> Engine<C> {
 
     /// Check if a key falls within any active range tombstone for the given column family.
     fn is_in_range_tombstone(core: &EngineCore<C>, cf: &str, key: &[u8]) -> bool {
-        if let Some(tombstones) = core.range_tombstones().get(cf) {
-            if tombstones
+        Self::covering_range_tombstone_ts(core, cf, key).is_some()
+    }
+
+    /// Timestamp of the newest range tombstone covering `key`, if any.
+    ///
+    /// A boolean is not enough to decide whether a range tombstone hides a
+    /// point write. The two live in different structures -- the write in a
+    /// memtable, the tombstone in a side list -- so only their timestamps say
+    /// which happened last.
+    fn covering_range_tombstone_ts(core: &EngineCore<C>, cf: &str, key: &[u8]) -> Option<u128> {
+        let engine_level = core.range_tombstones().get(cf).and_then(|tombstones| {
+            tombstones
                 .iter()
-                .any(|rt| rt.start_key.as_slice() <= key && key < rt.end_key.as_slice())
-            {
-                return true;
-            }
+                .filter(|rt| rt.start_key.as_slice() <= key && key < rt.end_key.as_slice())
+                .map(|rt| rt.timestamp)
+                .max()
+        });
+
+        let memtable_level = core.memtables().get(cf).and_then(|memtables| {
+            memtables
+                .iter()
+                .filter_map(|mem| mem.max_covering_range_tombstone(key))
+                .max()
+        });
+
+        match (engine_level, memtable_level) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
         }
-        // Also check memtable-level range tombstones
-        if let Some(memtables) = core.memtables().get(cf) {
-            for mem in memtables.iter() {
-                if mem.contains_range_tombstone(key) {
-                    return true;
-                }
-            }
-        }
-        false
     }
 
     pub fn get_cf<K>(&self, cf: &str, key: K) -> Result<Option<Vec<u8>>>
@@ -1173,11 +1204,30 @@ impl<C: Cache> Engine<C> {
         let key_str = String::from_utf8_lossy(key).into_owned();
         let core = self.core.read();
 
-        // First check memtables (newest first) — point writes take precedence
-        // over range tombstones.
+        // Check memtables (newest first). A point write only wins over a range
+        // tombstone that covers it if the write is newer -- comparing
+        // timestamps, not check order. Consulting the memtable first and
+        // returning unconditionally made `delete_range` a no-op for anything
+        // not yet flushed to an SSTable.
+        let covering_tombstone_ts = Self::covering_range_tombstone_ts(&core, cf, key);
         if let Some(memtables) = core.memtables().get(cf) {
             for mem in memtables.iter().rev() {
                 if let Some(v) = mem.data.get(key) {
+                    // A range tombstone written after this record hides it.
+                    if covering_tombstone_ts.is_some_and(|ts| ts > v.timestamp) {
+                        let elapsed_us = start.elapsed().as_micros() as u64;
+                        self.metrics.record_get(elapsed_us);
+                        tracing::debug!(
+                            target: "apexstore::engine",
+                            operation = "get_cf",
+                            cf = cf,
+                            key = %key_str,
+                            found = false,
+                            reason = "range_tombstone",
+                            duration_us = elapsed_us,
+                        );
+                        return Ok(None);
+                    }
                     // Skip tombstones (deleted records)
                     if v.is_deleted {
                         return Ok(None);
@@ -1204,9 +1254,10 @@ impl<C: Cache> Engine<C> {
             }
         }
 
-        // After memtable lookup, check if key falls within a range tombstone.
-        // This is done after memtable check so point writes take precedence.
-        if Self::is_in_range_tombstone(&core, cf, key) {
+        // The key was not in any memtable, so it can only come from the version
+        // set. Those records carry no timestamp on this path, so a covering
+        // tombstone shadows them unconditionally.
+        if covering_tombstone_ts.is_some() {
             let elapsed_us = start.elapsed().as_micros() as u64;
             self.metrics.record_get(elapsed_us);
             tracing::debug!(
@@ -2270,19 +2321,19 @@ impl<C: Cache> Engine<C> {
     /// Maintain secondary indexes for a key-value pair being written.
     /// Called internally by put_cf_with_ttl_inner.
     fn update_indexes(&self, cf: &str, key: &[u8], value: &[u8]) -> Result<()> {
-        // Check if any indexes exist for this CF
-        let schema_prefix = format!("{}__schema:index:", Self::INDEX_PREFIX);
-        let (index_fields, _) = self.search_prefix(&schema_prefix, None, 100)?;
-
-        if index_fields.is_empty() {
-            return Ok(()); // No indexes configured
-        }
-
-        // Parse the value as JSON to extract indexed fields
+        // Binary and plain-text values cannot have indexed JSON fields. Reject
+        // them before scanning schemas: that scan snapshots the keyspace and
+        // otherwise makes ordinary byte writes increasingly expensive.
         let json_val: Value = match serde_json::from_slice(value) {
             Ok(v) => v,
-            Err(_) => return Ok(()), // Non-JSON values can't be indexed by fields
+            Err(_) => return Ok(()),
         };
+
+        let schema_prefix = format!("{}__schema:index:", Self::INDEX_PREFIX);
+        let (index_fields, _) = self.search_prefix(&schema_prefix, None, 100)?;
+        if index_fields.is_empty() {
+            return Ok(());
+        }
 
         for (idx_key, _) in &index_fields {
             let idx_str = String::from_utf8_lossy(idx_key);
@@ -3398,13 +3449,24 @@ mod tests {
         let storage_config = crate::infra::config::StorageConfig::default();
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
-        let (_, metrics) = strategy
+        let expected_bytes: u64 = tables.iter().map(|table| table.size() as u64).sum();
+        let started = std::time::Instant::now();
+        let (output, metrics) = strategy
             .execute(tables, &options, &storage_config, &output_dir, &[])
             .unwrap();
 
-        assert!(metrics.bytes_read > 0, "Should track bytes read");
-        assert!(metrics.files_merged > 0, "Should track files merged");
-        assert!(metrics.duration_ms > 0, "Duration should be positive");
+        assert_eq!(metrics.bytes_read, expected_bytes);
+        assert_eq!(metrics.files_merged, 3);
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].data.len(), 300);
+        let written: u64 = std::fs::read_dir(&output_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().metadata().unwrap().len())
+            .sum();
+        assert_eq!(metrics.bytes_written, written);
+        assert!(written > 0);
+        // Truncation to whole milliseconds legitimately reports zero for fast runs.
+        assert!(u128::from(metrics.duration_ms) <= started.elapsed().as_millis());
     }
 
     #[test]
@@ -3621,9 +3683,12 @@ mod tests {
             tables.push(table);
         }
 
+        let expected: BTreeMap<_, _> = tables.iter().flat_map(|table| table.data.clone()).collect();
+        let expected_bytes = tables.iter().map(Table::size).sum::<usize>() as u64;
         let storage_config = crate::infra::config::StorageConfig::default();
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
+        let started = std::time::Instant::now();
         let (new_tables, metrics) = strategy
             .execute(tables, &options, &storage_config, &output_dir, &[])
             .unwrap();
@@ -3632,9 +3697,32 @@ mod tests {
             !new_tables.is_empty(),
             "Should produce at least one new table"
         );
-        assert!(metrics.files_merged > 0, "Should track files merged");
-        assert!(metrics.bytes_read > 0, "Should track bytes read");
-        assert!(metrics.duration_ms > 0, "Duration should be positive");
+        assert_eq!(metrics.files_merged, 5);
+        assert_eq!(metrics.bytes_read, expected_bytes);
+        assert!(u128::from(metrics.duration_ms) <= started.elapsed().as_millis());
+        let mut persisted = BTreeMap::new();
+        let mut output_bytes = 0;
+        for table in &new_tables {
+            let path = table.path.as_ref().expect("compaction creates an SSTable");
+            output_bytes += std::fs::metadata(path).unwrap().len();
+            let reader = crate::storage::reader::SstableReader::open(
+                path.clone(),
+                storage_config.clone(),
+                GlobalBlockCache::new(100, 4096),
+            )
+            .unwrap();
+            for (key, record) in reader.scan().unwrap() {
+                assert!(!record.is_deleted);
+                assert!(
+                    persisted.insert(key, record.value).is_none(),
+                    "duplicate output key"
+                );
+            }
+        }
+        assert!(output_bytes > 0);
+        assert_eq!(metrics.bytes_written, output_bytes);
+        assert_eq!(persisted.len(), 500);
+        assert_eq!(persisted, expected);
 
         // Check that new tables are at level 1
         for table in &new_tables {
