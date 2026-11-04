@@ -76,7 +76,7 @@ async fn list_notes(
     query: web::Query<ListNotesQuery>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
-        return e;
+        return *e;
     }
     match engine.list_notes(query.prefix.as_deref()) {
         Ok(notes) => HttpResponse::Ok()
@@ -99,7 +99,7 @@ async fn get_note(
     path: web::Path<String>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
-        return e;
+        return *e;
     }
     let note_path = path.into_inner();
     match engine.get_note(&note_path) {
@@ -141,7 +141,7 @@ async fn put_note(
     body: web::Json<PutNoteBody>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Write) {
-        return e;
+        return *e;
     }
     let note_path = path.into_inner();
     match engine.put_note_with_version(&note_path, &body.content) {
@@ -165,7 +165,7 @@ async fn delete_note(
     path: web::Path<String>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Delete) {
-        return e;
+        return *e;
     }
     let note_path = path.into_inner();
     match engine.delete_note(&note_path) {
@@ -190,7 +190,7 @@ async fn rename_note(
     body: web::Json<RenameBody>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Write) {
-        return e;
+        return *e;
     }
     let old_path = path.into_inner();
     match engine.rename_note(&old_path, &body.new_path) {
@@ -217,7 +217,7 @@ async fn get_backlinks(
     path: web::Path<String>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
-        return e;
+        return *e;
     }
     let note_path = path.into_inner();
     match engine.get_backlinks(&note_path) {
@@ -241,7 +241,7 @@ async fn get_forward_links(
     path: web::Path<String>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
-        return e;
+        return *e;
     }
     let note_path = path.into_inner();
     match engine.get_forward_links(&note_path) {
@@ -266,7 +266,7 @@ async fn get_graph(
     query: web::Query<GraphQuery>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
-        return e;
+        return *e;
     }
     let note_path = path.into_inner();
 
@@ -311,7 +311,7 @@ async fn get_version_history(
     path: web::Path<String>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
-        return e;
+        return *e;
     }
     let note_path = path.into_inner();
     match engine.get_version_history(&note_path) {
@@ -335,7 +335,7 @@ async fn get_note_at_version(
     path: web::Path<(String, u128)>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
-        return e;
+        return *e;
     }
     let (note_path, timestamp) = path.into_inner();
     match engine.get_note_at_version(&note_path, timestamp) {
@@ -362,7 +362,7 @@ async fn delete_version(
     path: web::Path<(String, u128)>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Delete) {
-        return e;
+        return *e;
     }
     let (note_path, timestamp) = path.into_inner();
     match engine.remove_version(&note_path, timestamp) {
@@ -390,7 +390,7 @@ async fn restore_version(
     query: web::Query<RestoreQuery>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Write) {
-        return e;
+        return *e;
     }
     let note_path = path.into_inner();
     match engine.restore_version(&note_path, query.timestamp) {
@@ -418,7 +418,7 @@ async fn create_snapshot(
     time_travel: web::Data<Mutex<crate::infra::time_travel::TimeTravelEngine>>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Admin) {
-        return e;
+        return *e;
     }
     let note_path = path.into_inner();
     let content = match engine.get_note(&note_path) {
@@ -454,7 +454,7 @@ async fn create_snapshot(
 #[get("/tags")]
 async fn list_tags(req: HttpRequest, engine: web::Data<NotesEngine>) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
-        return e;
+        return *e;
     }
     match engine.list_tags() {
         Ok(tags) => {
@@ -484,7 +484,7 @@ async fn get_notes_by_tag(
     query: web::Query<TagNotesQuery>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
-        return e;
+        return *e;
     }
     let tag = path.into_inner();
     match engine.search_by_tag(&tag, query.cursor.as_deref(), query.limit.unwrap_or(50)) {
@@ -516,7 +516,7 @@ async fn search_notes(
     query: web::Query<SearchQuery>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
-        return e;
+        return *e;
     }
     let max_results = query.limit.unwrap_or(20).min(100);
     match engine.search_notes(&query.q, max_results) {
@@ -541,7 +541,7 @@ async fn list_templates_handler(
     engine: web::Data<NotesEngine>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Read) {
-        return e;
+        return *e;
     }
     match crate::notes::template::list_templates(&engine) {
         Ok(templates) => HttpResponse::Ok()
@@ -571,7 +571,7 @@ async fn save_template_handler(
     body: web::Json<PutTemplateBody>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Write) {
-        return e;
+        return *e;
     }
     let name = path.into_inner();
     match crate::notes::template::save_template(&engine, &name, &body.content) {
@@ -595,7 +595,7 @@ async fn delete_template_handler(
     path: web::Path<String>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Delete) {
-        return e;
+        return *e;
     }
     let name = path.into_inner();
     match crate::notes::template::delete_template(&engine, &name) {
@@ -625,7 +625,7 @@ async fn create_daily_note_handler(
     body: web::Json<CreateDailyNoteBody>,
 ) -> impl Responder {
     if let Err(e) = crate::api::require_permission(&req, crate::api::Permission::Write) {
-        return e;
+        return *e;
     }
     match crate::notes::template::create_daily_note(&engine, body.template.as_deref()) {
         Ok(path) => HttpResponse::Ok()

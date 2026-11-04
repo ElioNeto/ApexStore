@@ -62,6 +62,8 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./book
+          user_name: ElioNeto
+          user_email: netoo.elio@hotmail.com
 
   report-status:
     name: Report status

@@ -3,10 +3,9 @@ name: Benchmarks
 # Benchmarks only. Formatting and linting live in `ci.yml`; this workflow used to
 # duplicate them in a `lint` job.
 #
-# Not run on push or pull_request: five matrix jobs with a 25-minute timeout on
-# every commit is slow, noisy, and produced a stream of no-op
-# "docs: update benchmark results" commits on main.
 on:
+  pull_request:
+    branches: [main]
   schedule:
     # 02:00 UTC daily.
     - cron: '0 2 * * *'
@@ -54,7 +53,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # v1
         with:
-          toolchain: "1.92"
+          toolchain: "1.99.1"
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
@@ -81,7 +80,8 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: bench-results-${{ matrix.bench }}
           path: bench_output_${{ matrix.bench }}.txt
@@ -90,6 +90,7 @@ jobs:
   publish:
     name: Publish results
     needs: [benchmarks]
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -167,8 +168,8 @@ jobs:
             echo "No change in docs/PERFORMANCE.md; nothing to commit."
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "ElioNeto"
+          git config user.email "netoo.elio@hotmail.com"
           git add docs/PERFORMANCE.md
           git commit -m "docs: update benchmark results [skip ci]"
           git push

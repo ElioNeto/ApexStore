@@ -73,7 +73,7 @@ env-check: ## Fail if .env.example drifts from the variables the code reads
 actionlint: ## Lint the GitHub Actions workflows
 	docker run --rm -v "$(REPO_DIR):/repo" -w /repo rhysd/actionlint:latest -color
 
-ci: actionlint fmt-check clippy test audit env-check doc ## Everything CI checks, locally
+ci: actionlint fmt-check clippy test audit env-check doc ## Run the core Rust checks locally
 
 # ── Workflow debugging via `act` (runs on the host, needs act installed) ─────
 

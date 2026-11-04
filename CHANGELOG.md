@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — v2.2 (Hardening) → v2.3 (Bug fixes, Features & Resilience)
 
+### Security and reliability updates
+
+- Upgrade the dashboard to Angular 21 and compatible build tools; enforce the high/critical npm audit gate and reject empty browser test suites. Preserve zone-based change detection during the upgrade.
+
+- Preserve WAL record timestamps, TTLs and range tombstones during recovery; order point reads against range deletions (#415).
+- Restore container data-volume settings, working health probes, frontend builds, pinned CI tools, release-profile tests and environment documentation checks (#426).
+- Measure compaction duration with a monotonic clock and verify exact output metrics without assuming a minimum execution time.
+
+- Preserve unselected SSTables when applying multiple compaction groups; cover manual/background compaction and tombstone-only generation updates (#430).
+- Separate authentication and access-control flags and require authentication when configuration is missing (#431).
+- Escape dashboard HTML and refresh values through text nodes (#436).
+- Upgrade TLS, telemetry, WASM and transitive dependencies; remove audit suppressions. Temporarily pin the native HTTP/2 implementation from Actix PR #4321 at revision `4537c9f5b407c6f7c0e8037b87b8bebbf6388d80` and retain HTTP/1.1 and HTTP/2 support.
+- Propagate CI and benchmark failures, reject empty benchmark reports, and require validation before release. Publishing is blocked while root-only dependency patches remain.
+- Make compaction stress input reproducible and correct the property-test reference model for repeated keys.
+
+### API compatibility notes
+
+- `require_permission` now returns `Result<(), Box<HttpResponse>>`; callers returning its error response directly must dereference it (`return *response`).
+- Applications assembling their own Actix app must register `Data<AuthEnabled>` and `Data<AccessControlEnabled>` instead of shared `Data<bool>` values. Missing authentication configuration now requires a valid token.
+
 ### 🐛 Critical Bug Fixes
 
 - **#238** — CI: formatting check failed: applied `cargo fmt --all` across the codebase

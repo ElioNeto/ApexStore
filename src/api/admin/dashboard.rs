@@ -8,11 +8,26 @@ use crate::api::auth::{require_permission, Permission};
 use crate::LsmEngine;
 use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
 
+fn escape_html(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
 /// Handler for `GET /admin/dashboard` — returns an HTML monitoring page.
 #[get("/dashboard")]
 pub async fn admin_dashboard(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Admin) {
-        return e;
+        return *e;
     }
     // Fetch engine stats
     let stats = engine.stats_all().unwrap_or_default();
@@ -218,20 +233,42 @@ pub async fn admin_dashboard(req: HttpRequest, engine: web::Data<LsmEngine>) -> 
 
     function refreshDashboard() {{
       fetch('/admin/dashboard')
-        .then(function(r) {{ return r.text(); }})
+        .then(function(r) {{
+          if (!r.ok) throw new Error('Dashboard request failed: ' + r.status);
+          return r.text();
+        }})
         .then(function(html) {{
           var parser = new DOMParser();
           var doc = parser.parseFromString(html, 'text/html');
           var newContent = doc.getElementById('dashboard-content');
           if (newContent) {{
-            document.getElementById('dashboard-content').innerHTML = newContent.innerHTML;
+            var content = document.getElementById('dashboard-content');
+            var values = content.querySelectorAll('.value');
+            newContent.querySelectorAll('.value').forEach(function(value, index) {{
+              if (values[index] && !values[index].querySelector('.status')) {{
+                values[index].textContent = value.textContent;
+              }}
+            }});
+            var status = newContent.querySelector('.status');
+            var currentStatus = content.querySelector('.status');
+            if (status && currentStatus) {{
+              currentStatus.textContent = status.textContent;
+              currentStatus.className = status.classList.contains('running')
+                ? 'status running' : 'status idle';
+            }}
+            var items = Array.from(newContent.querySelectorAll('.table-list li'), function(item) {{
+              var li = document.createElement('li');
+              li.textContent = item.textContent;
+              return li;
+            }});
+            content.querySelector('.table-list').replaceChildren(...items);
           }}
         }})
         .catch(function(err) {{
           console.error('Dashboard refresh failed:', err);
         }});
     }}
-    setTimeout(refreshDashboard, 5000);
+    setInterval(refreshDashboard, 5000);
   </script>
 </body>
 </html>"#,
@@ -268,13 +305,24 @@ pub async fn admin_dashboard(req: HttpRequest, engine: web::Data<LsmEngine>) -> 
         errors = metrics_snapshot.errors,
         cf_list = column_families
             .iter()
-            .map(|cf| format!("<li>{}</li>", cf))
+            .map(|cf| format!("<li>{}</li>", escape_html(cf)))
             .collect::<Vec<_>>()
             .join("\n"),
-        version = env!("CARGO_PKG_VERSION"),
+        version = escape_html(env!("CARGO_PKG_VERSION")),
     );
 
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(html)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::escape_html;
+
+    #[test]
+    fn escapes_html_metacharacters_without_changing_unicode() {
+        assert_eq!(escape_html("<&>\"' café"), "&lt;&amp;&gt;&quot;&#39; café");
+        assert_eq!(escape_html("default"), "default");
+    }
 }

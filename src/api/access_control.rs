@@ -30,21 +30,6 @@ use std::{
 
 use crate::infra::access_control::{AccessController, Operation};
 
-/// Whether the policy-engine access control middleware is enforced.
-///
-/// A newtype for the same reason as [`crate::api::auth::AuthEnabled`]:
-/// actix-web keys app data by `TypeId`, so two `web::Data<bool>` registrations
-/// collide and the last one wins for every reader.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AccessControlEnabled(pub bool);
-
-impl AccessControlEnabled {
-    /// Returns `true` when access control policies must be enforced.
-    pub fn is_enabled(&self) -> bool {
-        self.0
-    }
-}
-
 // ── Middleware factory ───────────────────────────────────────────────────────
 
 /// Middleware factory that applies access control policies to every request
@@ -90,12 +75,10 @@ where
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        // Check if access control is enabled (stored in app_data by start_server).
-        // Absent flag means access control was never configured for this app, so
-        // there is no policy set to enforce and the request passes through.
+        // Check if access control is enabled (stored in app_data by start_server)
         let enabled = req
-            .app_data::<Data<AccessControlEnabled>>()
-            .map(|flag| flag.is_enabled())
+            .app_data::<Data<crate::api::config::AccessControlEnabled>>()
+            .map(|flag| flag.get_ref().0)
             .unwrap_or(false);
 
         if !enabled {

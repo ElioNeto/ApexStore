@@ -79,13 +79,13 @@ Use `bash -c "..."` rather than `bash -lc "..."`: a login shell resets `PATH` an
 
 ## Working without the container
 
-A host toolchain works too. `rust-toolchain.toml` pins **1.98**, so `rustup` will
+A host toolchain works too. `rust-toolchain.toml` pins **1.99.1**, so `rustup` will
 install and select it automatically on the first `cargo` invocation in this
 repository — no manual `rustup override` needed. `Dockerfile.dev` builds on the
 same version; keep the two in sync.
 
 That is distinct from the crate's **MSRV**, `rust-version` in `Cargo.toml`, which
-is **1.94** — the oldest compiler the dependency graph accepts under
+is **1.96** — the oldest compiler the dependency graph accepts under
 `--all-features`. CI checks it in a separate job, so raising the pinned toolchain
 does not silently raise the MSRV.
 

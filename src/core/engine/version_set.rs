@@ -384,53 +384,47 @@ impl<C: Cache> VersionSet<C> {
         indices: &[usize],
         new_tables: Vec<crate::core::table::Table>,
     ) -> Vec<std::path::PathBuf> {
+        self.atomic_replace_groups(cf, vec![(indices.to_vec(), new_tables)])
+    }
+
+    /// Apply disjoint groups from one snapshot without shifting later groups' indices.
+    /// Each output occupies its oldest input's position; unselected tables retain
+    /// their relative order. Callers must validate the snapshot generation first.
+    pub(crate) fn atomic_replace_groups(
+        &mut self,
+        cf: &str,
+        groups: Vec<(Vec<usize>, Vec<crate::core::table::Table>)>,
+    ) -> Vec<PathBuf> {
         let mut removed_paths = Vec::new();
         if let Some(tables) = self.tables.get_mut(cf) {
-            if new_tables.is_empty() {
-                // Only removing — no insertion needed
-                let mut sorted_indices: Vec<usize> = indices.to_vec();
-                sorted_indices.sort_unstable_by(|a, b| b.cmp(a));
-                for &idx in &sorted_indices {
-                    if idx < tables.len() {
-                        if let Some(ref path) = tables[idx].path {
-                            removed_paths.push(path.clone());
-                        }
-                        tables.remove(idx);
-                    }
+            let mut removed = HashSet::new();
+            let mut replacements = std::collections::BTreeMap::new();
+            for (indices, outputs) in groups {
+                if let Some(first) = indices.iter().copied().filter(|&i| i < tables.len()).min() {
+                    removed.extend(indices.into_iter().filter(|&i| i < tables.len()));
+                    replacements.insert(first, outputs);
                 }
+            }
+            if removed.is_empty() {
                 return removed_paths;
             }
-
-            // Record old table paths before removal
-            for &idx in indices {
-                if idx < tables.len() {
-                    if let Some(ref path) = tables[idx].path {
-                        removed_paths.push(path.clone());
+            let mut updated = Vec::new();
+            for (index, table) in std::mem::take(tables).into_iter().enumerate() {
+                if let Some(outputs) = replacements.remove(&index) {
+                    updated.extend(outputs);
+                }
+                if removed.contains(&index) {
+                    if let Some(path) = table.path {
+                        removed_paths.push(path);
                     }
+                } else {
+                    updated.push(table);
                 }
             }
-
-            // The insertion point: where the first (oldest) removed table was
-            let insert_at = indices.iter().min().copied().unwrap_or(0);
-
-            // Sort indices in descending order to remove from end without invalidating indices
-            let mut sorted_indices: Vec<usize> = indices.to_vec();
-            sorted_indices.sort_unstable_by(|a, b| b.cmp(a));
-
-            // Remove old tables
-            for &idx in &sorted_indices {
-                if idx < tables.len() {
-                    tables.remove(idx);
-                }
-            }
-
-            // Insert new tables at the position of the first removed table,
-            // rather than appending at the end. This ensures that tables added
-            // by flushes during Phase 2 (which are appended) remain AFTER the
-            // compacted result, so they are checked first by `get()`'s `.rev()`.
-            let insert_at = insert_at.min(tables.len());
-            let _ = tables.splice(insert_at..insert_at, new_tables);
+            *tables = updated;
+            // Also invalidate plans when compaction removes only tombstones.
             self.compaction_generation += 1;
+            self.clear_cache();
         }
         removed_paths
     }

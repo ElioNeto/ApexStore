@@ -21,12 +21,13 @@ feature/xyz
      |  workflow_run: CI concluded successfully
      v
   Auto Release (release.yml)
+     - verify the validated commit is still main and dependencies are publishable
      - bump patch version in Cargo.toml
      - verify the release builds with the locked dependencies
      - tag, GitHub release, `cargo publish --locked`
 
   Deploy Documentation (deploy-docs.yml) .... on push to main
-  Benchmarks (benchmarks.yml) ............... nightly at 02:00 UTC
+  Benchmarks (benchmarks.yml) ............... on PRs, nightly at 02:00 UTC
 ```
 
 The release gate is the important edge. `release.yml` used to trigger directly on
@@ -39,7 +40,7 @@ successful `CI` run via `workflow_run`.
 
 ### `ci.yml` — CI
 
-**Trigger:** `pull_request` to `main`, `push` to `main`, `workflow_dispatch`.
+**Trigger:** `pull_request` to `main`, `push` to `main`, `workflow_dispatch`, and `workflow_call`.
 
 | Job | What it checks |
 |-----|----------------|
@@ -50,9 +51,10 @@ successful `CI` run via `workflow_run`.
 | `Test (release)` | the same suite under `--release` |
 | `Build and docs` | release build, examples, `cargo doc` |
 | `MSRV` | `cargo check --all-features` at the `rust-version` in `Cargo.toml` |
-| `Security audit` | `cargo audit --deny warnings` and `cargo deny check` |
+| `Security audit` | `cargo audit` (no advisory suppressions) |
 | `.env.example drift` | `scripts/check-env-example.sh` |
-| `Frontend` | `npm ci`, build, test, advisory `npm audit` |
+| `Frontend` | `npm ci`, build, test, `npm audit --audit-level=high` |
+| `CI script regression tests` | Python and Node regression suites |
 | `Report status` | opens/updates a tracking issue on failure (push only) |
 
 Notes on specific jobs:
@@ -73,9 +75,14 @@ Notes on specific jobs:
 **Trigger:** `workflow_run` on a successful `CI` run for `main`, or manual
 dispatch.
 
+Before any version bump, the workflow checks out the validated SHA, verifies it
+is still the head of `main`, and runs `scripts/check_release_dependencies.py`.
+Manual dispatch first runs the reusable CI workflow. Publication remains blocked
+while the root Actix patches are present; Cargo consumers do not inherit them.
+
 1. Read the current version from `Cargo.toml`.
 2. Increment the **patch** component.
-3. `cargo update --locked --package apex-store-rs` — only the package version
+3. `cargo update --offline --package apex-store-rs` — only the package version
    moves. The previous `cargo update --workspace` also bumped dependencies,
    releasing a tree CI never compiled.
 4. `cargo build --locked --release --all-features` as a final gate.
@@ -99,10 +106,8 @@ is silently unpublished.
 
 ### `benchmarks.yml` — Benchmarks
 
-**Trigger:** nightly at 02:00 UTC, or manual dispatch. Deliberately **not** on
-push or pull request: seven matrix jobs on every commit is slow, and the previous
-configuration produced a stream of no-op `docs: update benchmark results` commits
-on `main`.
+**Trigger:** pull requests to `main`, nightly at 02:00 UTC, or manual dispatch.
+Pull requests run measurements and upload artifacts without publishing results.
 
 The matrix covers all seven declared benchmarks. `latency_bench` and
 `write_amplification` were declared in `Cargo.toml` but missing from the matrix,
@@ -130,11 +135,8 @@ Tags are mutable, so a retagged or compromised release would otherwise execute
 with whatever permissions the job holds. `.github/dependabot.yml` keeps the pins
 current through reviewable PRs — without it, pinning freezes them forever.
 
-The Rust toolchain is pinned in `rust-toolchain.toml` (1.92, the floor required
-by `wasmtime 44` and the cranelift crates under `--all-features`). Previously
-every job used `container: rust:latest` *and* `dtolnay/rust-toolchain@stable`,
-which was both redundant and unpinned: a new stable release could turn CI red
-with no change to the repository.
+The Rust toolchain is pinned to 1.99.1 in `rust-toolchain.toml`, the development
+image and CI. The independent MSRV check uses Rust 1.96, required by Wasmtime 49.
 
 `permissions` defaults to `contents: read` at workflow level, and jobs that need
 more request it explicitly.
@@ -158,3 +160,7 @@ make ci-local    # the CI workflow itself, via act
    `Auto Release`.
 
 See [`MIGRATION_GUIDE.md`](../../MIGRATION_GUIDE.md) for the team workflow.
+
+The local `scripts/workflow-agent.ts` only executes shell steps through Docker.
+It cannot validate reusable/action-only jobs and reports those as failures.
+Direct local commands and hosted checks provide validation for those jobs.

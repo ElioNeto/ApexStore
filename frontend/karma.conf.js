@@ -43,7 +43,7 @@ module.exports = function (config) {
     browsers: ['ChromeHeadlessNoSandbox'],
     restartOnFileChange: true,
     singleRun: false,
-    failOnEmptyTestSuite: false,
+    failOnEmptyTestSuite: true,
     colors: true,
     logLevel: config.LOG_INFO,
     autoWatch: true,

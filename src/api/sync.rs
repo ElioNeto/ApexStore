@@ -142,7 +142,7 @@ pub async fn sync_handler(
 ) -> Result<HttpResponse, actix_web::Error> {
     // Authentication check — require at least Read permission
     if let Err(resp) = require_permission(&req, Permission::Read) {
-        return Err(InternalError::from_response("WebSocket auth failed", resp).into());
+        return Err(InternalError::from_response("WebSocket auth failed", *resp).into());
     }
 
     let (response, mut session, mut msg_stream) = actix_ws::handle(&req, body)?;

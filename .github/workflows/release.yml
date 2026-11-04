@@ -20,41 +20,56 @@ permissions:
 
 concurrency:
   # Never run two releases at once: both would bump from the same base version
-  # and race on `git push origin main`.
+  # and race on `git push origin HEAD:main`.
   group: release
   cancel-in-progress: false
 
 jobs:
+  validation:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
   release:
     name: Bump version and create release
+    needs: [validation]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     # Only release when CI actually passed, and never in response to the bot's
     # own version-bump commit (which would loop).
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      always() && !cancelled() &&
+      ((github.event_name == 'workflow_dispatch' && needs.validation.result == 'success') ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.actor.login != 'github-actions[bot]' &&
-       github.event.workflow_run.head_branch == 'main')
+       github.event.workflow_run.head_branch == 'main'))
 
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify the validated commit is still main
+        run: |
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+
+      - name: Verify publishable dependencies
+        run: python3 scripts/check_release_dependencies.py
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # v1
         with:
-          toolchain: "1.92"
+          toolchain: "1.99.1"
 
       - name: Configure Git
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "ElioNeto"
+          git config user.email "netoo.elio@hotmail.com"
 
       - name: Read current version from Cargo.toml
         id: current_version
@@ -85,7 +100,7 @@ jobs:
       # Only the package version changes; `cargo update --workspace` would also
       # move dependency versions, releasing a dependency tree that CI never saw.
       - name: Update Cargo.lock for the new package version
-        run: cargo update --locked --package apex-store-rs
+        run: cargo update --offline --package apex-store-rs
 
       # The lockfile is authoritative for the published artifact.
       - name: Verify the release builds with the locked dependencies
@@ -95,7 +110,7 @@ jobs:
         run: |
           git add Cargo.toml Cargo.lock
           git commit -m "chore: bump version to ${{ steps.new_version.outputs.version }} [skip ci]"
-          git push origin main
+          git push origin HEAD:main
 
       - name: Create and push tag
         run: |
