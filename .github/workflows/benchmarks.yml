@@ -90,7 +90,7 @@ jobs:
   publish:
     name: Publish results
     needs: [benchmarks]
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
