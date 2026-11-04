@@ -262,3 +262,17 @@ Plaintext V0/V1/V2 frames retain their compatibility behavior, and mixed V2/V3
 logs remain readable with the correct key. Existing handling of physical CRC
 failures and partial frames is unchanged. This is a recovery safeguard, not the
 legacy zero-key migration or the final encryption-default change from #411.
+
+## Compaction encryption configuration
+
+Built-in compaction strategies now use `EngineOptions.encryption`, matching
+flush and point reads. They do not reload a key file from the copied
+`StorageConfig` or substitute a zero key when its key path is absent. A running
+engine retains its loaded key even if the key file is subsequently unavailable;
+restarting still requires restoring the correct key configuration.
+
+When encryption is disabled, compacted SSTables retain the plaintext `LSMSST03`
+format. With a nonzero key, output remains `LSMSST04` under that same key. This
+also applies when invoking a built-in strategy directly: the runtime options
+are authoritative for encryption. Existing incorrectly encrypted outputs still
+require the explicit migration/recovery work tracked in #411.

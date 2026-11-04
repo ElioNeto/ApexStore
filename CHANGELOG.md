@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security and reliability updates
 
+- Preserve the loaded runtime encryption key across all built-in compaction strategies; keep disabled encryption plaintext and verify nonzero-key data through flush, compaction and restart (#411).
+
 - Abort encrypted WAL replay on missing keys, authentication failures and malformed authenticated records; preserve original logs instead of silently returning partial data (#411).
 
 - Validate SSTable metadata consistently during discovery and snapshot restore; retain readable tables with invalid Bloom filters, preserve quarantine reasons, abort on missing/wrong encryption keys, and expose unreadable-data health counters (#412).
