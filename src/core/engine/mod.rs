@@ -2321,19 +2321,19 @@ impl<C: Cache> Engine<C> {
     /// Maintain secondary indexes for a key-value pair being written.
     /// Called internally by put_cf_with_ttl_inner.
     fn update_indexes(&self, cf: &str, key: &[u8], value: &[u8]) -> Result<()> {
-        // Check if any indexes exist for this CF
-        let schema_prefix = format!("{}__schema:index:", Self::INDEX_PREFIX);
-        let (index_fields, _) = self.search_prefix(&schema_prefix, None, 100)?;
-
-        if index_fields.is_empty() {
-            return Ok(()); // No indexes configured
-        }
-
-        // Parse the value as JSON to extract indexed fields
+        // Binary and plain-text values cannot have indexed JSON fields. Reject
+        // them before scanning schemas: that scan snapshots the keyspace and
+        // otherwise makes ordinary byte writes increasingly expensive.
         let json_val: Value = match serde_json::from_slice(value) {
             Ok(v) => v,
-            Err(_) => return Ok(()), // Non-JSON values can't be indexed by fields
+            Err(_) => return Ok(()),
         };
+
+        let schema_prefix = format!("{}__schema:index:", Self::INDEX_PREFIX);
+        let (index_fields, _) = self.search_prefix(&schema_prefix, None, 100)?;
+        if index_fields.is_empty() {
+            return Ok(());
+        }
 
         for (idx_key, _) in &index_fields {
             let idx_str = String::from_utf8_lossy(idx_key);

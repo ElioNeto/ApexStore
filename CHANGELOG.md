@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security and reliability updates
 
+- Avoid scanning the keyspace for secondary-index schemas when writing non-JSON values; retain WAL durability and verify binary/text data across flush and restart.
+
 - Upgrade the dashboard to Angular 21 and compatible build tools; enforce the high/critical npm audit gate and reject empty browser test suites. Preserve zone-based change detection during the upgrade.
 
 - Preserve WAL record timestamps, TTLs and range tombstones during recovery; order point reads against range deletions (#415).
