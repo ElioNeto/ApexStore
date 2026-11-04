@@ -9,6 +9,11 @@ pub trait StorageIterator {
     fn value(&self) -> &[u8];
     fn is_valid(&self) -> bool;
     fn seek(&mut self, key: &[u8]);
+
+    /// Metadata for the current version, when the underlying storage has it.
+    fn record(&self) -> Option<&crate::core::log_record::LogRecord> {
+        None
+    }
 }
 
 pub struct HeapEntry<I: StorageIterator> {
@@ -91,6 +96,10 @@ impl<I: StorageIterator> MergeIterator<I> {
 impl<I: StorageIterator> StorageIterator for MergeIterator<I> {
     type KeyType = Vec<u8>;
 
+    fn record(&self) -> Option<&crate::core::log_record::LogRecord> {
+        self.heap.peek().and_then(|entry| entry.iter.record())
+    }
+
     fn next(&mut self) {
         if let Some(mut top) = self.heap.pop() {
             self.current_key = Some(top.iter.key().as_ref().to_vec());
@@ -142,6 +151,10 @@ impl<I: StorageIterator> StorageIterator for MergeIterator<I> {
 
 impl<K: AsRef<[u8]>, I: StorageIterator<KeyType = K> + ?Sized> StorageIterator for Box<I> {
     type KeyType = K;
+
+    fn record(&self) -> Option<&crate::core::log_record::LogRecord> {
+        (**self).record()
+    }
 
     fn next(&mut self) {
         (**self).next();

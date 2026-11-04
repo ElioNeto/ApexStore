@@ -338,9 +338,10 @@ impl SstableReader {
                 // Read key
                 let key = block.data[offset + 2..offset + 2 + key_len].to_vec();
 
-                // Check start filter (exclusive start for pagination)
+                // The range API includes its lower bound. Pagination callers
+                // can discard a matching cursor after the range is merged.
                 if let Some(start_key) = start {
-                    if key.as_slice() <= start_key {
+                    if key.as_slice() < start_key {
                         continue;
                     }
                 }

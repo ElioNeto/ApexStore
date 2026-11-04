@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security and reliability updates
 
 - Store API credentials in an isolated, atomically persisted private snapshot shared by the server and offline CLI. Fail startup on corrupt credential storage, reject reserved keys in public APIs, and hide legacy metadata from scans. Legacy user-keyspace tokens must be rotated; they are never automatically trusted.
+- Preserve record timestamps and expiry in scans, key listings and counts after flush/restart; compare range deletions consistently in engine and transaction reads. Scans report missing or corrupt SSTables instead of returning incomplete results.
 - Require Write permission for WebSocket sync, revalidate live token permissions on messages, reject reserved keys, and filter broadcasts/replies by per-key Read policies. Report storage errors before acknowledging changes and preserve the winning CRDT value on stale updates.
 
 - Avoid scanning the keyspace for secondary-index schemas when writing non-JSON values; retain WAL durability and verify binary/text data across flush and restart.
