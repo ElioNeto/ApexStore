@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security and reliability updates
 
+- Preserve record timestamps and expiry in scans, key listings and counts after flush/restart; compare range deletions consistently in engine and transaction reads. Scans report missing or corrupt SSTables instead of returning incomplete results.
+
 - Avoid scanning the keyspace for secondary-index schemas when writing non-JSON values; retain WAL durability and verify binary/text data across flush and restart.
 
 - Upgrade the dashboard to Angular 21 and compatible build tools; enforce the high/critical npm audit gate and reject empty browser test suites. Preserve zone-based change detection during the upgrade.
