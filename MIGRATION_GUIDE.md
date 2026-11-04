@@ -248,3 +248,17 @@ Snapshot SSTables are inspected before copying; conflicting live filenames,
 invalid manifest paths, missing files and duplicate entries fail preflight.
 Snapshot restore is still not a transactional replacement of a running database;
 use a fresh destination and retain the source snapshot.
+
+## Encrypted WAL recovery failures
+
+Recovery of a checksum-valid encrypted V3 WAL frame now requires an enabled key.
+A missing key, AES-GCM authentication failure, or malformed authenticated record
+aborts recovery without returning partially replayed records. This applies to
+both the default WAL and each column-family WAL. Recovery preserves the original
+WAL bytes, so an operator can correct the key and retry. An authentication error
+can also indicate damaged ciphertext: retain a backup before investigating.
+
+Plaintext V0/V1/V2 frames retain their compatibility behavior, and mixed V2/V3
+logs remain readable with the correct key. Existing handling of physical CRC
+failures and partial frames is unchanged. This is a recovery safeguard, not the
+legacy zero-key migration or the final encryption-default change from #411.
