@@ -63,6 +63,20 @@ The server will load `.env` automatically and display all active configuration o
 - **Low-latency**: Set `SERVER_KEEP_ALIVE` to 5-15
 - **Memory-constrained**: Reduce `SERVER_MAX_CONNECTIONS` to 5000-10000
 
+### Request Rate Limits
+
+`RATE_LIMIT_REQUESTS_PER_MINUTE` defaults to `100` accepted requests per client
+IP in a sliding 60-second window, shared across routes. `0` disables this global
+cap while keeping configured endpoint caps active. The server additionally
+limits `/admin/compact` and `/admin/flush` to five accepted requests each per
+window. Rejected requests do not extend the window or consume another cap.
+
+Applications configuring `RateLimiterState::set_endpoint_limit` must use the
+registered route pattern, including its scope (for example `/api/keys/{key}`),
+not a concrete key URL. A zero endpoint cap disables only that additional cap.
+The admin rate-limit summary reports both per-IP and per-route accepted counts
+in the last 60 seconds; requests with both caps disabled are not tracked.
+
 ## LSM Engine Configuration
 
 ### Storage Settings

@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Propagate CI and benchmark failures, reject empty benchmark reports, and require validation before release. Publishing is blocked while root-only dependency patches remain.
 - Make compaction stress input reproducible and correct the property-test reference model for repeated keys.
 
+- Expire per-route rate-limit counters in the same sliding 60-second window as per-IP totals. Enforce global and endpoint caps independently, group dynamic URLs by registered route, and prune inactive peers periodically (#414).
+
 ### API compatibility notes
 
 - `SyncManager::apply_change` now returns `Result<()>`; callers must handle persistence failures. WebSocket clients receive an error response for rejected writes instead of a success acknowledgement. A Write-only token may send updates but needs explicit Read permission to receive values.
