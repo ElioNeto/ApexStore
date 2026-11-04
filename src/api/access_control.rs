@@ -240,16 +240,27 @@ mod tests {
 
     // ── extract_resource_key tests ───────────────────────────────────────────
 
-    // These tests verify the logic without a real ServiceRequest by checking
-    // that the fallback path (full path) works when no match_info["key"] is
-    // available. The match_info extraction is tested implicitly through the
-    // middleware integration.
-
     #[test]
     fn test_extract_fallback_to_path() {
-        // We cannot easily construct a ServiceRequest in unit tests, but we
-        // can verify the fallback logic: req.path() returns the URI path.
-        // The match_info extraction is tested via integration.
+        let req =
+            actix_web::test::TestRequest::with_uri("/admin/flush?dry_run=true").to_srv_request();
+        assert_eq!(extract_resource_key(&req), "/admin/flush");
+    }
+
+    #[test]
+    fn test_extract_matched_key() {
+        let req = actix_web::test::TestRequest::with_uri("/keys/encoded-key")
+            .param("key", "tenant:alice")
+            .to_srv_request();
+        assert_eq!(extract_resource_key(&req), "tenant:alice");
+    }
+
+    #[test]
+    fn test_context_ignores_unvalidated_authorization_header() {
+        let req = actix_web::test::TestRequest::default()
+            .insert_header(("Authorization", "Bearer unvalidated"))
+            .to_srv_request();
+        assert!(build_context(&req).is_empty());
     }
 
     // ── build_context tests ──────────────────────────────────────────────────
@@ -267,13 +278,18 @@ mod tests {
             token_hash: "abc".to_string(),
             created_at: now,
             expires_at: None,
-            permissions: vec![crate::api::auth::Permission::Read],
+            permissions: vec![
+                crate::api::auth::Permission::Read,
+                crate::api::auth::Permission::Write,
+            ],
         };
 
-        let ctx = token_context_for_test(&token);
+        let req = actix_web::test::TestRequest::default().to_srv_request();
+        req.extensions_mut().insert(token);
+        let ctx = build_context(&req);
 
         assert_eq!(ctx.get("principal").unwrap(), "alice");
-        assert_eq!(ctx.get("permissions").unwrap(), "Read");
+        assert_eq!(ctx.get("permissions").unwrap(), "Read,Write");
     }
 
     #[test]
@@ -292,23 +308,12 @@ mod tests {
             permissions: vec![crate::api::auth::Permission::Admin],
         };
 
-        let ctx = token_context_for_test(&token);
+        let req = actix_web::test::TestRequest::default().to_srv_request();
+        req.extensions_mut().insert(token);
+        let ctx = build_context(&req);
 
         assert_eq!(ctx.get("principal").unwrap(), "bob");
         assert_eq!(ctx.get("permissions").unwrap(), "Admin");
-    }
-
-    /// Helper to build the context map for a token without a ServiceRequest.
-    fn token_context_for_test(token: &ApiToken) -> HashMap<String, String> {
-        let mut ctx = HashMap::new();
-        ctx.insert("principal".to_string(), token.name.clone());
-        let perms: Vec<String> = token
-            .permissions
-            .iter()
-            .map(|p| format!("{:?}", p))
-            .collect();
-        ctx.insert("permissions".to_string(), perms.join(","));
-        ctx
     }
 
     // ── AccessController integration tests ────────────────────────────────────
