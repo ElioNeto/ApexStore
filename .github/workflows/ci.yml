@@ -71,9 +71,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The release profile is tested too: `panic` behaviour and the
-        # optimisation level differ from `dev`, so a dev-only suite exercises
-        # code paths that cannot occur in production.
+        # Exercise optimized code as well as dev builds. Rust test harnesses
+        # still unwind: production panic=abort needs process-level coverage
+        # and is tracked separately in #416.
         profile: [dev, release]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

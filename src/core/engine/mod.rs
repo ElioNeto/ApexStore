@@ -3683,9 +3683,12 @@ mod tests {
             tables.push(table);
         }
 
+        let expected: BTreeMap<_, _> = tables.iter().flat_map(|table| table.data.clone()).collect();
+        let expected_bytes = tables.iter().map(Table::size).sum::<usize>() as u64;
         let storage_config = crate::infra::config::StorageConfig::default();
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
+        let started = std::time::Instant::now();
         let (new_tables, metrics) = strategy
             .execute(tables, &options, &storage_config, &output_dir, &[])
             .unwrap();
@@ -3694,9 +3697,32 @@ mod tests {
             !new_tables.is_empty(),
             "Should produce at least one new table"
         );
-        assert!(metrics.files_merged > 0, "Should track files merged");
-        assert!(metrics.bytes_read > 0, "Should track bytes read");
-        assert!(metrics.duration_ms > 0, "Duration should be positive");
+        assert_eq!(metrics.files_merged, 5);
+        assert_eq!(metrics.bytes_read, expected_bytes);
+        assert!(u128::from(metrics.duration_ms) <= started.elapsed().as_millis());
+        let mut persisted = BTreeMap::new();
+        let mut output_bytes = 0;
+        for table in &new_tables {
+            let path = table.path.as_ref().expect("compaction creates an SSTable");
+            output_bytes += std::fs::metadata(path).unwrap().len();
+            let reader = crate::storage::reader::SstableReader::open(
+                path.clone(),
+                storage_config.clone(),
+                GlobalBlockCache::new(100, 4096),
+            )
+            .unwrap();
+            for (key, record) in reader.scan().unwrap() {
+                assert!(!record.is_deleted);
+                assert!(
+                    persisted.insert(key, record.value).is_none(),
+                    "duplicate output key"
+                );
+            }
+        }
+        assert!(output_bytes > 0);
+        assert_eq!(metrics.bytes_written, output_bytes);
+        assert_eq!(persisted.len(), 500);
+        assert_eq!(persisted, expected);
 
         // Check that new tables are at level 1
         for table in &new_tables {
