@@ -211,3 +211,40 @@ Questions? Open an issue labeled `workflow` or ping @ElioNeto.
 
 **Migration Date:** March 9, 2026  
 **Migrated By:** github-actions[bot] / Elio Neto
+
+## SSTable recovery diagnostics
+
+SSTable metadata is validated during discovery and snapshot restore. An invalid
+Bloom filter is a performance degradation: the real key range and data remain
+available, and reads proceed without the filter. Structural metadata failures
+are quarantined instead of registering an empty table.
+
+A missing encryption key or AES-GCM authentication failure aborts discovery or
+snapshot preflight without moving any SSTables. Authentication failure can mean
+a wrong key or damaged ciphertext; preserve the originals and verify the key
+before attempting recovery. Plaintext `LSMSST03` files remain readable when an
+encryption key is configured for `LSMSST04` files. This change does not migrate
+legacy zero-key encryption or change encryption defaults; those require the
+separate encryption migration work.
+
+Quarantined files live in `sstables/quarantine/`. Each file has a sibling
+`<name>.sst.quarantine-reason` JSON file with `original_filename`, `error`,
+`engine_version`, and `timestamp_unix_ms`. Existing evidence is retained when a
+filename is reused. Keep a backup of both files before repairing data.
+
+`GET /stats`, `GET /stats/all`, and health diagnostics expose
+`quarantined_sstables`, `unreadable_sstables`, and `degraded_bloom_sstables`.
+These are instance-wide recovery counts, including previously quarantined
+files found on restart. Readiness, startup, and comprehensive health return 503
+while unreadable/quarantined files remain; liveness remains 200. A degraded
+Bloom filter alone keeps readiness at 200. After restoring verified data,
+archive the quarantined files and their reasons outside the database and
+restart to recompute the recovery counters. The counters describe discovery
+and snapshot recovery; they are not a full online integrity scan.
+
+Metadata is bounded to 64 MiB before decompression. Files exceeding that limit
+fail explicitly as unsupported inputs and are not automatically quarantined.
+Snapshot SSTables are inspected before copying; conflicting live filenames,
+invalid manifest paths, missing files and duplicate entries fail preflight.
+Snapshot restore is still not a transactional replacement of a running database;
+use a fresh destination and retain the source snapshot.

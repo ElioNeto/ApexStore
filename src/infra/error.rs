@@ -68,6 +68,12 @@ pub enum LsmError {
     #[error("Decompression failed: {0}")]
     DecompressionFailed(String),
 
+    #[error("encrypted storage requires an explicit encryption key")]
+    EncryptionKeyRequired,
+
+    #[error("encrypted storage authentication failed: wrong key or damaged ciphertext; original data must be preserved")]
+    EncryptionAuthenticationFailed,
+
     #[error("WAL corruption detected")]
     WalCorruption,
 

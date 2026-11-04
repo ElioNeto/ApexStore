@@ -17,6 +17,7 @@ pub mod cache;
 pub mod config;
 pub mod encryption;
 pub mod iterator;
+pub(crate) mod metadata;
 pub mod prefix_compression;
 pub mod reader;
 pub mod wal;

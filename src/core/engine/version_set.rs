@@ -51,6 +51,8 @@ pub struct VersionSet<C: Cache> {
     pub(crate) quarantined_count: AtomicU64,
     /// Number of SSTables recovered (data replayed from WAL) during startup.
     pub(crate) recovered_count: AtomicU64,
+    pub(crate) unreadable_count: AtomicU64,
+    pub(crate) degraded_bloom_count: AtomicU64,
 }
 
 impl<C: Cache> VersionSet<C> {
@@ -62,13 +64,9 @@ impl<C: Cache> VersionSet<C> {
     ) -> Self {
         // Derive KV cache capacity from block cache size (rough estimate: entry ~200 bytes)
         let kv_capacity = ((options.block_cache_size_mb * 1024 * 1024) / 200).max(1000) as u64;
-        // Build EncryptionConfig from the infra config
-        let encryption = if storage_config.encryption_enabled {
-            EncryptionConfig::from_key_path(storage_config.encryption_key_path.as_deref())
-                .unwrap_or_default()
-        } else {
-            EncryptionConfig::default()
-        };
+        // The engine already loaded the key. Re-reading a missing/changed key
+        // path here silently substituted the all-zero key on ordinary reads.
+        let encryption = options.encryption.clone();
 
         Self {
             _cache: std::marker::PhantomData,
@@ -84,6 +82,8 @@ impl<C: Cache> VersionSet<C> {
             quarantined: Arc::new(Mutex::new(HashSet::new())),
             quarantined_count: AtomicU64::new(0),
             recovered_count: AtomicU64::new(0),
+            unreadable_count: AtomicU64::new(0),
+            degraded_bloom_count: AtomicU64::new(0),
         }
     }
 

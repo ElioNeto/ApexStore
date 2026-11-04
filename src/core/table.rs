@@ -1,3 +1,11 @@
+/// Outcome of inspecting an existing SSTable. Configuration/authentication
+/// failures are returned separately and must never move the original file.
+pub enum TableLoad {
+    Healthy(Table),
+    DegradedBloom(Table),
+    Corrupt(crate::infra::error::LsmError),
+}
+
 pub struct Table {
     pub data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
     pub level: usize,
@@ -81,125 +89,47 @@ impl Table {
         self
     }
 
-    /// Create a table from an SSTable file path.
-    ///
-    /// `encryption` controls how the meta block is decrypted on read.
-    ///
-    /// Do **not** pass `EncryptionConfig::default()` (or `None`) to mean "no
-    /// encryption": the default has `enabled: true` with an all-zero key, so it
-    /// will attempt to decrypt. To read a plaintext SSTable, pass a config with
-    /// `enabled: false`.
+    /// Load validated metadata; Bloom failure degrades reads but never hides data.
+    /// The on-disk magic determines whether an available key is needed.
     pub fn from_sstable_path(
         path: &std::path::Path,
         encryption: Option<&crate::storage::encryption::EncryptionConfig>,
     ) -> crate::infra::error::Result<Self> {
-        // Read the SSTable and extract data
-        // For now, we'll create an empty table - in production this would read the SSTable
-        let data = std::collections::BTreeMap::new();
-
-        // Extract metadata from the SSTable's MetaBlock
-        let (min_key, max_key, bloom_filter) = if path.exists() {
-            let default_enc = crate::storage::encryption::EncryptionConfig::default();
-            let enc = encryption.unwrap_or(&default_enc);
-            match Self::read_meta_block(path, enc) {
-                Ok(meta) => {
-                    let bf = bloomfilter::Bloom::<[u8]>::from_bytes(meta.bloom_filter_data)
-                        .map_err(|e| {
-                            crate::infra::error::LsmError::CompactionFailed(format!(
-                                "Bloom filter deserialization failed: {}",
-                                e
-                            ))
-                        })?;
-                    (meta.min_key, meta.max_key, Some(bf))
-                }
-                Err(_) => (Vec::new(), Vec::new(), None),
-            }
-        } else {
-            (Vec::new(), Vec::new(), None)
-        };
-
+        let default_enc = crate::storage::encryption::EncryptionConfig::default();
+        let mut file = std::fs::File::open(path)?;
+        let (meta, _) =
+            crate::storage::metadata::read(&mut file, encryption.unwrap_or(&default_enc))?;
         Ok(Self {
-            data,
-            level: 1, // Assume L1 for compacted tables
+            data: std::collections::BTreeMap::new(),
+            level: 1,
             path: Some(path.to_path_buf()),
-            min_key,
-            max_key,
-            bloom_filter,
+            min_key: meta.min_key,
+            max_key: meta.max_key,
+            bloom_filter: crate::storage::metadata::bloom(meta.bloom_filter_data),
         })
     }
 
-    /// Read the MetaBlock from an SSTable file, decrypting if `encryption` is enabled.
-    fn read_meta_block(
+    /// Classify structural damage separately from key, permission and I/O failures.
+    /// Only proven structural damage is eligible for quarantine.
+    pub fn load_for_recovery(
         path: &std::path::Path,
         encryption: &crate::storage::encryption::EncryptionConfig,
-    ) -> crate::infra::error::Result<crate::storage::builder::MetaBlock> {
-        use crate::infra::codec::decode;
-        use crate::storage::builder::MetaBlock;
-        use crate::storage::encryption::Encryptor;
-        use lz4_flex::decompress_size_prepended;
-        use std::fs::File;
-        use std::io::{Read, Seek, SeekFrom};
-
-        const SST_MAGIC_V2: &[u8; 8] = b"LSMSST03";
-        const SST_MAGIC_V2_ENCRYPTED: &[u8; 8] = b"LSMSST04";
-        const FOOTER_SIZE: u64 = 8;
-
-        let mut file = File::open(path)?;
-
-        // Verify magic number and detect encryption
-        let mut magic = [0u8; 8];
-        file.read_exact(&mut magic)?;
-
-        let encryptor = Encryptor::new(encryption);
-
-        if &magic != SST_MAGIC_V2 && &magic != SST_MAGIC_V2_ENCRYPTED {
-            return Err(crate::infra::error::LsmError::InvalidSstableFormat(
-                format!(
-                    "Invalid magic number: expected {:?} or {:?}, found {:?}",
-                    SST_MAGIC_V2, SST_MAGIC_V2_ENCRYPTED, magic
-                ),
-            ));
+    ) -> crate::infra::error::Result<TableLoad> {
+        use crate::infra::error::LsmError;
+        match Self::from_sstable_path(path, Some(encryption)) {
+            Ok(table) if table.bloom_filter.is_none() => Ok(TableLoad::DegradedBloom(table)),
+            Ok(table) => Ok(TableLoad::Healthy(table)),
+            Err(
+                error @ (LsmError::InvalidSstableFormat(_)
+                | LsmError::CorruptedData(_)
+                | LsmError::DecompressionFailed(_)
+                | LsmError::Codec(_)),
+            ) => Ok(TableLoad::Corrupt(error)),
+            Err(LsmError::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+                Ok(TableLoad::Corrupt(LsmError::Io(error)))
+            }
+            Err(error) => Err(error),
         }
-
-        // If the file is encrypted but no key was provided, fail.
-        if &magic == SST_MAGIC_V2_ENCRYPTED && !encryptor.is_enabled() {
-            return Err(crate::infra::error::LsmError::InvalidSstableFormat(
-                "SSTable is encrypted but no encryption key was provided".to_string(),
-            ));
-        }
-
-        // Read footer to get metadata offset
-        file.seek(SeekFrom::End(-(FOOTER_SIZE as i64)))?;
-        let mut footer_bytes = [0u8; 8];
-        file.read_exact(&mut footer_bytes)?;
-        let meta_offset = u64::from_le_bytes(footer_bytes);
-
-        // Read (possibly encrypted) compressed metadata
-        file.seek(SeekFrom::Start(meta_offset))?;
-        let file_len = file.metadata()?.len();
-        let meta_size = (file_len - meta_offset - FOOTER_SIZE) as usize;
-        let mut on_disk_meta = vec![0u8; meta_size];
-        file.read_exact(&mut on_disk_meta)?;
-
-        // Decrypt first if encryption is enabled
-        let compressed_meta = if encryptor.is_enabled() {
-            encryptor.decrypt_block(&on_disk_meta)?
-        } else {
-            on_disk_meta
-        };
-
-        // Decompress metadata
-        let decompressed = decompress_size_prepended(&compressed_meta).map_err(|e| {
-            crate::infra::error::LsmError::DecompressionFailed(format!(
-                "Metadata decompression failed: {}",
-                e
-            ))
-        })?;
-
-        // Deserialize metadata
-        let metadata: MetaBlock = decode(&decompressed)?;
-
-        Ok(metadata)
     }
 
     pub fn size(&self) -> usize {
