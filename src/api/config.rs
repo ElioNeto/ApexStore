@@ -28,6 +28,12 @@ pub struct ServerConfig {
     pub rate_limit_enabled: bool,
     /// Max requests per minute per IP (default: 100)
     pub rate_limit_requests_per_minute: usize,
+    /// Maximum tracked IPs per rate-limit shard (16 shards).
+    #[serde(default = "default_rate_limit_capacity")]
+    pub rate_limit_max_ips_per_shard: usize,
+    /// Maximum distinct IPs with in-flight requests across workers.
+    #[serde(default = "default_connection_capacity")]
+    pub connection_max_tracked_ips: usize,
 
     /// CDC endpoint URL for streaming data changes.
     /// When set, CDC is enabled and data mutations are posted as JSON to this endpoint.
@@ -53,6 +59,14 @@ pub struct ServerConfig {
     pub max_connections_per_ip: usize,
 }
 
+fn default_rate_limit_capacity() -> usize {
+    super::rate_limiter::DEFAULT_MAX_IPS_PER_SHARD
+}
+
+fn default_connection_capacity() -> usize {
+    super::connection_guard::DEFAULT_MAX_TRACKED_IPS
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
     /// Enable/disable authentication
@@ -75,6 +89,8 @@ impl Default for ServerConfig {
             workers: Some(4),
             rate_limit_enabled: true,
             rate_limit_requests_per_minute: 100,
+            rate_limit_max_ips_per_shard: default_rate_limit_capacity(),
+            connection_max_tracked_ips: default_connection_capacity(),
             cdc_endpoint: None,
             cors_enabled: true,
             cors_origins: None,
@@ -155,6 +171,15 @@ impl ServerConfig {
             .parse::<usize>()
             .unwrap_or(100);
 
+        let rate_limit_max_ips_per_shard = env::var("RATE_LIMIT_MAX_IPS_PER_SHARD")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(default_rate_limit_capacity);
+        let connection_max_tracked_ips = env::var("CONNECTION_MAX_TRACKED_IPS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(default_connection_capacity);
+
         let cdc_endpoint = env::var("CDC_ENDPOINT").ok();
 
         let cors_enabled = env::var("CORS_ENABLED")
@@ -202,6 +227,8 @@ impl ServerConfig {
             workers,
             rate_limit_enabled,
             rate_limit_requests_per_minute,
+            rate_limit_max_ips_per_shard,
+            connection_max_tracked_ips,
             cdc_endpoint,
             cors_enabled,
             cors_origins,
