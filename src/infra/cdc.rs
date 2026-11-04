@@ -165,10 +165,7 @@ impl WebhookPublisher {
     /// to customise.
     pub fn new(endpoint: String) -> Self {
         let timeout = std::time::Duration::from_secs(30);
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(timeout)
-            .timeout_read(timeout)
-            .build();
+        let agent = Self::agent_with_timeout(timeout);
         Self {
             endpoint,
             agent,
@@ -184,11 +181,18 @@ impl WebhookPublisher {
     /// The same value is used for both the connect and read timeout.
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeout = timeout;
-        self.agent = ureq::AgentBuilder::new()
-            .timeout_connect(timeout)
-            .timeout_read(timeout)
-            .build();
+        self.agent = Self::agent_with_timeout(timeout);
         self
+    }
+
+    fn agent_with_timeout(timeout: std::time::Duration) -> ureq::Agent {
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(timeout))
+            .timeout_per_read(Some(timeout))
+            // Keep HTTP 4xx/5xx responses on the same retry path as transport errors.
+            .http_status_as_error(true)
+            .build()
+            .into()
     }
 
     /// Attach an HTTP auth header to every request.
@@ -219,20 +223,20 @@ impl CdcPublisher for WebhookPublisher {
         let json = serde_json::to_string(&event)?;
 
         // Retry up to 3 times with exponential backoff.
-        // Build a fresh request each time because ureq::Request is consumed on send.
+        // Build a fresh request each time because sending consumes the builder.
         let mut last_err = None;
         for attempt in 0..3 {
             let mut req = self.agent.post(&self.endpoint);
-            req = req.set("Content-Type", "application/json");
+            req = req.header("Content-Type", "application/json");
 
             // Add auth header if configured
             if let Some((ref name, ref value)) = self.auth_header {
-                req = req.set(name, value);
+                req = req.header(name.as_str(), value.as_str());
             }
 
-            match req.send_string(&json) {
+            match req.send(json.as_str()) {
                 Ok(response) => {
-                    if (200..300).contains(&response.status()) {
+                    if response.status().is_success() {
                         self.success_count.fetch_add(1, Ordering::Relaxed);
                     } else {
                         self.failure_count.fetch_add(1, Ordering::Relaxed);
@@ -351,6 +355,192 @@ pub fn create_publisher(config: &CdcConfig) -> Option<Box<dyn CdcPublisher>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    enum Reply {
+        Status(u16),
+        Stall,
+    }
+
+    struct ReceivedRequest {
+        request_line: String,
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
+    }
+
+    fn read_request(stream: &mut TcpStream) -> ReceivedRequest {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).unwrap();
+        let mut headers = Vec::new();
+        loop {
+            let mut line = String::new();
+            assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+            if line == "\r\n" {
+                break;
+            }
+            let (name, value) = line.split_once(':').unwrap();
+            headers.push((name.to_ascii_lowercase(), value.trim().to_owned()));
+        }
+        let length: usize = headers
+            .iter()
+            .find(|(name, _)| name == "content-length")
+            .unwrap()
+            .1
+            .parse()
+            .unwrap();
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        ReceivedRequest {
+            request_line,
+            headers,
+            body,
+        }
+    }
+
+    struct WebhookServer {
+        endpoint: String,
+        release: mpsc::Sender<()>,
+        handle: thread::JoinHandle<Vec<ReceivedRequest>>,
+    }
+
+    impl WebhookServer {
+        fn start(replies: Vec<Reply>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let endpoint = format!("http://{}/hook", listener.local_addr().unwrap());
+            listener.set_nonblocking(true).unwrap();
+            let (release, released) = mpsc::channel();
+            let handle = thread::spawn(move || {
+                let mut requests = Vec::new();
+                let mut stalled_connections = Vec::new();
+                let deadline = Instant::now() + Duration::from_secs(5);
+                for reply in replies {
+                    let mut stream = loop {
+                        match listener.accept() {
+                            Ok((stream, _)) => break stream,
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                assert!(Instant::now() < deadline, "missing webhook request");
+                                thread::sleep(Duration::from_millis(5));
+                            }
+                            Err(error) => panic!("accept webhook: {error}"),
+                        }
+                    };
+                    requests.push(read_request(&mut stream));
+                    match reply {
+                        Reply::Status(status) => {
+                            write!(stream, "HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                        }
+                        // Keep the connection open without sending response headers. Only
+                        // the client's timeout can complete publish before finish releases it.
+                        Reply::Stall => stalled_connections.push(stream),
+                    }
+                }
+                if !stalled_connections.is_empty() {
+                    released.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+                requests
+            });
+            Self {
+                endpoint,
+                release,
+                handle,
+            }
+        }
+
+        fn finish(self) -> Vec<ReceivedRequest> {
+            let _ = self.release.send(());
+            self.handle.join().unwrap()
+        }
+    }
+
+    #[test]
+    fn webhook_delivers_json_with_authorization() {
+        let server = WebhookServer::start(vec![Reply::Status(204)]);
+        let publisher = WebhookPublisher::new(server.endpoint.clone())
+            .with_auth("Authorization".into(), "Bearer test-token".into());
+        let event = make_event();
+        publisher.publish(event.clone()).unwrap();
+        assert_eq!(publisher.metrics(), (1, 0));
+        let requests = server.finish();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].request_line, "POST /hook HTTP/1.1\r\n");
+        assert!(requests[0]
+            .headers
+            .contains(&("content-type".into(), "application/json".into())));
+        assert!(requests[0]
+            .headers
+            .contains(&("authorization".into(), "Bearer test-token".into())));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&requests[0].body).unwrap(),
+            serde_json::to_value(event).unwrap()
+        );
+    }
+
+    #[test]
+    fn webhook_retries_http_errors_before_success() {
+        let server = WebhookServer::start(vec![
+            Reply::Status(503),
+            Reply::Status(502),
+            Reply::Status(200),
+        ]);
+        let publisher = WebhookPublisher::new(server.endpoint.clone())
+            .with_auth("X-API-Key".into(), "test-key".into());
+        publisher.publish(make_event()).unwrap();
+        assert_eq!(publisher.metrics(), (1, 0));
+        let requests = server.finish();
+        assert_eq!(requests.len(), 3);
+        for request in &requests {
+            assert_eq!(request.body, requests[0].body);
+            assert!(request
+                .headers
+                .contains(&("x-api-key".into(), "test-key".into())));
+        }
+    }
+
+    #[test]
+    fn webhook_reports_exhausted_http_errors_once() {
+        for status in [401, 500] {
+            let server = WebhookServer::start((0..3).map(|_| Reply::Status(status)).collect());
+            let publisher = WebhookPublisher::new(server.endpoint.clone());
+            let error = publisher.publish(make_event()).unwrap_err();
+            assert!(error.to_string().contains("after 3 retries"));
+            assert_eq!(publisher.metrics(), (0, 1));
+            assert_eq!(server.finish().len(), 3);
+        }
+    }
+
+    #[test]
+    fn webhook_read_timeout_retries_and_reports_failure() {
+        let server = WebhookServer::start(vec![Reply::Stall, Reply::Stall, Reply::Stall]);
+        let publisher =
+            WebhookPublisher::new(server.endpoint.clone()).with_timeout(Duration::from_millis(50));
+        let start = Instant::now();
+        let result = publisher.publish(make_event());
+        let elapsed = start.elapsed();
+        let requests = server.finish();
+        assert!(result.is_err());
+        assert_eq!(requests.len(), 3);
+        assert_eq!(publisher.metrics(), (0, 1));
+        // Includes the existing 100 + 200 + 400 ms retry backoff, with generous
+        // scheduling margin while remaining below the server's five-second guard.
+        assert!(elapsed < Duration::from_secs(3), "publish took {elapsed:?}");
+    }
+
+    #[test]
+    fn webhook_preserves_non_error_status_accounting() {
+        let server = WebhookServer::start(vec![Reply::Status(304)]);
+        let publisher = WebhookPublisher::new(server.endpoint.clone());
+        publisher.publish(make_event()).unwrap();
+        assert_eq!(publisher.metrics(), (0, 1));
+        assert_eq!(server.finish().len(), 1);
+    }
 
     fn make_event() -> CdcEvent {
         CdcEvent {
