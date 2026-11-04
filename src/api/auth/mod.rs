@@ -9,6 +9,7 @@
 pub mod error;
 pub mod manager;
 pub mod middleware;
+mod store;
 pub mod token;
 
 pub use error::{AuthError, AuthResult};
