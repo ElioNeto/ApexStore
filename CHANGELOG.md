@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### API compatibility notes
 
+- The server uses `HttpAuthentication::with_fn(request_validator)` to honor explicit authentication disablement without a Bearer header. Only `GET /health/liveness` is public; readiness, startup, detailed health and data routes still require authentication. Custom Actix applications can use the same validator.
+
 - `require_permission` now returns `Result<(), Box<HttpResponse>>`; callers returning its error response directly must dereference it (`return *response`).
 - Applications assembling their own Actix app must register `Data<AuthEnabled>` and `Data<AccessControlEnabled>` instead of shared `Data<bool>` values. Missing authentication configuration now requires a valid token.
 
