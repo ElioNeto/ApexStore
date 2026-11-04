@@ -33,6 +33,10 @@ impl MemTableIterator {
 impl StorageIterator for MemTableIterator {
     type KeyType = Vec<u8>;
 
+    fn record(&self) -> Option<&LogRecord> {
+        self.entries.get(self.pos).map(|(_, record)| record)
+    }
+
     fn key(&self) -> Self::KeyType {
         if self.pos < self.entries.len() {
             self.entries[self.pos].0.clone()

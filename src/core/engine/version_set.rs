@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+type RecordIterator<'a> = Box<dyn crate::core::iterators::StorageIterator<KeyType = Vec<u8>> + 'a>;
+
 /// Statistics returned by `VersionSet::stats()`.
 pub struct VersionStats {
     pub num_tables: usize,
@@ -99,6 +101,63 @@ impl<C: Cache> VersionSet<C> {
     /// to prevent stale results.
     pub fn clear_cache(&self) {
         self.kv_cache.invalidate_all();
+    }
+
+    /// Look up a complete version when timestamp ordering is required. The
+    /// value-only cache cannot answer whether a range tombstone is newer.
+    pub(crate) fn get_record(
+        &self,
+        cf: &str,
+        key: &[u8],
+    ) -> crate::infra::error::Result<Option<crate::core::log_record::LogRecord>> {
+        let Some(tables) = self.tables.get(cf) else {
+            return Ok(None);
+        };
+        for table in tables.iter().rev() {
+            if (!table.min_key.is_empty() && key < table.min_key.as_slice())
+                || (!table.max_key.is_empty() && key > table.max_key.as_slice())
+                || table
+                    .bloom_filter
+                    .as_ref()
+                    .is_some_and(|bloom| !bloom.check(key))
+            {
+                continue;
+            }
+            if let Some(path) = &table.path {
+                if let Some(record) = self.open_record_reader(path)?.get(key)? {
+                    return Ok(Some(record));
+                }
+            } else if let Some(value) = table.data.get(key) {
+                // Legacy in-memory Tables carry no version metadata. Preserve
+                // conservative ordering rather than inventing a fresh timestamp.
+                let mut record =
+                    crate::core::log_record::LogRecord::new(key.to_vec(), value.clone());
+                record.timestamp = 0;
+                record.is_deleted = value.is_empty();
+                return Ok(Some(record));
+            }
+        }
+        Ok(None)
+    }
+
+    fn open_record_reader(&self, path: &PathBuf) -> crate::infra::error::Result<SstableReader> {
+        if self.quarantined.lock().contains(path) {
+            return Err(crate::infra::error::LsmError::InvalidSstableFormat(
+                format!("cannot read quarantined SSTable {}", path.display(),),
+            ));
+        }
+        let cache = self.block_cache.clone().unwrap_or_else(|| {
+            GlobalBlockCache::new(
+                self.storage_config.block_cache_size_mb,
+                self.storage_config.block_size,
+            )
+        });
+        SstableReader::open_with_encryption(
+            path.clone(),
+            self.storage_config.clone(),
+            cache,
+            &self.encryption,
+        )
     }
 
     pub fn get(&self, cf: &str, key: &[u8]) -> Option<Vec<u8>> {
@@ -340,6 +399,39 @@ impl<C: Cache> VersionSet<C> {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Read persisted versions, including metadata, instead of iterating the
+    /// optional in-memory value cache (which is empty after recovery).
+    pub(crate) fn record_iters_in_range(
+        &self,
+        cf: &str,
+        lower: Option<&[u8]>,
+        upper: Option<&[u8]>,
+    ) -> crate::infra::error::Result<Vec<RecordIterator<'_>>> {
+        let mut iterators: Vec<RecordIterator<'_>> = Vec::new();
+        let Some(tables) = self.tables.get(cf) else {
+            return Ok(iterators);
+        };
+        for table in tables.iter().rev() {
+            if (!table.max_key.is_empty()
+                && lower.is_some_and(|lower| table.max_key.as_slice() < lower))
+                || (!table.min_key.is_empty()
+                    && upper.is_some_and(|upper| table.min_key.as_slice() >= upper))
+            {
+                continue;
+            }
+            if let Some(path) = &table.path {
+                let reader = self.open_record_reader(path)?;
+                let records = reader.scan_range(lower, upper)?;
+                iterators.push(Box::new(crate::storage::iterator::MemTableIterator::new(
+                    records,
+                )));
+            } else {
+                iterators.push(Box::new(table.iter()));
+            }
+        }
+        Ok(iterators)
     }
 
     pub fn record_count(&self, cf: &str) -> usize {

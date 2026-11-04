@@ -4,7 +4,7 @@
 //! retries it up to a configurable number of times with exponential backoff and
 //! random jitter to avoid thundering-herd problems.
 
-use rand::Rng;
+use rand::RngExt;
 use std::time::Duration;
 
 /// Configuration for retry behaviour.
@@ -97,8 +97,8 @@ impl RetryConfig {
                         let half = delay_ms / 2;
                         let min = delay_ms.saturating_sub(half);
                         let max = delay_ms.saturating_add(half);
-                        let mut rng = rand::thread_rng();
-                        rng.gen_range(min..=max)
+                        let mut rng = rand::rng();
+                        rng.random_range(min..=max)
                     } else {
                         delay_ms
                     };

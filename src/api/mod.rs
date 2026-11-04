@@ -21,6 +21,7 @@ pub mod connection_guard;
 pub mod events;
 pub mod graphql;
 pub mod health;
+mod keyspace;
 pub mod notes;
 pub mod rate_limiter;
 pub mod sync;
@@ -183,6 +184,9 @@ async fn get_key(
         return *e;
     }
     let key = path.into_inner();
+    if keyspace::is_reserved(key.as_bytes()) {
+        return keyspace::rejected();
+    }
     match engine.get_cf("default", key.as_bytes()) {
         Ok(Some(value)) => HttpResponse::Ok()
             .content_type("application/json")
@@ -219,6 +223,9 @@ async fn put_key(
     }
 
     let key = path.into_inner();
+    if keyspace::is_reserved(key.as_bytes()) {
+        return keyspace::rejected();
+    }
 
     // Validate key
     if key.is_empty() {
@@ -282,6 +289,9 @@ async fn get_key_ttl(
         return *e;
     }
     let key = path.into_inner();
+    if keyspace::is_reserved(key.as_bytes()) {
+        return keyspace::rejected();
+    }
 
     // Check if key exists
     match engine.get_cf("default", key.as_bytes()) {
@@ -351,6 +361,9 @@ async fn update_key_ttl(
     }
 
     let key = path.into_inner();
+    if keyspace::is_reserved(key.as_bytes()) {
+        return keyspace::rejected();
+    }
 
     // Read existing value
     let value = match engine.get_cf("default", key.as_bytes()) {
@@ -400,6 +413,13 @@ async fn batch_delete_keys(
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Delete) {
         return *e;
+    }
+    if body
+        .keys
+        .iter()
+        .any(|key| keyspace::is_reserved(key.as_bytes()))
+    {
+        return keyspace::rejected();
     }
 
     // Reject writes when engine is in read-only mode
@@ -466,6 +486,10 @@ async fn delete_keys_by_prefix(
         }
     };
 
+    if keyspace::is_reserved(prefix.as_bytes()) || b"__".starts_with(prefix.as_bytes()) {
+        return keyspace::rejected();
+    }
+
     // Calculate upper bound for prefix
     let upper_bound =
         crate::core::engine::Engine::<crate::storage::cache::GlobalBlockCache>::prefix_end(&prefix);
@@ -514,6 +538,9 @@ async fn delete_key(
     }
 
     let key = path.into_inner();
+    if keyspace::is_reserved(key.as_bytes()) {
+        return keyspace::rejected();
+    }
     match engine.delete_cf("default", key.as_bytes()) {
         Ok(_) => {
             tracing::info!(
@@ -544,6 +571,13 @@ async fn get_keys(
     if let Err(e) = require_permission(&req, Permission::Read) {
         return *e;
     }
+    if query
+        .prefix
+        .as_ref()
+        .is_some_and(|prefix| keyspace::is_reserved(prefix.as_bytes()))
+    {
+        return keyspace::rejected();
+    }
     let limit = query
         .limit
         .unwrap_or(100)
@@ -552,7 +586,7 @@ async fn get_keys(
     let cursor = query.cursor.as_deref();
 
     if let Some(ref prefix) = query.prefix {
-        let (results, new_cursor) = match engine.search_prefix(prefix, cursor, limit) {
+        let (results, new_cursor) = match keyspace::prefix(&engine, prefix, cursor, limit) {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!(target: "apexstore::api", "Failed to search prefix: {:?}", e);
@@ -570,12 +604,12 @@ async fn get_keys(
             .json(json!({ "keys": keys, "cursor": new_cursor }));
     }
 
-    match engine.keys() {
+    match keyspace::scan(&engine, None, None, limit) {
         Ok(keys) => {
             let limited: Vec<String> = keys
                 .into_iter()
                 .take(limit)
-                .map(|k| String::from_utf8_lossy(&k).to_string())
+                .map(|(k, _)| String::from_utf8_lossy(&k).to_string())
                 .collect();
             HttpResponse::Ok()
                 .content_type("application/json")
@@ -619,7 +653,7 @@ async fn keys_range(
     // Request extra records to detect if there are more results
     let scan_limit = limit + 1;
 
-    match engine.scan_cf("default", adjusted_lower, adjusted_upper, Some(scan_limit)) {
+    match keyspace::scan(&engine, adjusted_lower, adjusted_upper, scan_limit) {
         Ok(records) => {
             // If cursor is set, skip the first result if it matches the cursor key
             let records: Vec<(Vec<u8>, Vec<u8>)> = records
@@ -900,6 +934,9 @@ async fn post_key(
     if let Err(e) = require_permission(&req, Permission::Write) {
         return *e;
     }
+    if keyspace::is_reserved(body.key.as_bytes()) {
+        return keyspace::rejected();
+    }
 
     // Reject writes when engine is in read-only mode
     if let Err(msg) = engine.degradation.check_write_allowed() {
@@ -1004,6 +1041,9 @@ async fn txn_put(
     if let Err(e) = require_permission(&req, Permission::Write) {
         return *e;
     }
+    if keyspace::is_reserved(body.key.as_bytes()) {
+        return keyspace::rejected();
+    }
     let txn_id = path.into_inner();
 
     // Reject writes when engine is in read-only mode
@@ -1050,6 +1090,9 @@ async fn txn_delete(
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Delete) {
         return *e;
+    }
+    if keyspace::is_reserved(body.key.as_bytes()) {
+        return keyspace::rejected();
     }
     let txn_id = path.into_inner();
 
@@ -1161,11 +1204,16 @@ async fn search_keys(
 
     let query_str = query.q.as_deref().or(query.prefix.as_deref()).unwrap_or("");
     let mode = query.mode.as_deref().unwrap_or("prefix");
+    if keyspace::is_reserved(query_str.as_bytes()) {
+        return keyspace::rejected();
+    }
 
     match mode {
         "contains" | "substring" => {
             // Substring/key-contains search
-            match engine.search_contains(query_str, limit) {
+            match keyspace::scan_matching(&engine, None, None, limit, |key, _| {
+                String::from_utf8_lossy(key).contains(query_str)
+            }) {
                 Ok(results) => {
                     let records: Vec<serde_json::Value> = results
                         .into_iter()
@@ -1193,7 +1241,7 @@ async fn search_keys(
                         .json(json!({ "error": format!("invalid regex: {}", e) }));
                 }
             };
-            match engine.scan_cf("default", None, None, Some(10000)) {
+            match keyspace::scan(&engine, None, None, 10000) {
                 Ok(results) => {
                     let filtered: Vec<serde_json::Value> = results
                         .into_iter()
@@ -1218,7 +1266,7 @@ async fn search_keys(
         _ => {
             // Default: prefix search (supports cursor pagination)
             let cursor = query.cursor.as_deref();
-            let (results, new_cursor) = match engine.search_prefix(query_str, cursor, limit) {
+            let (results, new_cursor) = match keyspace::prefix(&engine, query_str, cursor, limit) {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::error!(target: "apexstore::api", "Failed to search keys: {:?}", e);
@@ -1285,7 +1333,7 @@ async fn query_by_index(
     match engine.query_index("default", &field, &value, limit) {
         Ok(results) => {
             let records: Vec<serde_json::Value> = results
-                .into_iter()
+                .into_iter().filter(|(key, _)| !keyspace::is_reserved(key))
                 .map(|(k, v)| json!({ "key": String::from_utf8_lossy(&k), "value": String::from_utf8_lossy(&v) }))
                 .collect();
             HttpResponse::Ok()
@@ -1313,6 +1361,9 @@ async fn create_index(
     }
 
     let (key, field) = path.into_inner();
+    if keyspace::is_reserved(key.as_bytes()) {
+        return keyspace::rejected();
+    }
 
     match engine.create_index("default", &field) {
         Ok(_) => {
@@ -1377,7 +1428,9 @@ async fn value_search_keys(
 
     let limit = query.limit.unwrap_or(100).min(100); // Safety cap
 
-    match engine.value_search(&q, limit) {
+    match keyspace::scan_matching(&engine, None, None, limit, |_, value| {
+        String::from_utf8_lossy(value).contains(&q)
+    }) {
         Ok(results) => {
             let records: Vec<serde_json::Value> = results
                 .into_iter()
@@ -1405,6 +1458,13 @@ async fn batch_keys(
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Write) {
         return *e;
+    }
+    if body
+        .records
+        .iter()
+        .any(|record| keyspace::is_reserved(record.key.as_bytes()))
+    {
+        return keyspace::rejected();
     }
 
     // Reject writes when engine is in read-only mode
@@ -1496,7 +1556,7 @@ async fn scan_keys(
     // Always +1 to check for more pages beyond the current limit.
     let scan_limit = limit + 1;
 
-    match engine.scan_cf("default", adjusted_lower, adjusted_upper, Some(scan_limit)) {
+    match keyspace::scan(&engine, adjusted_lower, adjusted_upper, scan_limit) {
         Ok(records) => {
             // If cursor is set, skip the first result if it matches the cursor key
             let records: Vec<(Vec<u8>, Vec<u8>)> = records
@@ -1763,7 +1823,9 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     rl_state.set_endpoint_limit("/admin/compact", 5);
     rl_state.set_endpoint_limit("/admin/flush", 5);
     let rate_limiter_state = web::Data::new(rl_state);
-    let token_manager = web::Data::new(TokenManager::new_with_engine(engine.clone()));
+    let token_manager = web::Data::new(
+        TokenManager::new_with_engine(engine.clone()).map_err(std::io::Error::other)?,
+    );
     let auth_enabled = web::Data::new(config::AuthEnabled(config.auth.enabled));
     let graphql_schema = web::Data::new(graphql::build_schema(engine.clone()));
     let note_engine = web::Data::new(crate::notes::NoteEngine::new(engine.clone()));
