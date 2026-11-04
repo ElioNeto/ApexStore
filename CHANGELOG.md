@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security and reliability updates
 
+- Require Write permission for WebSocket sync, revalidate live token permissions on messages, reject reserved keys, and filter broadcasts/replies by per-key Read policies. Report storage errors before acknowledging changes and preserve the winning CRDT value on stale updates.
+
 - Avoid scanning the keyspace for secondary-index schemas when writing non-JSON values; retain WAL durability and verify binary/text data across flush and restart.
 
 - Upgrade the dashboard to Angular 21 and compatible build tools; enforce the high/critical npm audit gate and reject empty browser test suites. Preserve zone-based change detection during the upgrade.
@@ -27,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Make compaction stress input reproducible and correct the property-test reference model for repeated keys.
 
 ### API compatibility notes
+
+- `SyncManager::apply_change` now returns `Result<()>`; callers must handle persistence failures. WebSocket clients receive an error response for rejected writes instead of a success acknowledgement. A Write-only token may send updates but needs explicit Read permission to receive values.
 
 - The server uses `HttpAuthentication::with_fn(request_validator)` to honor explicit authentication disablement without a Bearer header. Only `GET /health/liveness` is public; readiness, startup, detailed health and data routes still require authentication. Custom Actix applications can use the same validator.
 
