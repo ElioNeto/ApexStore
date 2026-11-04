@@ -184,7 +184,7 @@
 <ul>
 <li><strong>Type</strong>: Bearer Token</li>
 <li><strong>Algorithm</strong>: SHA-256 hashing</li>
-<li><strong>Storage</strong>: In-memory (tokens lost on restart)</li>
+<li><strong>Storage</strong>: Private, durable snapshot at <code>&lt;DATA_DIR&gt;/.apex-auth/tokens.json</code>; only token hashes and metadata are stored</li>
 <li><strong>Permissions</strong>: Read, Write, Delete, Admin</li>
 </ul>
 <h2 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h2>
@@ -193,12 +193,18 @@
 <pre><code class="language-bash">API_AUTH_ENABLED=true
 API_TOKEN_EXPIRY_DAYS=30
 </code></pre>
-<h3 id="2-start-the-server"><a class="header" href="#2-start-the-server">2. Start the Server</a></h3>
-<pre><code class="language-bash">cargo run --features api --bin apexstore-server
+<h3 id="2-create-an-administrator-offline"><a class="header" href="#2-create-an-administrator-offline">2. Create an Administrator Offline</a></h3>
+<p>Stop the server before using the CLI against its database directory. Create the first administrator locally and save the printed token securely:</p>
+<pre><code class="language-bash">apexstore-cli --db ./apexstore_data token create local-admin --permissions admin
 </code></pre>
-<h3 id="3-create-a-token"><a class="header" href="#3-create-a-token">3. Create a Token</a></h3>
+<p>Use the same directory as the server's <code>DATA_DIR</code>. The CLI and server share the private credential store; a database lock prevents simultaneous offline administration and server access.</p>
+<h3 id="3-start-the-server"><a class="header" href="#3-start-the-server">3. Start the Server</a></h3>
+<pre><code class="language-bash">DATA_DIR=./apexstore_data cargo run --features api --bin apexstore-server
+</code></pre>
+<h3 id="4-create-an-application-token"><a class="header" href="#4-create-an-application-token">4. Create an Application Token</a></h3>
 <p><strong>Request:</strong></p>
 <pre><code class="language-bash">curl -X POST http://localhost:8080/admin/tokens \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "production-api",
@@ -220,18 +226,28 @@ API_TOKEN_EXPIRY_DAYS=30
 }
 </code></pre>
 <p>⚠️ <strong>Important</strong>: Save the token immediately! It will not be shown again.</p>
-<h3 id="4-use-the-token"><a class="header" href="#4-use-the-token">4. Use the Token</a></h3>
+<h3 id="5-use-the-token"><a class="header" href="#5-use-the-token">5. Use the Token</a></h3>
 <p>Include the token in the <code>Authorization</code> header:</p>
 <pre><code class="language-bash">curl -X POST http://localhost:8080/keys \
   -H "Authorization: Bearer apx_a1b2c3d4e5f6..." \
   -H "Content-Type: application/json" \
   -d '{"key": "user:1", "value": "Alice"}'
 </code></pre>
+<h2 id="credential-storage-and-upgrades"><a class="header" href="#credential-storage-and-upgrades">Credential Storage and Upgrades</a></h2>
+<p>Credentials are isolated from the public LSM keyspace. Each update writes and syncs a temporary snapshot, atomically replaces the credential file, then syncs its directory on Unix. The directory is mode <code>0700</code> and the snapshot mode <code>0600</code> on Unix. Token hashes and metadata are protected by filesystem permissions; this file is not encrypted by SSTable/WAL encryption. Include <code>.apex-auth</code> when backing up or relocating the complete data directory, and restrict access to that backup. An LSM-only snapshot does not include credentials.</p>
+<p>Loading malformed, unsupported or inaccessible credential storage fails server startup. It never falls back to an empty credential set. Concurrent owners of the credential store are rejected. <code>TokenManager::new_with_engine</code> now returns <code>Result&lt;TokenManager, AuthError&gt;</code>; library callers must handle the error.</p>
+<p>Versions that stored credentials as <code>__token:*</code> records allowed public data writes to impersonate administrators. Those legacy records cannot be distinguished from forged credentials and are <strong>never imported automatically</strong>. Before upgrading an existing deployment:</p>
+<ol>
+<li>Stop the server and retain a backup for investigation/recovery.</li>
+<li>Use the upgraded offline CLI against the same database directory to create a replacement administrator, as shown above.</li>
+<li>Restart with authentication enabled, create replacement application tokens and update clients. Old public-keyspace tokens no longer authenticate.</li>
+</ol>
+<p>Do not copy legacy token JSON into the private file. Public key-value routes reject keys beginning with <code>__</code> (including <code>__token:</code>, <code>__ttl:</code>, <code>__index:</code> and <code>__idx:</code>), and public scans/searches hide legacy metadata. Batch and transaction key operations enforce the same boundary. Prefix deletion also rejects <code>_</code>, because that range includes reserved keys. GraphQL returns no reserved-key value and refuses reserved-key mutations.</p>
 <h2 id="permission-levels"><a class="header" href="#permission-levels">Permission Levels</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>Permission</th><th>Description</th><th>Grants Access To</th></tr></thead><tbody>
 <tr><td><code>Read</code></td><td>Read-only access</td><td>GET endpoints</td></tr>
-<tr><td><code>Write</code></td><td>Write access (includes Read)</td><td>POST, GET endpoints</td></tr>
-<tr><td><code>Delete</code></td><td>Delete access (includes Read)</td><td>DELETE, GET endpoints</td></tr>
+<tr><td><code>Write</code></td><td>Write access; grant Read separately when needed</td><td>PUT, POST and mutation endpoints</td></tr>
+<tr><td><code>Delete</code></td><td>Delete access; grant Read separately when needed</td><td>DELETE endpoints</td></tr>
 <tr><td><code>Admin</code></td><td>Full access</td><td>All endpoints including <code>/admin/*</code></td></tr>
 </tbody></table>
 </div>
@@ -275,7 +291,7 @@ Authorization: Bearer &lt;admin-token&gt;
 <h2 id="public-endpoints"><a class="header" href="#public-endpoints">Public Endpoints</a></h2>
 <p>These endpoints do NOT require authentication:</p>
 <ul>
-<li><code>GET /health/liveness</code>, <code>/health/readiness</code>, <code>/health/startup</code>, <code>/health/check</code> - Health probes</li>
+<li><code>GET /health/liveness</code> — other health endpoints require authentication</li>
 </ul>
 <h2 id="protected-endpoints"><a class="header" href="#protected-endpoints">Protected Endpoints</a></h2>
 <p>All other endpoints require valid Bearer token when authentication is enabled:</p>
