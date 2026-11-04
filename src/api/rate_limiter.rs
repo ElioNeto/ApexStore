@@ -276,25 +276,18 @@ where
 
 /// Extract the client IP address from a request.
 ///
-/// Checks the `X-Forwarded-For` header first (taking the first IP from the
-/// comma-separated list), which is the standard for reverse proxy deployments.
-/// Falls back to the direct peer address (socket's remote IP) when the header
-/// is not present or cannot be parsed.
+/// Use the transport peer as the identity until a trusted-proxy policy is
+/// explicitly configured. Forwarding headers are attacker-controlled and must
+/// never create a fresh bucket or erase an otherwise known peer address.
 pub fn get_client_ip(req: &ServiceRequest) -> Option<IpAddr> {
-    // 1. Try X-Forwarded-For header (first IP in the list)
-    if let Some(xff) = req.headers().get("X-Forwarded-For") {
-        if let Some(ip) = parse_x_forwarded_for(xff.to_str().ok()?) {
-            return Some(ip);
-        }
-    }
-    // 2. Fallback to direct peer address
     req.peer_addr().map(|s| s.ip())
 }
 
 /// Parse the first IP address from an `X-Forwarded-For` header value.
 ///
 /// The header may contain a comma-separated list of IP addresses; this function
-/// returns only the first (leftmost) one, which represents the original client.
+/// returns only the first (leftmost) one. This is a parsing utility: the result
+/// is untrusted and must not be used as an authenticated client identity.
 ///
 /// Returns `None` when the value is empty, unparseable, or contains no valid IP.
 pub fn parse_x_forwarded_for(value: &str) -> Option<IpAddr> {

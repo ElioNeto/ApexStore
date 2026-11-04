@@ -77,6 +77,14 @@ not a concrete key URL. A zero endpoint cap disables only that additional cap.
 The admin rate-limit summary reports both per-IP and per-route accepted counts
 in the last 60 seconds; requests with both caps disabled are not tracked.
 
+The current rate limiter identifies clients by the TCP peer address, matching
+the concurrent connection guard. It ignores `X-Forwarded-For` and `Forwarded`,
+including malformed values. Clients cannot reset their budget by changing a
+header. Behind a reverse proxy, clients share that proxy's peer-address budget;
+apply individual client limits at the proxy as well. Configurable trusted-proxy
+CIDRs and right-to-left forwarding-chain resolution are not implemented yet.
+Do not rely on the old leftmost `X-Forwarded-For` behavior for attribution.
+
 ## LSM Engine Configuration
 
 ### Storage Settings
