@@ -12,13 +12,27 @@ use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
 use actix_web::web::Data;
 use actix_web::Error;
 use parking_lot::Mutex;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::future::{ready, Ready};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
 
 /// Default maximum number of concurrent requests allowed per IP address.
 pub const MAX_CONNECTIONS_PER_IP: usize = 100;
+
+/// Default maximum distinct IPs with in-flight requests, shared by all workers.
+pub const DEFAULT_MAX_TRACKED_IPS: usize = 16_384;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnectionLimitSummary {
+    pub tracked_ip_count: usize,
+    pub max_tracked_ips: usize,
+    pub active_requests: usize,
+    pub max_per_ip: usize,
+    pub capacity_rejections: u64,
+}
 
 /// Guard that tracks per-IP concurrent connections.
 ///
@@ -28,14 +42,24 @@ pub struct IpConnectionGuard {
     connections: Mutex<HashMap<String, usize>>,
     /// Maximum number of concurrent requests allowed per IP.
     max_per_ip: usize,
+    max_tracked_ips: usize,
+    capacity_rejections: AtomicU64,
 }
 
 impl IpConnectionGuard {
     /// Create a new empty guard with the given per-IP limit.
     pub fn new(max_per_ip: usize) -> Self {
+        Self::with_capacity(max_per_ip, DEFAULT_MAX_TRACKED_IPS)
+    }
+
+    /// Refuse new peers at capacity without evicting live connection counts.
+    /// Zero capacity rejects every new peer.
+    pub fn with_capacity(max_per_ip: usize, max_tracked_ips: usize) -> Self {
         Self {
             connections: Mutex::new(HashMap::new()),
             max_per_ip,
+            max_tracked_ips,
+            capacity_rejections: AtomicU64::new(0),
         }
     }
 
@@ -50,12 +74,34 @@ impl IpConnectionGuard {
     /// Try to acquire a connection slot for `ip` with an explicit max (used by tests).
     pub fn try_acquire_with_max(&self, ip: &str, max_per_ip: usize) -> bool {
         let mut map = self.connections.lock();
-        let count = map.entry(ip.to_string()).or_insert(0);
-        if *count >= max_per_ip {
+        if max_per_ip == 0 {
             return false;
         }
-        *count += 1;
+        if let Some(count) = map.get_mut(ip) {
+            if *count >= max_per_ip {
+                return false;
+            }
+            *count += 1;
+            return true;
+        }
+        if map.len() >= self.max_tracked_ips {
+            self.capacity_rejections.fetch_add(1, Ordering::Relaxed);
+            return false;
+        }
+        map.insert(ip.to_owned(), 1);
         true
+    }
+
+    /// Snapshot of occupied slots and capacity-pressure rejections.
+    pub fn get_state(&self) -> ConnectionLimitSummary {
+        let map = self.connections.lock();
+        ConnectionLimitSummary {
+            tracked_ip_count: map.len(),
+            max_tracked_ips: self.max_tracked_ips,
+            active_requests: map.values().copied().fold(0, usize::saturating_add),
+            max_per_ip: self.max_per_ip,
+            capacity_rejections: self.capacity_rejections.load(Ordering::Relaxed),
+        }
     }
 
     /// Returns the configured per-IP limit.
@@ -162,6 +208,108 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tracking_capacity_is_atomic_and_existing_peers_keep_their_slots() {
+        let guard = IpConnectionGuard::with_capacity(2, 3);
+        let barrier = std::sync::Barrier::new(20);
+        let accepted = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..20)
+                .map(|i| {
+                    let guard = &guard;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        guard.try_acquire(&format!("peer-{i}"))
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| usize::from(h.join().unwrap()))
+                .sum::<usize>()
+        });
+        assert_eq!(accepted, 3);
+        let peers: Vec<_> = guard.connections.lock().keys().cloned().collect();
+        for peer in &peers {
+            assert!(guard.try_acquire(peer));
+            assert!(!guard.try_acquire(peer));
+        }
+        let summary = guard.get_state();
+        assert_eq!(summary.tracked_ip_count, 3);
+        assert_eq!(summary.active_requests, 6);
+        assert_eq!(summary.capacity_rejections, 17);
+        guard.release(&peers[0]);
+        assert!(!guard.try_acquire("new-peer"));
+        guard.release(&peers[0]);
+        assert!(guard.try_acquire("new-peer"));
+        let zero = IpConnectionGuard::with_capacity(1, 0);
+        assert!(!zero.try_acquire("peer"));
+        assert_eq!(zero.get_state().tracked_ip_count, 0);
+    }
+
+    #[actix_web::test]
+    async fn tracking_capacity_middleware_frees_admission_after_cancellation() {
+        let guard = Data::new(IpConnectionGuard::with_capacity(2, 1));
+        let service = ConnectionLimiter
+            .new_transform(actix_web::dev::fn_service(
+                |req: ServiceRequest| async move {
+                    std::future::pending::<()>().await;
+                    Ok::<_, Error>(req.into_response(actix_web::HttpResponse::Ok().finish()))
+                },
+            ))
+            .await
+            .unwrap();
+        let request = |ip: &str| {
+            actix_web::test::TestRequest::default()
+                .peer_addr(ip.parse().unwrap())
+                .app_data(guard.clone())
+                .to_srv_request()
+        };
+        let first = service.call(request("192.0.2.1:1"));
+        let same_peer = service.call(request("192.0.2.1:2"));
+        let rejected = service.call(request("192.0.2.2:1")).await.unwrap_err();
+        assert_eq!(
+            rejected.as_response_error().status_code(),
+            actix_web::http::StatusCode::TOO_MANY_REQUESTS
+        );
+        drop(first);
+        assert!(service.call(request("192.0.2.2:1")).await.is_err());
+        drop(same_peer);
+        let admitted = service.call(request("192.0.2.2:1"));
+        assert_eq!(guard.get_state().tracked_ip_count, 1);
+        assert_eq!(guard.get_state().active_requests, 1);
+        assert_eq!(guard.get_state().capacity_rejections, 2);
+        drop(admitted);
+        assert_eq!(guard.get_state().tracked_ip_count, 0);
+    }
+
+    #[test]
+    fn tracking_capacity_preserves_live_counts_when_full() {
+        let guard = IpConnectionGuard::new(1);
+        for ip in 0..16_384 {
+            assert!(guard.try_acquire(&format!("peer-{ip}")));
+        }
+        assert!(
+            !guard.try_acquire("overflow"),
+            "accepted more than the tracking capacity"
+        );
+        assert!(!guard.try_acquire("peer-0"), "lost a live connection count");
+        guard.release("peer-0");
+        assert!(guard.try_acquire("overflow"));
+    }
+
+    #[test]
+    fn tracking_capacity_rejections_with_zero_limit_do_not_allocate() {
+        let guard = IpConnectionGuard::new(0);
+        for ip in 0..1000 {
+            assert!(!guard.try_acquire(&format!("peer-{ip}")));
+        }
+        assert!(
+            guard.connections.lock().is_empty(),
+            "rejected peers leaked map entries"
+        );
+    }
 
     #[test]
     fn test_try_acquire_allows_under_limit() {
