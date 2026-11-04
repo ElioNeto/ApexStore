@@ -55,7 +55,8 @@ pub struct SstableBuilder {
 
 impl SstableBuilder {
     pub fn new(path: PathBuf, config: StorageConfig, timestamp: u128) -> Result<Self> {
-        Self::new_with_encryption(path, config, timestamp, &EncryptionConfig::default())
+        let encryption = EncryptionConfig::from_storage_config(&config)?;
+        Self::new_with_encryption(path, config, timestamp, &encryption)
     }
 
     pub fn new_with_encryption(

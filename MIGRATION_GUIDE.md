@@ -223,9 +223,8 @@ A missing encryption key or AES-GCM authentication failure aborts discovery or
 snapshot preflight without moving any SSTables. Authentication failure can mean
 a wrong key or damaged ciphertext; preserve the originals and verify the key
 before attempting recovery. Plaintext `LSMSST03` files remain readable when an
-encryption key is configured for `LSMSST04` files. This change does not migrate
-legacy zero-key encryption or change encryption defaults; those require the
-separate encryption migration work.
+encryption key is configured for `LSMSST04` files. Legacy zero-key files require the explicit offline migration below; automatic
+recovery never rewrites them.
 
 Quarantined files live in `sstables/quarantine/`. Each file has a sibling
 `<name>.sst.quarantine-reason` JSON file with `original_filename`, `error`,
@@ -260,8 +259,7 @@ can also indicate damaged ciphertext: retain a backup before investigating.
 
 Plaintext V0/V1/V2 frames retain their compatibility behavior, and mixed V2/V3
 logs remain readable with the correct key. Existing handling of physical CRC
-failures and partial frames is unchanged. This is a recovery safeguard, not the
-legacy zero-key migration or the final encryption-default change from #411.
+failures and partial frames is unchanged. Use the explicit offline migration below for legacy zero-key logs.
 
 ## Compaction encryption configuration
 
@@ -274,5 +272,88 @@ restarting still requires restoring the correct key configuration.
 When encryption is disabled, compacted SSTables retain the plaintext `LSMSST03`
 format. With a nonzero key, output remains `LSMSST04` under that same key. This
 also applies when invoking a built-in strategy directly: the runtime options
-are authoritative for encryption. Existing incorrectly encrypted outputs still
-require the explicit migration/recovery work tracked in #411.
+are authoritative for encryption. Existing zero-key outputs must be migrated explicitly before reopening with
+the new defaults.
+
+## Upgrade: explicit encryption and legacy zero-key migration
+
+Encryption is now **disabled by default**, consistently for programmatic and
+serialized application configuration. Set `encryption_enabled = true` only with
+a valid nonzero 32-byte key file (64 hexadecimal characters). Missing, unreadable,
+malformed and all-zero key files fail construction before the engine opens its
+storage. The server accepts `ENCRYPTION_ENABLED=true` and
+`ENCRYPTION_KEY_PATH=/run/secrets/apexstore.key`; invalid booleans fail startup.
+The CLI enables encryption when `--encrypt-key-file` is supplied.
+
+This is a compatibility change. Older defaults wrote `LSMSST04` files and V3 WAL
+frames with a publicly known all-zero key. Startup diagnoses that format and
+names `migrate-encryption`; it does not silently use the legacy key or quarantine
+those files. Retain the originals and any backups while migrating.
+
+Stop all servers and CLI processes using the source database. Store keys outside
+the database directory. Choose an output directory that does not exist, under an
+existing parent, outside the source. To migrate legacy zero-key data:
+
+```bash
+apexstore-cli --db /data/old migrate-encryption --legacy-zero-key \
+  --output /data/migrated --target-key-file /run/secrets/apexstore.key
+```
+
+To explicitly remove encryption instead:
+
+```bash
+apexstore-cli --db /data/old migrate-encryption --legacy-zero-key \
+  --output /data/plaintext --plaintext
+```
+
+For rotation from a real key, replace `--legacy-zero-key` with
+`--source-key-file /run/secrets/old.key`. Omit both source options for a plaintext
+source. The target must always be selected explicitly: `--target-key-file` or
+`--plaintext`. Migration never generates or prints a key.
+
+The command acquires the source database lock and refuses live nested databases.
+It rewrites SSTables and every WAL frame into a private staging directory,
+retaining record timestamps, expiration, tombstones, range tombstones, column
+family metadata and frame ordering. Existing manifests and ancillary files are
+copied without rewriting their contents. Snapshots under the source tree are
+also converted. Bloom filters are rebuilt from the retained records. The command
+does not reconstruct missing manifests or repair corrupted records.
+
+Any checksum, decoding, authentication or record-count failure aborts migration;
+partial WAL frames are rejected rather than discarded. Symlinks and special
+files are refused. Failed conversion removes its staging directory and leaves
+the original data intact. Successful conversion publishes the staged directory
+with an OS-enforced atomic rename without replacement and reports SSTable/frame/file
+counts as JSON. The migration command currently requires Linux/Android, Apple or
+Redox with filesystem support for this operation; other platforms fail safely.
+Existing output directories are refused. The original database is retained, including its old
+ciphertext, and should be archived according to your data-retention policy.
+
+Verify the destination before switching applications to it:
+
+```bash
+apexstore-cli --db /data/migrated --encrypt-key-file /run/secrets/apexstore.key stats
+# For a plaintext destination, omit --encrypt-key-file.
+```
+
+Update the application's data directory and key configuration together. Keep the
+key available for future restarts; a running engine retains the loaded key but a
+restart does not recover it from its SSTables or WAL.
+
+Library compatibility changes: replace `EngineOptions::from(&config)` and the
+infallible `from_config` with `EngineOptions::try_from_config(&config)?` or
+`EngineOptions::try_from(&config)?`. The standalone `SstableBuilder::new` and
+`SstableReader::open` constructors also validate the supplied encryption settings
+before accessing the table. `EncryptionConfig` no longer implements serde
+serialization/deserialization; its Debug is redacted and its key is zeroized on
+drop. Serialized layout-only `storage::config::StorageConfig` omits runtime
+encryption and rejects an embedded encryption field. Use the application's
+`infra::config::StorageConfig` key-path settings to reload keys explicitly.
+
+The scrubber accepts a loaded key through `scrub_file_with_encryption` or
+`DataScrubber::new_with_encryption`. Without the necessary key, `skipped = true`
+and `valid = false` distinguish an unverified file from corruption; no file is
+moved. With the key it verifies both CRC32 and encrypted block authentication.
+
+These constructor/serde changes require a semver review before crate publication;
+they must not be published as an automatic patch release.

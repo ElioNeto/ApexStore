@@ -522,6 +522,7 @@ dependencies = [
  "rcgen",
  "regex-lite",
  "reqwest 0.12.28",
+ "rustix 1.1.6",
  "rustls",
  "rustls-pemfile",
  "serde",
@@ -542,6 +543,7 @@ dependencies = [
  "ureq",
  "uuid",
  "wasmtime",
+ "zeroize",
 ]
 
 [[package]]

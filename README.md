@@ -36,7 +36,7 @@ While industry giants like RocksDB or LevelDB focus on extreme complexity, ApexS
 - **Educational Clarity**: A clean, modular implementation of LSM-Tree that serves as a blueprint for high-performance systems.
 - **Strict SOLID Compliance**: Leveraging Rust's ownership model to enforce clear boundaries between MemTable, WAL, and SSTable layers.
 - **Observability First**: Built-in real-time metrics for memory, disk usage, and WAL health.
-- **Modern Defaults**: Native LZ4 compression, Bloom Filters, encryption-at-rest (AES-GCM), and 45+ tunable parameters via environment variables.
+- **Modern Defaults**: Native LZ4 compression, Bloom Filters, opt-in encryption-at-rest (AES-GCM), and 45+ tunable parameters via environment variables.
 - **Security Hardened**: TLS/HTTPS support, CORS enforcement, rate limiting, per-IP connection limits, audit logging, and CSRF protection.
 
 ## 📊 Performance Benchmarks
@@ -195,7 +195,7 @@ CI runner is shared and its absolute numbers are not comparable between runs.
 - **SSTable V2**: Block-based storage with Sparse Indexing, LZ4 Compression, and AES-GCM encryption.
 - **Bloom Filters**: Drastically reduces unnecessary disk I/O for read operations.
 - **Crash Recovery**: Automatic WAL replay on startup + SSTable auto-repair (truncated files detected and quarantined).
-- **Encryption at Rest**: AES-256-GCM for SSTable blocks (`LSMSST04`) and WAL frames (V3). ⚠️ Enabled by default, but when no key file is supplied the engine falls back to an **all-zero key**, which provides no confidentiality. Supply a key with the CLI's `--encrypt-key-file`, or disable encryption explicitly.
+- **Encryption at Rest**: AES-256-GCM for SSTable blocks (`LSMSST04`) and WAL frames (V3). Disabled by default. Enabling encryption requires a valid nonzero key through `--encrypt-key-file` or `ENCRYPTION_ENABLED=true` plus `ENCRYPTION_KEY_PATH`. Missing/invalid keys fail startup. Legacy zero-key files require the explicit offline migration in [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md).
 - **Range Deletion**: Efficient range tombstone support with compaction-aware filtering.
 
 ### 🔐 Security
@@ -387,7 +387,8 @@ ApexStore is configured via environment variables:
 | `CORS_ENABLED` | `false` | Enable CORS middleware |
 | `RATE_LIMIT_ENABLED` | `true` | Enable rate limiting |
 | `MAX_CONNECTIONS_PER_IP` | `100` | Max concurrent connections per IP |
-| `ENCRYPTION_ENABLED` | `true` | Enable data encryption at rest |
+| `ENCRYPTION_ENABLED` | `false` | Enable encryption with a valid nonzero key |
+| `ENCRYPTION_KEY_PATH` | unset | Hex-encoded 32-byte key file, outside DATA_DIR |
 | `WAL_SYNC_INTERVAL` | `4` | WAL fsync interval (writes between syncs) |
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for a complete list.

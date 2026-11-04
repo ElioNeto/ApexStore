@@ -137,8 +137,9 @@ impl Default for EngineOptions {
     }
 }
 
-impl From<&crate::infra::config::LsmConfig> for EngineOptions {
-    fn from(config: &crate::infra::config::LsmConfig) -> Self {
+impl TryFrom<&crate::infra::config::LsmConfig> for EngineOptions {
+    type Error = crate::LsmError;
+    fn try_from(config: &crate::infra::config::LsmConfig) -> Result<Self> {
         let compaction_options = CompactionOptions {
             strategy_type: config.compaction.strategy.clone().into(),
             compaction_threshold: config.compaction.min_compaction_threshold,
@@ -146,43 +147,9 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             max_concurrent_compactions: 2,
         };
 
-        // Build encryption config from the config.
-        //
-        // NOTE: a failure here currently falls back to `EncryptionConfig::default()`,
-        // which is `enabled: true` with an all-zero key. That is a known security
-        // defect kept for on-disk compatibility -- changing it would make existing
-        // zero-key SSTables and WAL frames unreadable. Until a migration path
-        // lands, the failure is at least logged loudly instead of being discarded.
-        let encryption = if config.storage.encryption_enabled {
-            match config.storage.encryption_key_path.as_deref() {
-                Some(path) => match EncryptionConfig::from_key_path(Some(path)) {
-                    Ok(cfg) => cfg,
-                    Err(e) => {
-                        tracing::error!(
-                            target: "apexstore::security",
-                            key_path = %path,
-                            error = %e,
-                            "encryption enabled but key file unreadable; using an ALL-ZERO key with no confidentiality"
-                        );
-                        EncryptionConfig::default()
-                    }
-                },
-                None => {
-                    tracing::error!(
-                        target: "apexstore::security",
-                        "encryption enabled but no key path provided; using an ALL-ZERO key with no confidentiality"
-                    );
-                    EncryptionConfig::default()
-                }
-            }
-        } else {
-            crate::storage::encryption::EncryptionConfig {
-                enabled: false,
-                ..Default::default()
-            }
-        };
+        let encryption = EncryptionConfig::from_storage_config(&config.storage)?;
 
-        Self {
+        Ok(Self {
             block_size: config.storage.block_size,
             bloom_bits_per_key: 10,
             max_table_size: 1024 * 1024,
@@ -196,14 +163,14 @@ impl From<&crate::infra::config::LsmConfig> for EngineOptions {
             default_ttl: None,
             encryption,
             wal_sync_interval: config.wal.sync_interval,
-        }
+        })
     }
 }
 
 impl EngineOptions {
     /// Create EngineOptions from LsmConfig
-    pub fn from_config(config: &crate::infra::config::LsmConfig) -> Self {
-        config.into()
+    pub fn try_from_config(config: &crate::infra::config::LsmConfig) -> Result<Self> {
+        config.try_into()
     }
 }
 
@@ -564,6 +531,9 @@ impl<C: Cache> Engine<C> {
         cache: C,
         dir_path: &std::path::Path,
     ) -> Result<Self> {
+        if options.encryption.enabled && options.encryption.key == [0; 32] {
+            return Err(crate::LsmError::LegacyEncryptionMigrationRequired);
+        }
         // Create SSTable directory
         let sst_dir = dir_path.join("sstables");
         std::fs::create_dir_all(&sst_dir)?;
@@ -792,7 +762,7 @@ impl<C: Cache> Engine<C> {
 
     /// Create a new engine from an `LsmConfig` (the app-level config).
     pub fn new_from_config(config: &crate::infra::config::LsmConfig, cache: C) -> Result<Self> {
-        let options: EngineOptions = config.into();
+        let options = EngineOptions::try_from_config(config)?;
         let dir_path = std::path::PathBuf::from(&config.core.dir_path);
         let mut engine = Self::new_generic(options, cache, &dir_path)?;
 

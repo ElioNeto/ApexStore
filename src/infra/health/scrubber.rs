@@ -15,8 +15,8 @@ use std::thread;
 use std::time::Duration;
 
 use crate::core::engine::Engine;
-use crate::storage::builder::MetaBlock;
 use crate::storage::cache::Cache;
+use crate::storage::encryption::EncryptionConfig;
 
 /// Outcome of a single scrub operation on one SSTable file.
 #[derive(Debug, Clone)]
@@ -25,6 +25,8 @@ pub struct ScrubResult {
     pub file_path: PathBuf,
     /// Whether the checksum verification passed (no corrupt blocks).
     pub valid: bool,
+    /// Verification was not possible without the correct key; not proof of corruption.
+    pub skipped: bool,
     /// Total number of data blocks in the file.
     pub total_blocks: usize,
     /// Number of blocks with valid CRC32.
@@ -43,6 +45,7 @@ pub struct ScrubResult {
 pub struct DataScrubber {
     /// Directory containing SSTable files to scrub.
     sst_dir: String,
+    encryption: EncryptionConfig,
     /// Results of the most recent scrub cycle.
     results: Arc<Mutex<Vec<ScrubResult>>>,
     /// Flag to stop the background thread.
@@ -54,8 +57,14 @@ pub struct DataScrubber {
 impl DataScrubber {
     /// Create a new data scrubber targeting the given SSTable directory.
     pub fn new(sst_dir: impl Into<String>) -> Self {
+        Self::new_with_encryption(sst_dir, EncryptionConfig::default())
+    }
+
+    /// Scrub encrypted SSTables using a loaded runtime key.
+    pub fn new_with_encryption(sst_dir: impl Into<String>, encryption: EncryptionConfig) -> Self {
         Self {
             sst_dir: sst_dir.into(),
+            encryption,
             results: Arc::new(Mutex::new(Vec::new())),
             stopped: Arc::new(AtomicBool::new(false)),
             handle: None,
@@ -69,13 +78,14 @@ impl DataScrubber {
     /// CRC32 checksums.
     pub fn start_scrubbing(&mut self, interval: Duration) {
         let sst_dir = self.sst_dir.clone();
+        let encryption = self.encryption.clone();
         let results = self.results.clone();
         let stopped = self.stopped.clone();
 
         self.handle = Some(thread::spawn(move || {
             while !stopped.load(Ordering::Relaxed) {
                 // Run one scrub cycle
-                let cycle_results = scrub_sst_directory(&sst_dir);
+                let cycle_results = scrub_sst_directory(&sst_dir, &encryption);
                 if let Ok(scrub_results) = cycle_results {
                     let mut res = results.lock().unwrap();
                     *res = scrub_results;
@@ -106,7 +116,10 @@ impl DataScrubber {
 
 /// Scrub all `*.sst` files in the given directory by reading them and checking
 /// CRC32 checksums.
-fn scrub_sst_directory(dir: &str) -> std::result::Result<Vec<ScrubResult>, String> {
+fn scrub_sst_directory(
+    dir: &str,
+    encryption: &EncryptionConfig,
+) -> std::result::Result<Vec<ScrubResult>, String> {
     let path = Path::new(dir);
     let mut results = Vec::new();
 
@@ -121,7 +134,7 @@ fn scrub_sst_directory(dir: &str) -> std::result::Result<Vec<ScrubResult>, Strin
             continue;
         }
 
-        let result = scrub_file(&file_path);
+        let result = scrub_file_with_encryption(&file_path, encryption);
         results.push(result);
     }
 
@@ -140,107 +153,45 @@ fn scrub_sst_directory(dir: &str) -> std::result::Result<Vec<ScrubResult>, Strin
 /// - For each data block, reads the compressed data + its 4-byte CRC32 trailer
 ///   and verifies the CRC32 matches the stored value
 ///
-/// Encrypted SSTables (`LSMSST04`) are reported as invalid because the scrubber
-/// does not have access to the encryption key to read the meta block.
+/// Encrypted files without an available key are explicitly `skipped`.
 pub fn scrub_file<P: AsRef<Path>>(path: P) -> ScrubResult {
-    use std::io::{Read, Seek, SeekFrom};
+    scrub_file_with_encryption(path, &EncryptionConfig::default())
+}
 
+/// Verify CRC32 and encrypted block authentication with the provided runtime key.
+pub fn scrub_file_with_encryption<P: AsRef<Path>>(
+    path: P,
+    encryption: &EncryptionConfig,
+) -> ScrubResult {
+    use crate::LsmError;
+    use std::io::{Read, Seek, SeekFrom};
     let path = path.as_ref();
     let file_path = path.to_path_buf();
-
-    // Helper to build an error result early
-    let error_result = |msg: String| -> ScrubResult {
-        ScrubResult {
-            file_path: file_path.clone(),
-            valid: false,
-            total_blocks: 0,
-            verified_blocks: 0,
-            corrupt_blocks: 0,
-            total_bytes: 0,
-            corrupt_bytes: 0,
-            errors: vec![msg],
-        }
+    let error_result = |msg: String, skipped: bool| ScrubResult {
+        file_path: file_path.clone(),
+        valid: false,
+        skipped,
+        total_blocks: 0,
+        verified_blocks: 0,
+        corrupt_blocks: 0,
+        total_bytes: 0,
+        corrupt_bytes: 0,
+        errors: vec![msg],
     };
-
     let mut file = match std::fs::File::open(path) {
-        Ok(f) => f,
-        Err(e) => return error_result(format!("Failed to open file: {}", e)),
+        Ok(file) => file,
+        Err(error) => return error_result(format!("Failed to open file: {error}"), false),
     };
-
-    let file_len = match file.metadata() {
-        Ok(m) => m.len(),
-        Err(e) => return error_result(format!("Failed to get file metadata: {}", e)),
-    };
-
-    // Minimum size: magic (8) + at least one data block (1) + footer (8)
-    if file_len < 17 {
-        return error_result("File too small to contain valid SSTable".to_string());
-    }
-
-    // Read and validate magic number
-    let mut magic = [0u8; 8];
-    if file.read_exact(&mut magic).is_err() {
-        return error_result("Failed to read magic number".to_string());
-    }
-
-    if &magic != b"LSMSST03" && &magic != b"LSMSST04" {
-        return error_result(format!(
-            "Invalid magic number: expected LSMSST03 or LSMSST04, got {:?}",
-            magic
-        ));
-    }
-
-    // Encrypted SSTables require the encryption key to read the meta block
-    if &magic == b"LSMSST04" {
-        return error_result(
-            "Cannot verify CRC32 of encrypted SSTable without encryption key".to_string(),
-        );
-    }
-
-    // Read footer (last 8 bytes) to get meta block offset
-    if file.seek(SeekFrom::End(-8)).is_err() {
-        return error_result("Failed to seek to footer".to_string());
-    }
-
-    let mut footer_bytes = [0u8; 8];
-    if file.read_exact(&mut footer_bytes).is_err() {
-        return error_result("Failed to read footer".to_string());
-    }
-
-    let meta_offset = u64::from_le_bytes(footer_bytes);
-
-    // Validate meta offset: must be within bounds and leave room for footer
-    if meta_offset >= file_len - 8 {
-        return error_result(format!(
-            "Invalid meta block offset: {} (file length: {})",
-            meta_offset, file_len
-        ));
-    }
-
-    // Read compressed meta block
-    let meta_size = (file_len - meta_offset - 8) as usize;
-    if file.seek(SeekFrom::Start(meta_offset)).is_err() {
-        return error_result("Failed to seek to meta block".to_string());
-    }
-
-    let mut meta_compressed = vec![0u8; meta_size];
-    if file.read_exact(&mut meta_compressed).is_err() {
-        return error_result("Failed to read meta block data".to_string());
-    }
-
-    // Decompress meta block
-    let meta_decompressed = match lz4_flex::decompress_size_prepended(&meta_compressed) {
-        Ok(d) => d,
-        Err(e) => {
-            return error_result(format!("Meta block decompression failed: {}", e));
-        }
-    };
-
-    // Deserialize meta block (postcard format)
-    let meta_block: MetaBlock = match crate::infra::codec::decode(&meta_decompressed) {
-        Ok(m) => m,
-        Err(e) => {
-            return error_result(format!("Meta block deserialization failed: {}", e));
+    let (meta_block, encryptor) = match crate::storage::metadata::read(&mut file, encryption) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            let skipped = matches!(
+                error,
+                LsmError::EncryptionKeyRequired
+                    | LsmError::EncryptionAuthenticationFailed
+                    | LsmError::LegacyEncryptionMigrationRequired
+            );
+            return error_result(error.to_string(), skipped);
         }
     };
 
@@ -297,6 +248,13 @@ pub fn scrub_file<P: AsRef<Path>>(path: P) -> ScrubResult {
                 "CRC32 mismatch at block offset {}: stored {:08x}, computed {:08x}",
                 block.offset, stored_crc32, computed_crc32
             ));
+        } else if let Err(error) = encryptor.decrypt_block(&data) {
+            corrupt_blocks += 1;
+            corrupt_bytes += data_size as u64;
+            errors.push(format!(
+                "Block authentication failed at offset {}: {error}",
+                block.offset
+            ));
         }
     }
 
@@ -305,6 +263,7 @@ pub fn scrub_file<P: AsRef<Path>>(path: P) -> ScrubResult {
     ScrubResult {
         file_path,
         valid: corrupt_blocks == 0,
+        skipped: false,
         total_blocks,
         verified_blocks,
         corrupt_blocks,
@@ -344,6 +303,7 @@ pub fn scrub_with_version_set<C: Cache>(engine: &Engine<C>) -> Vec<ScrubResult> 
             return vec![ScrubResult {
                 file_path: sst_dir,
                 valid: false,
+                skipped: false,
                 total_blocks: 0,
                 verified_blocks: 0,
                 corrupt_blocks: 0,
@@ -367,6 +327,7 @@ pub fn scrub_with_version_set<C: Cache>(engine: &Engine<C>) -> Vec<ScrubResult> 
             results.push(ScrubResult {
                 file_path: disk_path.clone(),
                 valid: false,
+                skipped: false,
                 total_blocks: 0,
                 verified_blocks: 0,
                 corrupt_blocks: 0,
@@ -383,6 +344,7 @@ pub fn scrub_with_version_set<C: Cache>(engine: &Engine<C>) -> Vec<ScrubResult> 
             results.push(ScrubResult {
                 file_path: tracked_path.clone(),
                 valid: false,
+                skipped: false,
                 total_blocks: 0,
                 verified_blocks: 0,
                 corrupt_blocks: 0,
@@ -434,10 +396,11 @@ mod tests {
 
         let result = scrub_file(&sst_path);
         assert!(!result.valid, "file with invalid magic should fail scrub");
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.contains("Invalid magic number")));
+        assert!(!result.skipped);
+        assert_eq!(
+            result.errors,
+            ["Invalid SSTable format: invalid SSTable magic"]
+        );
     }
 
     #[test]
@@ -452,7 +415,11 @@ mod tests {
 
         let result = scrub_file(&sst_path);
         assert!(!result.valid, "corrupted .sst file should fail scrub");
-        assert!(result.errors.iter().any(|e| e.contains("File too small")));
+        assert!(!result.skipped);
+        assert_eq!(
+            result.errors,
+            ["Invalid SSTable format: file is shorter than header and footer"]
+        );
     }
 
     // ── CRC32 validity tests ───────────────────────────────────────────────
@@ -463,8 +430,7 @@ mod tests {
         let sst_path = dir.path().join("valid.sst");
 
         // Build a proper SSTable with SstableBuilder.
-        // Disable encryption explicitly because the scrubber doesn't
-        // support encrypted SSTables (LSMSST04 magic).
+        // Exercise CRC diagnostics independently of AES authentication.
         let config = crate::infra::config::StorageConfig::default();
         let enc_config = crate::storage::encryption::EncryptionConfig {
             enabled: false,
@@ -513,8 +479,7 @@ mod tests {
         let sst_path = dir.path().join("corrupt.sst");
 
         // Build a proper SSTable.
-        // Disable encryption explicitly because the scrubber doesn't
-        // support encrypted SSTables (LSMSST04 magic).
+        // Exercise CRC diagnostics independently of AES authentication.
         let config = crate::infra::config::StorageConfig::default();
         let enc_config = crate::storage::encryption::EncryptionConfig {
             enabled: false,

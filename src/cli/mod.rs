@@ -19,7 +19,7 @@ use crate::infra::cicd::{Fixture, FixtureEntry};
 use crate::infra::config::LsmConfig;
 use crate::infra::sql::{format_sql_result, SqlEngine};
 use crate::storage::cache::GlobalBlockCache;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use std::sync::Arc;
 
 type CliEngine = Engine<Arc<GlobalBlockCache>>;
@@ -46,10 +46,89 @@ struct Cli {
     command: Command,
 }
 
+#[derive(Subcommand, Debug)]
+enum Command {
+    #[command(flatten)]
+    Engine(EngineCommand),
+    /// Rewrite encryption offline into a NEW directory, preserving originals.
+    MigrateEncryption(MigrationArgs),
+}
+
+#[derive(Args, Debug)]
+struct MigrationArgs {
+    /// New destination directory under an existing parent; must not exist.
+    #[arg(long)]
+    output: std::path::PathBuf,
+    /// Explicitly authorize reading the insecure legacy all-zero key.
+    #[arg(long, conflicts_with = "source_key_file")]
+    legacy_zero_key: bool,
+    /// Key for already encrypted source data; omit for plaintext sources.
+    #[arg(long, conflicts_with = "legacy_zero_key")]
+    source_key_file: Option<std::path::PathBuf>,
+    /// New nonzero AES-256 key file, stored outside the database directory.
+    #[arg(
+        long,
+        conflicts_with = "plaintext",
+        required_unless_present = "plaintext"
+    )]
+    target_key_file: Option<std::path::PathBuf>,
+    /// Explicitly convert the destination to plaintext SSTables/WAL frames.
+    #[arg(long, conflicts_with = "target_key_file")]
+    plaintext: bool,
+}
+
+fn migrate_command(
+    source: &std::path::Path,
+    args: MigrationArgs,
+) -> crate::infra::error::Result<()> {
+    use crate::storage::{encryption::EncryptionConfig, migration::migrate_encryption};
+    let source = source.canonicalize()?;
+    for path in [&args.source_key_file, &args.target_key_file]
+        .into_iter()
+        .flatten()
+    {
+        if path.canonicalize()?.starts_with(&source) {
+            return Err(crate::LsmError::InvalidArgument(
+                "keep migration key files outside the source database directory".into(),
+            ));
+        }
+    }
+    let from = if args.legacy_zero_key {
+        EncryptionConfig {
+            enabled: true,
+            key: [0; 32],
+        }
+    } else {
+        EncryptionConfig::from_key_path(
+            args.source_key_file
+                .as_deref()
+                .map(|p| {
+                    p.to_str().ok_or_else(|| {
+                        crate::LsmError::InvalidArgument("key path must be UTF-8".into())
+                    })
+                })
+                .transpose()?,
+        )?
+    };
+    let to = if args.plaintext {
+        EncryptionConfig::default()
+    } else {
+        EncryptionConfig::from_key_path(Some(
+            args.target_key_file
+                .as_deref()
+                .and_then(|p| p.to_str())
+                .ok_or(crate::LsmError::EncryptionKeyRequired)?,
+        ))?
+    };
+    let report = migrate_encryption(&source, &args.output, &from, &to)?;
+    println!("{}", serde_json::to_string(&report)?);
+    Ok(())
+}
+
 const FIXTURE_PREFIX: &str = "__fixture:";
 
-#[derive(Parser, Debug)]
-enum Command {
+#[derive(Subcommand, Debug)]
+enum EngineCommand {
     /// Get the value for a key
     Get {
         key: String,
@@ -196,6 +275,15 @@ enum TokenCommand {
 
 pub fn main() -> crate::infra::error::Result<()> {
     let cli = Cli::parse();
+    let command = match cli.command {
+        Command::MigrateEncryption(args) => {
+            if cli.encrypt_key_file.is_some() || cli.cdc_endpoint.is_some() {
+                return Err(crate::LsmError::InvalidArgument("migration uses --source-key-file/--target-key-file and runs offline without CDC".into()));
+            }
+            return migrate_command(&cli.db_path, args);
+        }
+        Command::Engine(command) => command,
+    };
 
     // Build config from CLI args
     let mut builder = LsmConfig::builder().dir_path(cli.db_path);
@@ -218,26 +306,28 @@ pub fn main() -> crate::infra::error::Result<()> {
         tracing::info!(target: "apexstore::cli", "CDC enabled, endpoint: {}", endpoint);
     }
 
-    match cli.command {
-        Command::Get { key, cf } => cmd_get(&engine, &cf, &key),
-        Command::Set { key, value, cf } => cmd_set(&engine, &cf, &key, &value),
-        Command::Delete { key, cf } => cmd_delete(&engine, &cf, &key),
-        Command::Scan {
+    match command {
+        EngineCommand::Get { key, cf } => cmd_get(&engine, &cf, &key),
+        EngineCommand::Set { key, value, cf } => cmd_set(&engine, &cf, &key, &value),
+        EngineCommand::Delete { key, cf } => cmd_delete(&engine, &cf, &key),
+        EngineCommand::Scan {
             lower,
             upper,
             limit,
             cf,
         } => cmd_scan(&engine, &cf, lower.as_deref(), upper.as_deref(), limit),
-        Command::Keys { prefix, limit, cf } => cmd_keys(&engine, &cf, prefix.as_deref(), limit),
-        Command::Count { prefix, cf } => cmd_count(&engine, &cf, prefix.as_deref()),
-        Command::Stats => cmd_stats(&engine),
-        Command::Flush => cmd_flush(&engine),
-        Command::Compact => cmd_compact(&engine),
-        Command::Sql { query } => cmd_sql(&engine, &query),
-        Command::Import { format, file, cf } => cmd_import(&engine, &format, &file, &cf),
-        Command::Export { format, file, cf } => cmd_export(&engine, &format, &file, &cf),
-        Command::Token(sub) => cmd_token(&engine, sub),
-        Command::Fixture(sub) => cmd_fixture(&engine, sub),
+        EngineCommand::Keys { prefix, limit, cf } => {
+            cmd_keys(&engine, &cf, prefix.as_deref(), limit)
+        }
+        EngineCommand::Count { prefix, cf } => cmd_count(&engine, &cf, prefix.as_deref()),
+        EngineCommand::Stats => cmd_stats(&engine),
+        EngineCommand::Flush => cmd_flush(&engine),
+        EngineCommand::Compact => cmd_compact(&engine),
+        EngineCommand::Sql { query } => cmd_sql(&engine, &query),
+        EngineCommand::Import { format, file, cf } => cmd_import(&engine, &format, &file, &cf),
+        EngineCommand::Export { format, file, cf } => cmd_export(&engine, &format, &file, &cf),
+        EngineCommand::Token(sub) => cmd_token(&engine, sub),
+        EngineCommand::Fixture(sub) => cmd_fixture(&engine, sub),
     }
 }
 

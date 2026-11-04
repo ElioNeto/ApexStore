@@ -9,7 +9,7 @@
 //! [`EncryptionConfig`].  The [`Encryptor`] struct wraps the cipher and
 //! exposes `encrypt_block` / `decrypt_block`.
 //!
-//! Encryption is **enabled by default** for maximum security.
+//! Encryption is disabled by default and requires an explicit nonzero key.
 
 use crate::infra::error::{LsmError, Result};
 use aes_gcm::{
@@ -17,65 +17,65 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use rand::{rngs::SysRng, TryCryptoRng};
-use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, Zeroizing};
 
-/// Configuration for encryption at rest.
-///
-/// When `enabled` is `true` (the default), all SSTable blocks and WAL
-/// frames are transparently encrypted using AES-256-GCM.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Runtime encryption configuration. Keys are not serializable and Debug is redacted.
+#[derive(Clone, Default)]
 pub struct EncryptionConfig {
     /// AES-256 key (exactly 32 bytes).
     pub key: [u8; 32],
-    /// Whether encryption is enabled.
+    /// Whether encryption is enabled. Disabled by default.
     pub enabled: bool,
 }
 
-impl Default for EncryptionConfig {
-    /// # Warning
-    ///
-    /// The default is `enabled: true` with an **all-zero key**. An all-zero
-    /// AES-256 key is publicly known, so data encrypted with it is readable by
-    /// anyone: the default provides obfuscation, not confidentiality.
-    ///
-    /// Callers that genuinely want encryption off must construct
-    /// `EncryptionConfig { enabled: false, ..Default::default() }` explicitly
-    /// rather than relying on `default()`.
-    ///
-    /// Note also that `StorageConfig` disagrees with itself about the default:
-    /// `StorageConfig::default()` sets `encryption_enabled: true`, while
-    /// `#[serde(default)]` yields `false` when the field is absent from a
-    /// deserialised config file.
-    fn default() -> Self {
-        Self {
-            key: [0u8; 32],
-            enabled: true,
-        }
+impl std::fmt::Debug for EncryptionConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EncryptionConfig")
+            .field("enabled", &self.enabled)
+            .field("key", &"[REDACTED]")
+            .finish()
     }
 }
 
+impl Drop for EncryptionConfig {
+    fn drop(&mut self) {
+        self.key.zeroize();
+    }
+}
+impl zeroize::ZeroizeOnDrop for EncryptionConfig {}
+
 impl EncryptionConfig {
+    /// Validate application storage settings before touching an SSTable or database.
+    pub fn from_storage_config(config: &crate::infra::config::StorageConfig) -> Result<Self> {
+        if !config.encryption_enabled {
+            return Ok(Self::default());
+        }
+        let path = config
+            .encryption_key_path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+            .ok_or(LsmError::EncryptionKeyRequired)?;
+        Self::from_key_path(Some(path))
+    }
+
     /// Create an [`EncryptionConfig`] from an optional hex-encoded key file path.
     ///
     /// * `Some(path)` — reads the file, trims whitespace, hex-decodes the
     ///   contents to obtain the 32-byte AES-256 key, and enables encryption.
-    /// * `None` — returns [`EncryptionConfig::default()`], which has
-    ///   `enabled: true` and an **all-zero key**. That key provides no
-    ///   confidentiality whatsoever; see the warning on
-    ///   [`EncryptionConfig::default`].
+    /// * `None` — returns the disabled default configuration.
     pub fn from_key_path(path: Option<&str>) -> Result<Self> {
         match path {
             Some(p) => {
-                let contents = std::fs::read_to_string(p).map_err(|e| {
+                let contents = Zeroizing::new(std::fs::read_to_string(p).map_err(|e| {
                     LsmError::InvalidArgument(format!("Failed to read key file '{}': {}", p, e))
-                })?;
+                })?);
                 let key_hex = contents.trim();
-                let key_bytes = hex::decode(key_hex).map_err(|e| {
+                let key_bytes = Zeroizing::new(hex::decode(key_hex).map_err(|e| {
                     LsmError::InvalidArgument(format!(
                         "Invalid hex key in '{}': {} (expected 64 hex chars)",
                         p, e
                     ))
-                })?;
+                })?);
                 if key_bytes.len() != 32 {
                     return Err(LsmError::InvalidArgument(format!(
                         "Key file '{}' must contain exactly 32 bytes (64 hex chars), got {} bytes",
@@ -85,6 +85,9 @@ impl EncryptionConfig {
                 }
                 let mut key = [0u8; 32];
                 key.copy_from_slice(&key_bytes);
+                if key == [0; 32] {
+                    return Err(LsmError::LegacyEncryptionMigrationRequired);
+                }
                 Ok(Self { key, enabled: true })
             }
             None => Ok(Self::default()),
@@ -102,6 +105,30 @@ pub struct Encryptor {
 }
 
 impl Encryptor {
+    /// Decode an encrypted persisted payload without silently accepting a
+    /// legacy zero key. Probing that key only diagnoses migration requirements.
+    pub(crate) fn decrypt_for_recovery(&self, data: &[u8]) -> Result<Vec<u8>> {
+        let result = if self.is_enabled() {
+            self.decrypt_block(data)
+        } else {
+            Err(LsmError::EncryptionKeyRequired)
+        };
+        match result {
+            Ok(plaintext) => Ok(plaintext),
+            Err(error) => {
+                let legacy = Self::new(&EncryptionConfig {
+                    enabled: true,
+                    key: [0; 32],
+                });
+                if let Ok(mut plaintext) = legacy.decrypt_block(data) {
+                    plaintext.zeroize();
+                    return Err(LsmError::LegacyEncryptionMigrationRequired);
+                }
+                Err(error)
+            }
+        }
+    }
+
     /// Create a new `Encryptor` from an [`EncryptionConfig`].
     pub fn new(config: &EncryptionConfig) -> Self {
         let cipher = if config.enabled {
@@ -344,7 +371,7 @@ mod tests {
     #[test]
     fn test_encryption_config_from_none() {
         let config = EncryptionConfig::from_key_path(None).unwrap();
-        assert!(config.enabled, "encryption is enabled by default");
+        assert!(!config.enabled, "no key must leave encryption disabled");
     }
 
     #[test]

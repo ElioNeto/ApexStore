@@ -365,3 +365,21 @@ SERVER_WORKERS=8
 - [LSM-Tree Paper](https://www.cs.umb.edu/~poneil/lsmtree.pdf)
 - [RocksDB Tuning Guide](https://github.com/facebook/rocksdb/wiki/RocksDB-Tuning-Guide)
 - [Actix-Web Configuration](https://actix.rs/docs/server/)
+
+
+## Encryption at rest
+
+Encryption is opt-in and disabled by default. For the server, configure
+`ENCRYPTION_ENABLED=true` and `ENCRYPTION_KEY_PATH` pointing to a readable file
+containing a nonzero 32-byte AES key encoded as 64 hexadecimal characters. Keep
+this file outside `DATA_DIR`. Missing/invalid keys and invalid boolean values
+stop startup; there is no fallback key. The CLI uses `--encrypt-key-file`.
+
+Programmatic configuration uses `LsmConfig.storage.encryption_enabled` and
+`encryption_key_path`, validated by `EngineOptions::try_from_config` and
+`LsmEngine::new_from_config`. Runtime keys are redacted in Debug and zeroized on
+drop; they are not serialized into layout configuration.
+
+Legacy zero-key databases require the explicit offline `migrate-encryption`
+command documented in [the migration guide](../MIGRATION_GUIDE.md). Do not delete
+WALs or SSTables to work around a key/configuration error.

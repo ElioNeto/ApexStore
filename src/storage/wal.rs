@@ -526,10 +526,7 @@ impl WriteAheadLog {
                     // A key/configuration failure is not a damaged frame that
                     // can be skipped: doing so can silently discard every write.
                     // Return before exposing any partial replay to the engine.
-                    if !self.encryptor.is_enabled() {
-                        return Err(LsmError::EncryptionKeyRequired);
-                    }
-                    let decrypted = self.encryptor.decrypt_block(&payload)?;
+                    let decrypted = self.encryptor.decrypt_for_recovery(&payload)?;
                     decode::<LogRecord>(&decrypted)?
                 }
                 other => {
@@ -875,6 +872,74 @@ fn resync_after_invalid_length(
 
     // Exhausted scan limit without finding a valid frame.
     Ok(false)
+}
+
+/// Rewrite a WAL into a new directory without deduplicating records or tolerating
+/// damage. Migration must preserve every frame's ordering and record metadata.
+pub(crate) fn rewrite_for_migration(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+    source_encryption: &EncryptionConfig,
+    target_encryption: &EncryptionConfig,
+) -> Result<u64> {
+    let filename = destination
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| LsmError::InvalidArgument("invalid WAL filename".into()))?;
+    let cf = if filename == "wal.log" {
+        "default"
+    } else {
+        filename
+            .strip_prefix("wal-")
+            .and_then(|n| n.strip_suffix(".log"))
+            .filter(|cf| !cf.is_empty() && *cf != "default")
+            .ok_or_else(|| LsmError::InvalidArgument("invalid per-CF WAL filename".into()))?
+    };
+    let parent = destination
+        .parent()
+        .ok_or_else(|| LsmError::InvalidArgument("WAL destination parent missing".into()))?;
+    let mut output = WriteAheadLog::new_with_encryption(parent, cf, target_encryption)?;
+    output.set_sync_interval(usize::MAX);
+    let encryptor = Encryptor::new(source_encryption);
+    let mut reader = BufReader::new(File::open(source)?);
+    let mut count = 0;
+    loop {
+        let mut length_bytes = [0; 4];
+        if reader.read(&mut length_bytes[..1])? == 0 {
+            break;
+        }
+        reader.read_exact(&mut length_bytes[1..])?;
+        let length = u32::from_le_bytes(length_bytes) as usize;
+        if length == 0 || length > MAX_WAL_RECORD_BYTES {
+            return Err(LsmError::WalCorruption);
+        }
+        let mut version = [0];
+        reader.read_exact(&mut version)?;
+        let mut payload = vec![0; length - 1];
+        reader.read_exact(&mut payload)?;
+        let mut checksum = [0; 4];
+        reader.read_exact(&mut checksum)?;
+        let mut hasher = Hasher::new();
+        hasher.update(&length_bytes);
+        hasher.update(&version);
+        hasher.update(&payload);
+        if hasher.finalize() != u32::from_le_bytes(checksum) {
+            return Err(LsmError::WalCorruption);
+        }
+        let record = match version[0] {
+            WAL_FRAME_VERSION_V0 => LogRecord::from(decode::<LogRecordV0>(&payload)?),
+            WAL_FRAME_VERSION_V1 => LogRecord::from(decode::<LogRecordV1>(&payload)?),
+            WAL_FRAME_VERSION_V2 => decode::<LogRecord>(&payload)?,
+            WAL_FRAME_VERSION_V3_ENCRYPTED => {
+                decode::<LogRecord>(&encryptor.decrypt_for_recovery(&payload)?)?
+            }
+            _ => return Err(LsmError::WalCorruption),
+        };
+        output.write_record(&record)?;
+        count += 1;
+    }
+    output.sync()?;
+    Ok(count)
 }
 
 #[cfg(test)]
