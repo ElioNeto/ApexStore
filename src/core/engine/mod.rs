@@ -1162,11 +1162,6 @@ impl<C: Cache> Engine<C> {
         self.delete_cf("default", key_vec)
     }
 
-    /// Check if a key falls within any active range tombstone for the given column family.
-    fn is_in_range_tombstone(core: &EngineCore<C>, cf: &str, key: &[u8]) -> bool {
-        Self::covering_range_tombstone_ts(core, cf, key).is_some()
-    }
-
     /// Timestamp of the newest range tombstone covering `key`, if any.
     ///
     /// A boolean is not enough to decide whether a range tombstone hides a
@@ -1254,25 +1249,18 @@ impl<C: Cache> Engine<C> {
             }
         }
 
-        // The key was not in any memtable, so it can only come from the version
-        // set. Those records carry no timestamp on this path, so a covering
-        // tombstone shadows them unconditionally.
-        if covering_tombstone_ts.is_some() {
-            let elapsed_us = start.elapsed().as_micros() as u64;
-            self.metrics.record_get(elapsed_us);
-            tracing::debug!(
-                target: "apexstore::engine",
-                operation = "get_cf",
-                cf = cf,
-                key = %key_str,
-                found = false,
-                reason = "range_tombstone",
-                duration_us = elapsed_us,
-            );
-            return Ok(None);
-        }
-
-        let result = core.version_set().get(cf, key);
+        // Persisted records retain their timestamps. A later SSTable write
+        // survives an older range deletion just like a memtable write does.
+        let result = if let Some(tombstone_ts) = covering_tombstone_ts {
+            core.version_set()
+                .get_record(cf, key)?
+                .filter(|record| {
+                    !record.is_deleted && !record.is_expired() && record.timestamp >= tombstone_ts
+                })
+                .map(|record| record.value)
+        } else {
+            core.version_set().get(cf, key)
+        };
         // Check TTL expiry for keys stored in SSTable / in-memory Table.
         // The version_set.get() above checks LogRecord.is_expired() for
         // the SSTable read path, but the in-memory Table.data path only
@@ -1365,85 +1353,11 @@ impl<C: Cache> Engine<C> {
         limit: Option<usize>,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let start = std::time::Instant::now();
-        let core = self.core.read();
-        let mut iters: Vec<Box<dyn StorageIterator<KeyType = Vec<u8>> + '_>> = Vec::new();
-
-        // 1. Memtables (newer first)
-        if let Some(memtables) = core.memtables().get(cf) {
-            for mem in memtables.iter().rev() {
-                iters.push(Box::new(mem.iter()));
-            }
-        }
-
-        // 2. SSTables (from VersionSet) — skip non-intersecting ranges
-        for sst_iter in core.version_set().table_iters_in_range(cf, lower, upper) {
-            iters.push(Box::new(sst_iter));
-        }
-
-        let mut merge_iter = MergeIterator::new(iters);
-        let mut results = Vec::new();
         let limit = limit.unwrap_or(MAX_SCAN_LIMIT);
-
-        while merge_iter.is_valid() && results.len() < limit {
-            if let Some(lower) = lower {
-                if merge_iter.key().as_slice() < lower {
-                    merge_iter.next();
-                    continue;
-                }
-            }
-            if let Some(upper) = upper {
-                if merge_iter.key().as_slice() >= upper {
-                    break;
-                }
-            }
-            // Skip keys that fall within active range tombstones
-            let key = merge_iter.key();
-            if Self::is_in_range_tombstone(&core, cf, key.as_slice()) {
-                merge_iter.next();
-                continue;
-            }
-            results.push((merge_iter.key(), merge_iter.value().to_vec()));
-            merge_iter.next();
-        }
-
-        // Filter out expired entries using TTL metadata, and also skip
-        // internal metadata keys (__ttl:*) that should not be visible to users.
-        // Memtable entries have full LogRecord metadata (checked below),
-        // while SSTable/Table entries use the __ttl:{key} side-table.
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        results.retain(|(k, _)| {
-            // Skip internal metadata keys (__ttl:* prefix)
-            if k.starts_with(b"__ttl:") {
-                return false;
-            }
-            // 1. Check memtables (newest first) — full LogRecord with expires_at
-            if let Some(memtables) = core.memtables().get(cf) {
-                for mem in memtables.iter().rev() {
-                    if let Some(record) = mem.data.get(k) {
-                        // Found in a memtable — keep only if not expired
-                        return !record.is_expired_at(now);
-                    }
-                }
-            }
-            // 2. Not in any memtable (from SSTable/Table) — check __ttl: side-table
-            let ttl_key = format!("__ttl:{}", String::from_utf8_lossy(k)).into_bytes();
-            if let Some(ttl_value) = core.version_set().get(cf, &ttl_key) {
-                if ttl_value.len() == 16 {
-                    let expires_at = u128::from_le_bytes(
-                        ttl_value
-                            .as_slice()
-                            .try_into()
-                            .unwrap_or(u128::MAX.to_le_bytes()),
-                    );
-                    return now < expires_at;
-                }
-            }
-            // No TTL metadata → keep as-is
-            true
-        });
+        let mut results = Vec::new();
+        self.for_each_visible_record(cf, lower, upper, limit, |key, value| {
+            results.push((key, value.to_vec()));
+        })?;
 
         let elapsed_us = start.elapsed().as_micros() as u64;
         self.metrics.record_scan(elapsed_us);
@@ -1461,6 +1375,74 @@ impl<C: Cache> Engine<C> {
         );
 
         Ok(results)
+    }
+
+    /// Share version visibility between scans, key listings and counts.
+    fn for_each_visible_record(
+        &self,
+        cf: &str,
+        lower: Option<&[u8]>,
+        upper: Option<&[u8]>,
+        limit: usize,
+        mut visit: impl FnMut(Vec<u8>, &[u8]),
+    ) -> Result<()> {
+        if limit == 0
+            || lower
+                .zip(upper)
+                .is_some_and(|(lower, upper)| lower >= upper)
+        {
+            return Ok(());
+        }
+        let core = self.core.read();
+        let mut iters: Vec<Box<dyn StorageIterator<KeyType = Vec<u8>> + '_>> = Vec::new();
+        if let Some(memtables) = core.memtables().get(cf) {
+            for mem in memtables.iter().rev() {
+                iters.push(Box::new(mem.iter()));
+            }
+        }
+        iters.extend(core.version_set().record_iters_in_range(cf, lower, upper)?);
+        let mut merged = MergeIterator::new(iters);
+        let mut visible = 0;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        while merged.is_valid() && visible < limit {
+            let key = merged.key();
+            if upper.is_some_and(|upper| key.as_slice() >= upper) {
+                break;
+            }
+            if lower.is_some_and(|lower| key.as_slice() < lower) || key.starts_with(b"__ttl:") {
+                merged.next();
+                continue;
+            }
+            let record = merged.record();
+            let deleted = record.map_or_else(
+                || merged.value().is_empty(),
+                |record| record.is_deleted || record.is_expired_at(now),
+            );
+            let covered = Self::covering_range_tombstone_ts(&core, cf, &key)
+                .is_some_and(|timestamp| record.is_none_or(|record| timestamp > record.timestamp));
+            // Only legacy value-only tables need the TTL side table. Complete
+            // records carry their own expiry, including newer writes without TTL.
+            let legacy_expired = if record.is_none() {
+                let ttl_key = format!("__ttl:{}", String::from_utf8_lossy(&key));
+                core.version_set()
+                    .get(cf, ttl_key.as_bytes())
+                    .and_then(|value| <[u8; 16]>::try_from(value).ok())
+                    .is_some_and(|expiry| now >= u128::from_le_bytes(expiry))
+            } else {
+                false
+            };
+            if !deleted && !covered && !legacy_expired {
+                visit(key, merged.value());
+                visible += 1;
+            }
+            // Advancing also consumes older duplicate versions, even when the
+            // newest version is deleted or expired.
+            merged.next();
+        }
+        Ok(())
     }
 
     pub fn scan_range(
@@ -1535,68 +1517,23 @@ impl<C: Cache> Engine<C> {
 
     pub fn keys(&self) -> Result<Vec<Vec<u8>>> {
         let start = std::time::Instant::now();
-        let core = self.core.read();
-        let mut iters: Vec<Box<dyn StorageIterator<KeyType = Vec<u8>> + '_>> = Vec::new();
-
-        if let Some(memtables) = core.memtables().get("default") {
-            for mem in memtables.iter().rev() {
-                iters.push(Box::new(mem.iter()));
-            }
-        }
-
-        for sst_iter in core.version_set().table_iters("default") {
-            iters.push(Box::new(sst_iter));
-        }
-
-        let mut merge_iter = MergeIterator::new(iters);
-        let mut results = Vec::new();
-
-        while merge_iter.is_valid() && results.len() < MAX_SCAN_LIMIT {
-            results.push(merge_iter.key());
-            merge_iter.next();
-        }
-
-        let elapsed = start.elapsed();
-        tracing::debug!(
-            target: "apexstore::engine",
-            operation = "keys",
-            count = results.len(),
-            duration_us = elapsed.as_micros() as u64,
-        );
-
-        Ok(results)
+        let mut keys = Vec::new();
+        self.for_each_visible_record("default", None, None, MAX_SCAN_LIMIT, |key, _| {
+            keys.push(key);
+        })?;
+        tracing::debug!(target: "apexstore::engine", operation = "keys",
+            count = keys.len(), duration_us = start.elapsed().as_micros() as u64);
+        Ok(keys)
     }
 
     pub fn count(&self) -> Result<usize> {
         let start = std::time::Instant::now();
-        let core = self.core.read();
         let mut count = 0;
-        let mut iters: Vec<Box<dyn StorageIterator<KeyType = Vec<u8>> + '_>> = Vec::new();
-
-        if let Some(memtables) = core.memtables().get("default") {
-            for mem in memtables.iter().rev() {
-                count += mem.data.len();
-            }
-        }
-
-        for sst_iter in core.version_set().table_iters("default") {
-            iters.push(Box::new(sst_iter));
-        }
-
-        let mut merge_iter = MergeIterator::new(iters);
-        while merge_iter.is_valid() {
+        self.for_each_visible_record("default", None, None, usize::MAX, |_, _| {
             count += 1;
-            merge_iter.next();
-        }
-
-        let elapsed = start.elapsed();
-        tracing::debug!(
-            target: "apexstore::engine",
-            operation = "count",
-            count = count,
-            duration_us = elapsed.as_micros() as u64,
-        );
-
+        })?;
+        tracing::debug!(target: "apexstore::engine", operation = "count",
+            count = count, duration_us = start.elapsed().as_micros() as u64);
         Ok(count)
     }
 
@@ -1627,6 +1564,13 @@ impl<C: Cache> Engine<C> {
 
     fn flush_memtable_impl(&self, cf: &str, core: &mut EngineCore<C>) -> Result<bool> {
         if let Some(memtables) = core.memtables_mut().get_mut(cf) {
+            if memtables.last().is_some_and(|mem| mem.data.is_empty()) {
+                // A range-delete-only memtable has no point blocks to write.
+                // Keep its metadata and WAL, and make the WAL durable instead
+                // of constructing an empty SSTable or discarding the deletion.
+                core.wal_mut(cf)?.sync()?;
+                return Ok(false);
+            }
             if let Some(mem) = memtables.pop() {
                 let records = mem.data.len();
                 // TTL / expires_at metadata is preserved via __ttl:{key} entries
