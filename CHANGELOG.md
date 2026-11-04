@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — v2.2 (Hardening) → v2.3 (Bug fixes, Features & Resilience)
 
+- Release per-IP connection permits when middleware futures are cancelled or unwind, including cancellation before polling; prevent leaked slots and use a non-poisoning mutex.
+
 ### Security and reliability updates
 
 - Disable implicit encryption, make invalid key configuration fatal, redact/zeroize runtime keys and expose server encryption environment variables. Add explicit locked migration of legacy zero-key SSTables and WALs into a new directory, and key-aware scrubbing with a distinct skipped state (#411). Breaking library change: EngineOptions configuration conversion is fallible and runtime EncryptionConfig no longer supports serde.
