@@ -11,13 +11,13 @@ use actix_web::body::MessageBody;
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
 use actix_web::web::Data;
 use actix_web::Error;
+use parking_lot::Mutex;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::{ready, Ready};
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::pin::Pin;
-use std::sync::Mutex;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -25,24 +25,51 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone)]
 struct IpTrack {
     /// Timestamps of recent requests (sliding window).
-    timestamps: Vec<Instant>,
-    /// Per-endpoint counters for this IP.
-    endpoint_counts: HashMap<String, usize>,
+    timestamps: VecDeque<Instant>,
+    /// Accepted requests per registered route in the same sliding window.
+    endpoint_timestamps: HashMap<String, VecDeque<Instant>>,
 }
 
 impl IpTrack {
     fn new() -> Self {
         Self {
-            timestamps: Vec::new(),
-            endpoint_counts: HashMap::new(),
+            timestamps: VecDeque::new(),
+            endpoint_timestamps: HashMap::new(),
         }
     }
 
-    fn prune(&mut self, window: Duration) {
-        let now = Instant::now();
-        self.timestamps.retain(|t| now.duration_since(*t) < window);
-        // endpoint_counts are pruned implicitly when the whole IpTrack
-        // is removed (retain below checks timestamps.is_empty()).
+    fn prune(&mut self, now: Instant, window: Duration) {
+        prune_timestamps(&mut self.timestamps, now, window);
+        self.endpoint_timestamps.retain(|_, timestamps| {
+            prune_timestamps(timestamps, now, window);
+            !timestamps.is_empty()
+        });
+    }
+}
+
+fn prune_timestamps(timestamps: &mut VecDeque<Instant>, now: Instant, window: Duration) {
+    while timestamps
+        .front()
+        .is_some_and(|timestamp| now.saturating_duration_since(*timestamp) >= window)
+    {
+        timestamps.pop_front();
+    }
+}
+
+const WINDOW: Duration = Duration::from_secs(60);
+
+struct RateLimitShard {
+    requests: HashMap<IpAddr, IpTrack>,
+    last_cleanup: Instant,
+}
+
+impl RateLimitShard {
+    fn prune(&mut self, now: Instant) {
+        self.requests.retain(|_, track| {
+            track.prune(now, WINDOW);
+            !track.timestamps.is_empty()
+        });
+        self.last_cleanup = now;
     }
 }
 
@@ -52,9 +79,9 @@ const NUM_SHARDS: usize = 16;
 
 /// Shared state for rate limiting, tracked across all worker threads.
 pub struct RateLimiterState {
-    shards: Vec<Mutex<HashMap<IpAddr, IpTrack>>>,
+    shards: Vec<Mutex<RateLimitShard>>,
     max_requests_per_minute: usize,
-    /// Per-endpoint rate limits (requests per minute). Empty = use global default.
+    /// Additional per-route limits; zero disables only that route's extra cap.
     endpoint_limits: HashMap<String, usize>,
 }
 
@@ -62,7 +89,10 @@ impl RateLimiterState {
     pub fn new(max_requests_per_minute: usize) -> Self {
         let mut shards = Vec::with_capacity(NUM_SHARDS);
         for _ in 0..NUM_SHARDS {
-            shards.push(Mutex::new(HashMap::new()));
+            shards.push(Mutex::new(RateLimitShard {
+                requests: HashMap::new(),
+                last_cleanup: Instant::now(),
+            }));
         }
         Self {
             shards,
@@ -72,7 +102,7 @@ impl RateLimiterState {
     }
 
     /// Select the shard for a given peer IP address by hashing the address.
-    fn shard_for(&self, peer: IpAddr) -> &Mutex<HashMap<IpAddr, IpTrack>> {
+    fn shard_for(&self, peer: IpAddr) -> &Mutex<RateLimitShard> {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         peer.hash(&mut hasher);
         let idx = hasher.finish() as usize % NUM_SHARDS;
@@ -81,73 +111,86 @@ impl RateLimiterState {
 
     /// Set a per-endpoint rate limit.
     ///
-    /// `endpoint` is the URL path pattern (e.g., "/keys", "/admin/compact").
-    /// When set, requests to that path use this limit instead of the global default.
+    /// `endpoint` is the registered route pattern (e.g., "/keys/{key}").
+    /// This cap and the global per-IP cap apply independently. Zero disables
+    /// only this endpoint's additional cap, never the global one.
     pub fn set_endpoint_limit(&mut self, endpoint: &str, limit: usize) {
         self.endpoint_limits.insert(endpoint.to_string(), limit);
     }
 
-    /// Get the effective limit for a given endpoint.
-    fn effective_limit(&self, endpoint: &str) -> usize {
-        self.endpoint_limits
-            .get(endpoint)
-            .copied()
-            .unwrap_or(self.max_requests_per_minute)
+    fn is_rate_limited(&self, peer: IpAddr, endpoint: Option<&str>) -> bool {
+        self.is_rate_limited_with_clock(peer, endpoint, Instant::now)
     }
 
-    fn is_rate_limited(&self, peer: IpAddr, endpoint: Option<&str>) -> bool {
-        let now = Instant::now();
-        let window = Duration::from_secs(60);
-        let limit = match endpoint {
-            Some(ep) => self.effective_limit(ep),
-            None => self.max_requests_per_minute,
-        };
-
-        if limit == 0 {
-            return false; // No limit = disabled
-        }
-
-        let mut shard = self
-            .shard_for(peer)
-            .lock()
-            .expect("rate limiter shard lock poisoned");
-        // Prune entries in this shard
-        shard.retain(|_, track| {
-            track.prune(window);
-            !track.timestamps.is_empty()
-        });
-
-        let track = shard.entry(peer).or_insert_with(IpTrack::new);
-
-        // Per-endpoint limit: use dedicated endpoint counter
-        if let Some(ep) = endpoint {
-            let count = track.endpoint_counts.get(ep).copied().unwrap_or(0);
-            if count >= limit {
-                return true;
-            }
-            track.timestamps.push(now);
-            *track.endpoint_counts.entry(ep.to_string()).or_insert(0) += 1;
+    fn is_rate_limited_with_clock(
+        &self,
+        peer: IpAddr,
+        endpoint: Option<&str>,
+        clock: impl FnOnce() -> Instant,
+    ) -> bool {
+        let endpoint_limit = endpoint
+            .and_then(|route| self.endpoint_limits.get(route))
+            .copied()
+            .unwrap_or(0);
+        if self.max_requests_per_minute == 0 && endpoint_limit == 0 {
             return false;
         }
 
-        // Global per-IP limit: use total timestamp count
-        if track.timestamps.len() >= limit {
+        let mut shard = self.shard_for(peer).lock();
+        // Read the clock under the lock so concurrent requests append in order.
+        let now = clock();
+        // Sweep inactive peers at most once per window, rather than on every
+        // request. The touched peer is always pruned before enforcing its caps.
+        if now.saturating_duration_since(shard.last_cleanup) >= WINDOW {
+            shard.prune(now);
+        }
+        let track = shard.requests.entry(peer).or_insert_with(IpTrack::new);
+        track.prune(now, WINDOW);
+        if self.max_requests_per_minute > 0
+            && track.timestamps.len() >= self.max_requests_per_minute
+        {
             return true;
         }
-        track.timestamps.push(now);
+        if let Some(route) = endpoint {
+            if endpoint_limit > 0
+                && track
+                    .endpoint_timestamps
+                    .get(route)
+                    .is_some_and(|timestamps| timestamps.len() >= endpoint_limit)
+            {
+                return true;
+            }
+            track
+                .endpoint_timestamps
+                .entry(route.to_owned())
+                .or_default()
+                .push_back(now);
+        }
+        track.timestamps.push_back(now);
         false
     }
 
-    /// Get current state summary for all tracked IPs.
+    /// Accepted requests tracked in the last 60 seconds. Requests with both
+    /// caps disabled and rejected requests are not counted. Endpoint counts
+    /// use the same window as the per-IP total.
     pub fn get_state(&self) -> RateLimitSummary {
+        self.get_state_with_clock(Instant::now)
+    }
+
+    fn get_state_with_clock(&self, clock: impl Fn() -> Instant) -> RateLimitSummary {
         let mut ips = Vec::new();
         for shard in &self.shards {
-            let requests = shard.lock().expect("rate limiter shard lock poisoned");
-            for (addr, track) in requests.iter() {
+            let mut shard = shard.lock();
+            shard.prune(clock());
+            for (addr, track) in &shard.requests {
                 ips.push(IpSummary {
                     ip: addr.to_string(),
                     request_count: track.timestamps.len(),
-                    endpoint_counts: track.endpoint_counts.clone(),
+                    endpoint_counts: track
+                        .endpoint_timestamps
+                        .iter()
+                        .map(|(route, timestamps)| (route.clone(), timestamps.len()))
+                        .collect(),
                 });
             }
         }
@@ -216,15 +259,14 @@ where
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         if let Some(state) = req.app_data::<Data<RateLimiterState>>() {
-            if state.max_requests_per_minute > 0 {
-                if let Some(peer) = get_client_ip(&req) {
-                    // Extract endpoint path for per-endpoint rate limiting
-                    let endpoint = req.path().to_string();
-                    if state.is_rate_limited(peer, Some(&endpoint)) {
-                        return Box::pin(ready(Err(actix_web::error::ErrorTooManyRequests(
-                            "rate limit exceeded",
-                        ))));
-                    }
+            if let Some(peer) = get_client_ip(&req) {
+                // App middleware runs before routing sets match_pattern().
+                // Resolve against the router's map, including scope prefixes.
+                let endpoint = req.resource_map().match_pattern(req.path());
+                if state.is_rate_limited(peer, Some(endpoint.as_deref().unwrap_or("<unmatched>"))) {
+                    return Box::pin(ready(Err(actix_web::error::ErrorTooManyRequests(
+                        "rate limit exceeded",
+                    ))));
                 }
             }
         }
@@ -266,6 +308,98 @@ pub fn parse_x_forwarded_for(value: &str) -> Option<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn endpoint_window_expires_while_another_endpoint_stays_active() {
+        let mut state = RateLimiterState::new(100);
+        state.set_endpoint_limit("/admin/compact", 2);
+        let peer = "127.0.0.1".parse().unwrap();
+        let start = Instant::now();
+        let request = |route, seconds| {
+            state.is_rate_limited_with_clock(peer, Some(route), || {
+                start + Duration::from_secs(seconds)
+            })
+        };
+        assert!(!request("/admin/compact", 0));
+        assert!(!request("/admin/compact", 1));
+        assert!(request("/admin/compact", 2));
+        assert!(!request("/health/liveness", 30));
+        assert!(request("/admin/compact", 59));
+        assert!(!request("/admin/compact", 60));
+        assert!(request("/admin/compact", 60));
+        assert!(!request("/admin/compact", 61));
+    }
+
+    #[test]
+    fn global_limit_applies_across_endpoints() {
+        let state = RateLimiterState::new(2);
+        let peer = "127.0.0.1".parse().unwrap();
+        assert!(!state.is_rate_limited(peer, Some("/keys")));
+        assert!(!state.is_rate_limited(peer, Some("/stats")));
+        assert!(state.is_rate_limited(peer, Some("/health/liveness")));
+    }
+
+    #[test]
+    fn zero_endpoint_limit_does_not_disable_the_global_limit() {
+        let mut state = RateLimiterState::new(1);
+        state.set_endpoint_limit("/keys", 0);
+        let peer = "127.0.0.1".parse().unwrap();
+        assert!(!state.is_rate_limited(peer, Some("/keys")));
+        assert!(state.is_rate_limited(peer, Some("/keys")));
+    }
+
+    #[test]
+    fn summary_counts_only_accepted_requests_in_the_current_window() {
+        let mut state = RateLimiterState::new(10);
+        state.set_endpoint_limit("/admin/compact", 1);
+        let peer = "127.0.0.1".parse().unwrap();
+        let start = Instant::now();
+        assert!(!state.is_rate_limited_with_clock(peer, Some("/admin/compact"), || start));
+        assert!(
+            state.is_rate_limited_with_clock(peer, Some("/admin/compact"), || {
+                start + Duration::from_secs(20)
+            })
+        );
+        assert!(!state.is_rate_limited_with_clock(peer, Some("/keys"), || {
+            start + Duration::from_secs(30)
+        }));
+        let summary = state.get_state_with_clock(|| start + Duration::from_secs(59));
+        assert_eq!(summary.tracked_ips[0].request_count, 2);
+        assert_eq!(summary.tracked_ips[0].endpoint_counts["/admin/compact"], 1);
+        assert_eq!(summary.tracked_ips[0].endpoint_counts["/keys"], 1);
+        let summary = state.get_state_with_clock(|| start + Duration::from_secs(60));
+        assert_eq!(summary.tracked_ips[0].request_count, 1);
+        assert_eq!(summary.tracked_ips[0].endpoint_counts.len(), 1);
+        assert_eq!(summary.tracked_ips[0].endpoint_counts["/keys"], 1);
+        assert!(state
+            .get_state_with_clock(|| start + Duration::from_secs(90))
+            .tracked_ips
+            .is_empty());
+    }
+
+    #[test]
+    fn concurrent_requests_share_a_cap_but_different_peers_do_not() {
+        let state = RateLimiterState::new(7);
+        let peer = "127.0.0.1".parse().unwrap();
+        let barrier = std::sync::Barrier::new(20);
+        let accepted = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..20)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        !state.is_rate_limited(peer, Some("/keys"))
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| usize::from(handle.join().unwrap()))
+                .sum::<usize>()
+        });
+        assert_eq!(accepted, 7);
+        assert_eq!(state.get_state().tracked_ips[0].request_count, 7);
+        assert!(!state.is_rate_limited("127.0.0.2".parse().unwrap(), Some("/keys")));
+    }
 
     #[test]
     fn test_rate_limiter_basic() {

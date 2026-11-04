@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Propagate CI and benchmark failures, reject empty benchmark reports, and require validation before release. Publishing is blocked while root-only dependency patches remain.
 - Make compaction stress input reproducible and correct the property-test reference model for repeated keys.
 
+- Expire per-route rate-limit counters in the same sliding 60-second window as per-IP totals. Enforce global and endpoint caps independently, group dynamic URLs by registered route, and prune inactive peers periodically (#414).
+
 ### API compatibility notes
 
 - **Breaking:** `api::auth::token::generate_token()` now returns `Result<String, AuthError>` instead of `String`. Direct callers must propagate or handle entropy-source failures (for example, `let token = generate_token()?;`). `TokenManager::create_token` keeps its existing result type; token encoding and encrypted storage formats remain unchanged.
