@@ -1,3 +1,5 @@
+mod common;
+
 use apexstore::infra::config::LsmConfig;
 use apexstore::storage::cache::GlobalBlockCache;
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -26,23 +28,14 @@ fn setup_temp_dir(name: &str) -> (TempDir, PathBuf) {
 }
 
 fn generate_key(index: usize, key_size: usize) -> String {
-    let prefix = format!("key_{}_{:08x}_", index, index);
-    let padding_size = key_size.saturating_sub(prefix.len());
-    let padding = if padding_size > 0 {
-        &"x".repeat(padding_size.min(64))
-    } else {
-        ""
-    };
-    format!("{}{}", prefix, padding)
+    let mut key = format!("{index:08x}");
+    key.extend(std::iter::repeat_n('x', key_size.saturating_sub(key.len())));
+    key
 }
 
 fn generate_value(index: usize, value_size: usize) -> Vec<u8> {
-    let pattern = format!("val_{}_{:08x}_", index, index);
-    let remaining = value_size.saturating_sub(pattern.len());
-    let fill_count = remaining.min(64);
-    let mut value = pattern.into_bytes();
-    value.extend(std::iter::repeat_n(b'x', fill_count));
-    value.truncate(value_size);
+    let mut value = format!("val_{index:08x}_").into_bytes();
+    value.resize(value_size, b'x');
     value
 }
 
@@ -92,9 +85,7 @@ fn bench_read_latency_memtable_1k(c: &mut Criterion) {
     .unwrap();
     let keys: Vec<String> = (0..1_000).map(|i| generate_key(i, 10)).collect();
     let values: Vec<Vec<u8>> = (0..1_000).map(|i| generate_value(i, 100)).collect();
-    for (key, value) in keys.iter().zip(values.iter()) {
-        engine.set(key.clone(), value.clone()).unwrap();
-    }
+    common::populate(&engine, keys.iter().cloned().zip(values)).unwrap();
 
     let mut all_latencies = Vec::with_capacity(1_000);
     group.bench_function("memtable_1k", |b| {
@@ -102,7 +93,12 @@ fn bench_read_latency_memtable_1k(c: &mut Criterion) {
             all_latencies.clear();
             for key in keys.iter() {
                 let start = Instant::now();
-                let _ = engine.get(key.as_str()).unwrap();
+                criterion::black_box(
+                    engine
+                        .get(key.as_str())
+                        .unwrap()
+                        .expect("fixture key exists"),
+                );
                 all_latencies.push(start.elapsed().as_nanos() as u64);
             }
         });
@@ -124,9 +120,7 @@ fn bench_read_latency_memtable_100k(c: &mut Criterion) {
     .unwrap();
     let keys: Vec<String> = (0..100_000).map(|i| generate_key(i, 10)).collect();
     let values: Vec<Vec<u8>> = (0..100_000).map(|i| generate_value(i, 100)).collect();
-    for (key, value) in keys.iter().zip(values.iter()) {
-        engine.set(key.clone(), value.clone()).unwrap();
-    }
+    common::populate(&engine, keys.iter().cloned().zip(values)).unwrap();
 
     let mut all_latencies = Vec::with_capacity(1_000);
     group.bench_function("memtable_100k", |b| {
@@ -134,7 +128,12 @@ fn bench_read_latency_memtable_100k(c: &mut Criterion) {
             all_latencies.clear();
             for key in keys.iter() {
                 let start = Instant::now();
-                let _ = engine.get(key.as_str()).unwrap();
+                criterion::black_box(
+                    engine
+                        .get(key.as_str())
+                        .unwrap()
+                        .expect("fixture key exists"),
+                );
                 all_latencies.push(start.elapsed().as_nanos() as u64);
             }
         });
@@ -160,17 +159,22 @@ fn bench_read_latency_sstable_1k(c: &mut Criterion) {
     .unwrap();
     let keys: Vec<String> = (0..1_000).map(|i| generate_key(i, 10)).collect();
     let values: Vec<Vec<u8>> = (0..1_000).map(|i| generate_value(i, 100)).collect();
-    for (key, value) in keys.iter().zip(values.iter()) {
-        engine.set(key.clone(), value.clone()).unwrap();
-    }
+    common::populate(&engine, keys.iter().cloned().zip(values)).unwrap();
+    engine.flush_memtable().unwrap();
+    assert_eq!(engine.stats("default").unwrap().mem_records, 0);
 
     let mut all_latencies = Vec::with_capacity(1_000);
-    group.bench_function("sstable_cold_1k", |b| {
+    group.bench_function("sstable_warm_1k", |b| {
         b.iter(|| {
             all_latencies.clear();
             for key in keys.iter() {
                 let start = Instant::now();
-                let _ = engine.get(key.as_str()).unwrap();
+                criterion::black_box(
+                    engine
+                        .get(key.as_str())
+                        .unwrap()
+                        .expect("fixture key exists"),
+                );
                 all_latencies.push(start.elapsed().as_nanos() as u64);
             }
         });
@@ -192,17 +196,22 @@ fn bench_read_latency_sstable_100k(c: &mut Criterion) {
     .unwrap();
     let keys: Vec<String> = (0..100_000).map(|i| generate_key(i, 10)).collect();
     let values: Vec<Vec<u8>> = (0..100_000).map(|i| generate_value(i, 100)).collect();
-    for (key, value) in keys.iter().zip(values.iter()) {
-        engine.set(key.clone(), value.clone()).unwrap();
-    }
+    common::populate(&engine, keys.iter().cloned().zip(values)).unwrap();
+    engine.flush_memtable().unwrap();
+    assert_eq!(engine.stats("default").unwrap().mem_records, 0);
 
     let mut all_latencies = Vec::with_capacity(1_000);
-    group.bench_function("sstable_cold_100k", |b| {
+    group.bench_function("sstable_warm_100k", |b| {
         b.iter(|| {
             all_latencies.clear();
             for key in keys.iter() {
                 let start = Instant::now();
-                let _ = engine.get(key.as_str()).unwrap();
+                criterion::black_box(
+                    engine
+                        .get(key.as_str())
+                        .unwrap()
+                        .expect("fixture key exists"),
+                );
                 all_latencies.push(start.elapsed().as_nanos() as u64);
             }
         });
