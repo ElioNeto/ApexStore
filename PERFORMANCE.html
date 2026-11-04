@@ -186,107 +186,107 @@ by hand -- edits are overwritten. The workflow commits only when the numbers
 actually change, and fails rather than publishing an empty table.</p>
 <!-- BENCHMARK_RESULTS_START -->
 <blockquote>
-<p>Auto-updated by CI on <strong>2026-11-04 13:20 UTC</strong> — <a href="https://github.com/ElioNeto/ApexStore/actions/runs/41835289719">view run</a>
-Runner: <code>Linux</code> (GitHub-hosted). Commit: <code>10513855aa95d49accbd28edc2674dc8434e58ed</code>.</p>
+<p>Auto-updated by CI on <strong>2026-11-04 15:17 UTC</strong> — <a href="https://github.com/ElioNeto/ApexStore/actions/runs/41854690620">view run</a>
+Runner: <code>Linux</code> (GitHub-hosted). Commit: <code>ca76e1c12acd42deb0a1f015cad1a38d7db4666f</code>.</p>
 </blockquote>
 <p><strong>📝 Write</strong></p>
 <div class="table-wrapper"><table><thead><tr><th>Benchmark</th><th style="text-align: center">Median</th><th style="text-align: center">Perf</th></tr></thead><tbody>
-<tr><td><code>write_single/10</code></td><td style="text-align: center">57.531 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>write_single/1024</code></td><td style="text-align: center">74.528 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>write_batch_1000/1000</code></td><td style="text-align: center">58.117 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>write_batch_10000/10000</code></td><td style="text-align: center">587.94 ms</td><td style="text-align: center">🔴</td></tr>
-<tr><td><code>memtable_flush_8/8</code></td><td style="text-align: center">78.968 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>sstable_flush/10000</code></td><td style="text-align: center">16.771 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>write_size_10_100/10x100</code></td><td style="text-align: center">57.448 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>write_size_100_10000/100x10000</code></td><td style="text-align: center">111.05 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>key_updates/10k_keys</code></td><td style="text-align: center">548.30 ms</td><td style="text-align: center">🔴</td></tr>
-<tr><td><code>delete_operations/10k_keys</code></td><td style="text-align: center">526.24 ms</td><td style="text-align: center">🔴</td></tr>
+<tr><td><code>write_single/10</code></td><td style="text-align: center">59.936 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>write_single/1024</code></td><td style="text-align: center">76.417 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>write_batch_1000/1000</code></td><td style="text-align: center">62.524 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>write_batch_10000/10000</code></td><td style="text-align: center">588.31 ms</td><td style="text-align: center">🔴</td></tr>
+<tr><td><code>memtable_flush_8/8</code></td><td style="text-align: center">74.811 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>sstable_flush/10000</code></td><td style="text-align: center">16.637 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>write_size_10_100/10x100</code></td><td style="text-align: center">58.513 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>write_size_100_10000/100x10000</code></td><td style="text-align: center">111.47 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>key_updates/10k_keys</code></td><td style="text-align: center">467.83 ms</td><td style="text-align: center">🔴</td></tr>
+<tr><td><code>delete_operations/10k_keys</code></td><td style="text-align: center">437.67 ms</td><td style="text-align: center">🔴</td></tr>
 </tbody></table>
 </div>
 <p><strong>📚 Read</strong></p>
 <div class="table-wrapper"><table><thead><tr><th>Benchmark</th><th style="text-align: center">Median</th><th style="text-align: center">Perf</th></tr></thead><tbody>
-<tr><td><code>read_memtable/1000</code></td><td style="text-align: center">276.30 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>read_memtable/10000</code></td><td style="text-align: center">303.74 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>read_sstable_cold/1000</code></td><td style="text-align: center">497.65 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>read_sstable_cold/10000</code></td><td style="text-align: center">540.75 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>read_sstable_warm/1000</code></td><td style="text-align: center">496.35 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>read_sstable_warm/10000</code></td><td style="text-align: center">599.18 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>read_latency/memtable_1k</code></td><td style="text-align: center">253.65 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>read_latency/sstable_cold_1k</code></td><td style="text-align: center">496.10 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>read_memtable_latency/memtable_1k</code></td><td style="text-align: center">257.77 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>read_sstable_warm_latency/sstable_warm_1k</code></td><td style="text-align: center">504.86 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>read_latency_memtable_1k/memtable_1k</code></td><td style="text-align: center">246.42 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>read_latency_memtable_100k/memtable_100k</code></td><td style="text-align: center">41.789 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>read_latency_sstable_1k/sstable_warm_1k</code></td><td style="text-align: center">431.73 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>read_latency_sstable_100k/sstable_warm_100k</code></td><td style="text-align: center">191.07 ms</td><td style="text-align: center">🔴</td></tr>
+<tr><td><code>read_memtable/1000</code></td><td style="text-align: center">200.15 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>read_memtable/10000</code></td><td style="text-align: center">205.09 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>read_sstable_cold/1000</code></td><td style="text-align: center">340.38 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>read_sstable_cold/10000</code></td><td style="text-align: center">355.52 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>read_sstable_warm/1000</code></td><td style="text-align: center">337.56 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>read_sstable_warm/10000</code></td><td style="text-align: center">409.28 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>read_latency/memtable_1k</code></td><td style="text-align: center">186.78 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>read_latency/sstable_cold_1k</code></td><td style="text-align: center">341.78 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>read_memtable_latency/memtable_1k</code></td><td style="text-align: center">186.08 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>read_sstable_warm_latency/sstable_warm_1k</code></td><td style="text-align: center">348.27 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>read_latency_memtable_1k/memtable_1k</code></td><td style="text-align: center">308.95 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>read_latency_memtable_100k/memtable_100k</code></td><td style="text-align: center">44.636 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>read_latency_sstable_1k/sstable_warm_1k</code></td><td style="text-align: center">545.33 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>read_latency_sstable_100k/sstable_warm_100k</code></td><td style="text-align: center">242.00 ms</td><td style="text-align: center">🔴</td></tr>
 </tbody></table>
 </div>
 <p><strong>🔍 Scan</strong></p>
 <div class="table-wrapper"><table><thead><tr><th>Benchmark</th><th style="text-align: center">Median</th><th style="text-align: center">Perf</th></tr></thead><tbody>
-<tr><td><code>scan_sequential/1000</code></td><td style="text-align: center">457.40 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>scan_sequential/10000</code></td><td style="text-align: center">4.9477 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>full_scan/1000</code></td><td style="text-align: center">612.61 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>full_scan/10000</code></td><td style="text-align: center">8.8271 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>range_scan_100/100</code></td><td style="text-align: center">4.9322 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>prefix_scan_100/100</code></td><td style="text-align: center">5.1235 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>prefix_scan_1000/1000</code></td><td style="text-align: center">5.2024 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>iteration_sorted/1000</code></td><td style="text-align: center">639.99 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>iteration_sorted/10000</code></td><td style="text-align: center">8.7048 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>scan_limit_10/10</code></td><td style="text-align: center">4.7100 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>scan_limit_100/100</code></td><td style="text-align: center">4.3408 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>scan_pagination/10</code></td><td style="text-align: center">45.336 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>scan_pagination/100</code></td><td style="text-align: center">518.05 ms</td><td style="text-align: center">🔴</td></tr>
+<tr><td><code>scan_sequential/1000</code></td><td style="text-align: center">355.21 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>scan_sequential/10000</code></td><td style="text-align: center">3.8204 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>full_scan/1000</code></td><td style="text-align: center">500.69 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>full_scan/10000</code></td><td style="text-align: center">7.1956 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>range_scan_100/100</code></td><td style="text-align: center">5.1518 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>prefix_scan_100/100</code></td><td style="text-align: center">5.6304 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>prefix_scan_1000/1000</code></td><td style="text-align: center">5.5565 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>iteration_sorted/1000</code></td><td style="text-align: center">528.60 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>iteration_sorted/10000</code></td><td style="text-align: center">7.1925 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>scan_limit_10/10</code></td><td style="text-align: center">4.9925 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>scan_limit_100/100</code></td><td style="text-align: center">4.7942 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>scan_pagination/10</code></td><td style="text-align: center">48.652 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>scan_pagination/100</code></td><td style="text-align: center">574.42 ms</td><td style="text-align: center">🔴</td></tr>
 </tbody></table>
 </div>
 <p><strong>🌐 YCSB</strong></p>
 <div class="table-wrapper"><table><thead><tr><th>Benchmark</th><th style="text-align: center">Median</th><th style="text-align: center">Perf</th></tr></thead><tbody>
-<tr><td><code>ycsb_type_a/10000</code></td><td style="text-align: center">22.851 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>ycsb_type_b/10000</code></td><td style="text-align: center">3.6004 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>ycsb_type_c/10000</code></td><td style="text-align: center">715.16 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>ycsb_type_c/100000</code></td><td style="text-align: center">2.2252 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>ycsb_type_a/10000</code></td><td style="text-align: center">27.788 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>ycsb_type_b/10000</code></td><td style="text-align: center">4.0933 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>ycsb_type_c/10000</code></td><td style="text-align: center">671.95 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>ycsb_type_c/100000</code></td><td style="text-align: center">2.0274 ms</td><td style="text-align: center">🟠</td></tr>
 </tbody></table>
 </div>
 <p><strong>⚡ Mixed Workload</strong></p>
 <div class="table-wrapper"><table><thead><tr><th>Benchmark</th><th style="text-align: center">Median</th><th style="text-align: center">Perf</th></tr></thead><tbody>
-<tr><td><code>workload_balanced/10000</code></td><td style="text-align: center">22.039 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>workload_read_heavy/10000</code></td><td style="text-align: center">5.5901 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>workload_write_heavy/10000</code></td><td style="text-align: center">38.439 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>workload_balanced/10000</code></td><td style="text-align: center">30.912 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>workload_read_heavy/10000</code></td><td style="text-align: center">7.6168 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>workload_write_heavy/10000</code></td><td style="text-align: center">56.145 ms</td><td style="text-align: center">🟠</td></tr>
 </tbody></table>
 </div>
 <p><strong>🏗️ SSTable</strong></p>
 <div class="table-wrapper"><table><thead><tr><th>Benchmark</th><th style="text-align: center">Median</th><th style="text-align: center">Perf</th></tr></thead><tbody>
-<tr><td><code>sstable_layer_1/1</code></td><td style="text-align: center">4.8814 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>many_sstables_10/10</code></td><td style="text-align: center">556.34 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>sstable_layer_1/1</code></td><td style="text-align: center">6.9450 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>many_sstables_10/10</code></td><td style="text-align: center">538.87 µs</td><td style="text-align: center">🟡</td></tr>
 </tbody></table>
 </div>
 <p><strong>🧵 Bloom Filter</strong></p>
 <div class="table-wrapper"><table><thead><tr><th>Benchmark</th><th style="text-align: center">Median</th><th style="text-align: center">Perf</th></tr></thead><tbody>
-<tr><td><code>bloom_filter/10000</code></td><td style="text-align: center">12.599 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>bloom_filter/10000</code></td><td style="text-align: center">7.3461 ms</td><td style="text-align: center">🟠</td></tr>
 </tbody></table>
 </div>
 <p><strong>💾 Cache</strong></p>
 <div class="table-wrapper"><table><thead><tr><th>Benchmark</th><th style="text-align: center">Median</th><th style="text-align: center">Perf</th></tr></thead><tbody>
-<tr><td><code>cache_thrash_64MB/64</code></td><td style="text-align: center">99.077 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>cache_thrash_64MB/64</code></td><td style="text-align: center">98.808 µs</td><td style="text-align: center">🟡</td></tr>
 </tbody></table>
 </div>
 <p><strong>🧵 Concurrency</strong></p>
 <div class="table-wrapper"><table><thead><tr><th>Benchmark</th><th style="text-align: center">Median</th><th style="text-align: center">Perf</th></tr></thead><tbody>
-<tr><td><code>concurrent_1_threads/1</code></td><td style="text-align: center">3.2062 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>concurrent_1_threads/1</code></td><td style="text-align: center">3.5099 ms</td><td style="text-align: center">🟠</td></tr>
 </tbody></table>
 </div>
 <p><strong>💡 Memory</strong></p>
 <div class="table-wrapper"><table><thead><tr><th>Benchmark</th><th style="text-align: center">Median</th><th style="text-align: center">Perf</th></tr></thead><tbody>
-<tr><td><code>memory_pressure/small_memtable</code></td><td style="text-align: center">267.14 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>memory_pressure/small_memtable</code></td><td style="text-align: center">267.91 µs</td><td style="text-align: center">🟡</td></tr>
 </tbody></table>
 </div>
 <p><strong>⚙️ Other</strong></p>
 <div class="table-wrapper"><table><thead><tr><th>Benchmark</th><th style="text-align: center">Median</th><th style="text-align: center">Perf</th></tr></thead><tbody>
-<tr><td><code>read_negative_bloom/negative_bloom_10k</code></td><td style="text-align: center">1.0560 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>scan_1000_keys/scan_1k</code></td><td style="text-align: center">461.37 µs</td><td style="text-align: center">🟡</td></tr>
-<tr><td><code>write_latency_1k/write_1k</code></td><td style="text-align: center">46.227 ms</td><td style="text-align: center">🟠</td></tr>
-<tr><td><code>write_latency_100k/write_100k</code></td><td style="text-align: center">7.5658 s</td><td style="text-align: center">🔴</td></tr>
-<tr><td><code>write_amplification_leveled/leveled_10k_keys</code></td><td style="text-align: center">664.91 ms</td><td style="text-align: center">🔴</td></tr>
-<tr><td><code>write_amplification_size_tiered/size_tiered_10k_keys</code></td><td style="text-align: center">653.63 ms</td><td style="text-align: center">🔴</td></tr>
+<tr><td><code>read_negative_bloom/negative_bloom_10k</code></td><td style="text-align: center">753.37 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>scan_1000_keys/scan_1k</code></td><td style="text-align: center">358.28 µs</td><td style="text-align: center">🟡</td></tr>
+<tr><td><code>write_latency_1k/write_1k</code></td><td style="text-align: center">63.836 ms</td><td style="text-align: center">🟠</td></tr>
+<tr><td><code>write_latency_100k/write_100k</code></td><td style="text-align: center">6.7286 s</td><td style="text-align: center">🔴</td></tr>
+<tr><td><code>write_amplification_leveled/leveled_10k_keys</code></td><td style="text-align: center">656.32 ms</td><td style="text-align: center">🔴</td></tr>
+<tr><td><code>write_amplification_size_tiered/size_tiered_10k_keys</code></td><td style="text-align: center">635.79 ms</td><td style="text-align: center">🔴</td></tr>
 </tbody></table>
 </div><!-- BENCHMARK_RESULTS_END -->
 <p>Run them locally with <code>make bench</code>, or <code>cargo bench --all-features</code> for HTML
