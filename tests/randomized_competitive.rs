@@ -409,8 +409,17 @@ fn test_random_scan_consistency() {
 #[test]
 fn test_flush_compaction_stress() {
     let (_dir, engine) = create_engine();
-    let mut rng = rand::thread_rng();
-    let mut model = HashMap::new();
+    use rand::SeedableRng;
+    let seed = std::env::var("APEXSTORE_STRESS_SEED")
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .expect("APEXSTORE_STRESS_SEED must be a u64")
+        })
+        .unwrap_or(430);
+    eprintln!("  Compaction stress seed: {seed}");
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let mut model = std::collections::BTreeMap::new();
 
     // Phase 1: Write many keys to force flushes
     eprintln!("  Phase 1: Writing 5000 keys with 32KB memtable...");
@@ -432,7 +441,8 @@ fn test_flush_compaction_stress() {
 
     // Phase 2: Compact
     eprintln!("  Phase 2: Compacting...");
-    if let Ok(results) = engine.compact() {
+    {
+        let results = engine.compact().expect("initial compaction should succeed");
         for (cf, m) in &results {
             eprintln!(
                 "    CF '{}': {} files merged, {} bytes read/written",
@@ -464,7 +474,9 @@ fn test_flush_compaction_stress() {
         engine.delete(key.as_slice()).unwrap();
         model.remove(key);
     }
-    let _ = engine.compact();
+    engine
+        .compact()
+        .expect("compaction after deletes should succeed");
 
     // Phase 5: Verify remaining data
     eprintln!("  Phase 5: Verifying {} remaining keys...", model.len());
