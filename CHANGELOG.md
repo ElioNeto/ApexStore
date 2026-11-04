@@ -36,7 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Expire per-route rate-limit counters in the same sliding 60-second window as per-IP totals. Enforce global and endpoint caps independently, group dynamic URLs by registered route, and prune inactive peers periodically (#414).
 
+- Bind REST transactions to their authenticated token, use random UUID v4 identifiers, expire them after five minutes and enforce per-token/global limits. Reject foreign transactions without removing or changing them (#438).
+
 ### API compatibility notes
+
+- **Breaking:** REST `txn_id` is now a UUID string instead of an integer. Reuse the returned string in transaction URLs; ownership belongs to the creating token, including for administrators. `TransactionManager` no longer exposes its map or unauthenticated `begin`/`take` methods; embedded HTTP apps can configure bounds with `with_limits`.
 
 - **Breaking:** `api::auth::token::generate_token()` now returns `Result<String, AuthError>` instead of `String`. Direct callers must propagate or handle entropy-source failures (for example, `let token = generate_token()?;`). `TokenManager::create_token` keeps its existing result type; token encoding and encrypted storage formats remain unchanged.
 

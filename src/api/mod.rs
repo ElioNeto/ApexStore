@@ -28,6 +28,8 @@ pub mod sync;
 pub mod test_helpers;
 pub mod timeout_middleware;
 mod tls;
+mod transactions;
+pub use transactions::TransactionManager;
 
 use self::access_control::AccessControl;
 pub use self::auth::{require_permission, Permission, TokenManager};
@@ -35,69 +37,25 @@ pub use self::config::ServerConfig;
 use self::connection_guard::IpConnectionGuard;
 pub use self::graphql::AppSchema;
 use self::rate_limiter::{RateLimiter, RateLimiterState};
-use crate::core::engine::transaction::Transaction;
 use crate::infra::access_control::AccessController;
 use crate::infra::cdc::CdcPublisher;
 use crate::infra::idempotency::IdempotencyMiddleware;
-use crate::storage::cache::GlobalBlockCache;
 use crate::LsmEngine;
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
 use actix_web::{
     body::MessageBody, delete, get, patch, post, put, web, App, Error, HttpRequest, HttpResponse,
-    HttpServer, Responder,
+    HttpServer, Responder, ResponseError,
 };
 use actix_web_httpauth::middleware::HttpAuthentication;
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use async_graphql_actix_web::{GraphQLRequest, GraphQLResponse};
 use serde::Deserialize;
 use serde_json::json;
-use std::collections::HashMap;
 use std::future::{ready, Ready};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
-
-// ── Transaction management ──────────────────────────────────────────────────
-
-/// Manages active transactions for the REST API.
-pub struct TransactionManager {
-    /// Map from numeric transaction ID to active transaction.
-    pub transactions: Mutex<HashMap<u64, Transaction<Arc<GlobalBlockCache>>>>,
-    /// Counter for generating transaction IDs.
-    next_id: AtomicU64,
-}
-
-impl Default for TransactionManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TransactionManager {
-    pub fn new() -> Self {
-        Self {
-            transactions: Mutex::new(HashMap::new()),
-            next_id: AtomicU64::new(1),
-        }
-    }
-
-    /// Begin a new transaction and return its numeric ID.
-    pub fn begin(&self, engine: &LsmEngine) -> u64 {
-        let txn = engine.begin_transaction();
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let mut map = self.transactions.lock().unwrap();
-        map.insert(id, txn);
-        id
-    }
-
-    /// Remove and return a transaction by ID (for operations that need to mutate it).
-    /// This is used for put/delete operations that consume the transaction.
-    pub fn take(&self, id: u64) -> Option<Transaction<Arc<GlobalBlockCache>>> {
-        self.transactions.lock().unwrap().remove(&id)
-    }
-}
 
 /// Maximum number of records accepted in a single batch insert request.
 pub const MAX_BATCH_SIZE: usize = 1000;
@@ -1020,10 +978,14 @@ async fn begin_txn(
     engine: web::Data<LsmEngine>,
     txn_mgr: web::Data<TransactionManager>,
 ) -> impl Responder {
-    if let Err(e) = require_permission(&req, Permission::Write) {
-        return *e;
-    }
-    let id = txn_mgr.begin(&engine);
+    let owner = match transactions::owner(&req, Permission::Write) {
+        Ok(owner) => owner,
+        Err(response) => return *response,
+    };
+    let id = match txn_mgr.begin(&engine, owner) {
+        Ok(id) => id,
+        Err(error) => return error.error_response(),
+    };
     HttpResponse::Ok()
         .content_type("application/json")
         .json(json!({ "txn_id": id }))
@@ -1035,12 +997,13 @@ async fn txn_put(
     req: HttpRequest,
     engine: web::Data<LsmEngine>,
     txn_mgr: web::Data<TransactionManager>,
-    path: web::Path<u64>,
+    path: web::Path<String>,
     body: web::Json<TxnPutBody>,
 ) -> impl Responder {
-    if let Err(e) = require_permission(&req, Permission::Write) {
-        return *e;
-    }
+    let owner = match transactions::owner(&req, Permission::Write) {
+        Ok(owner) => owner,
+        Err(response) => return *response,
+    };
     if keyspace::is_reserved(body.key.as_bytes()) {
         return keyspace::rejected();
     }
@@ -1053,27 +1016,18 @@ async fn txn_put(
             .json(json!({ "error": msg }));
     }
 
-    let mut txn = match txn_mgr.take(txn_id) {
-        Some(t) => t,
-        None => {
-            return HttpResponse::NotFound()
-                .content_type("application/json")
-                .json(json!({ "error": "transaction not found" }));
-        }
-    };
-
     let cf = body.cf.as_deref().unwrap_or("default");
-    if let Err(e) = txn.put_cf(cf, body.key.as_bytes(), body.value.as_bytes()) {
-        tracing::error!(target: "apexstore::api", "txn put failed: {:?}", e);
-        // Re-insert the transaction even on error
-        txn_mgr.transactions.lock().unwrap().insert(txn_id, txn);
-        return HttpResponse::InternalServerError()
-            .content_type("application/json")
-            .json(json!({ "error": "internal server error" }));
+    match txn_mgr.with_transaction(&txn_id, &owner, |txn| {
+        txn.put_cf(cf, body.key.as_bytes(), body.value.as_bytes())
+    }) {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            tracing::error!(target: "apexstore::api", "txn put failed: {error:?}");
+            return HttpResponse::InternalServerError()
+                .json(json!({ "error": "internal server error" }));
+        }
+        Err(error) => return error.error_response(),
     }
-
-    // Re-insert transaction after modification
-    txn_mgr.transactions.lock().unwrap().insert(txn_id, txn);
     HttpResponse::Ok()
         .content_type("application/json")
         .json(json!({ "status": "ok" }))
@@ -1085,12 +1039,13 @@ async fn txn_delete(
     req: HttpRequest,
     engine: web::Data<LsmEngine>,
     txn_mgr: web::Data<TransactionManager>,
-    path: web::Path<u64>,
+    path: web::Path<String>,
     body: web::Json<TxnDeleteBody>,
 ) -> impl Responder {
-    if let Err(e) = require_permission(&req, Permission::Delete) {
-        return *e;
-    }
+    let owner = match transactions::owner(&req, Permission::Delete) {
+        Ok(owner) => owner,
+        Err(response) => return *response,
+    };
     if keyspace::is_reserved(body.key.as_bytes()) {
         return keyspace::rejected();
     }
@@ -1103,25 +1058,18 @@ async fn txn_delete(
             .json(json!({ "error": msg }));
     }
 
-    let mut txn = match txn_mgr.take(txn_id) {
-        Some(t) => t,
-        None => {
-            return HttpResponse::NotFound()
-                .content_type("application/json")
-                .json(json!({ "error": "transaction not found" }));
-        }
-    };
-
     let cf = body.cf.as_deref().unwrap_or("default");
-    if let Err(e) = txn.delete_cf(cf, body.key.as_bytes()) {
-        tracing::error!(target: "apexstore::api", "txn delete failed: {:?}", e);
-        txn_mgr.transactions.lock().unwrap().insert(txn_id, txn);
-        return HttpResponse::InternalServerError()
-            .content_type("application/json")
-            .json(json!({ "error": "internal server error" }));
+    match txn_mgr.with_transaction(&txn_id, &owner, |txn| {
+        txn.delete_cf(cf, body.key.as_bytes())
+    }) {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            tracing::error!(target: "apexstore::api", "txn delete failed: {error:?}");
+            return HttpResponse::InternalServerError()
+                .json(json!({ "error": "internal server error" }));
+        }
+        Err(error) => return error.error_response(),
     }
-
-    txn_mgr.transactions.lock().unwrap().insert(txn_id, txn);
     HttpResponse::Ok()
         .content_type("application/json")
         .json(json!({ "status": "ok" }))
@@ -1132,20 +1080,17 @@ async fn txn_delete(
 async fn txn_commit(
     req: HttpRequest,
     txn_mgr: web::Data<TransactionManager>,
-    path: web::Path<u64>,
+    path: web::Path<String>,
 ) -> impl Responder {
-    if let Err(e) = require_permission(&req, Permission::Write) {
-        return *e;
-    }
+    let owner = match transactions::owner(&req, Permission::Write) {
+        Ok(owner) => owner,
+        Err(response) => return *response,
+    };
     let txn_id = path.into_inner();
 
-    let mut txn = match txn_mgr.take(txn_id) {
-        Some(t) => t,
-        None => {
-            return HttpResponse::NotFound()
-                .content_type("application/json")
-                .json(json!({ "error": "transaction not found" }));
-        }
+    let mut txn = match txn_mgr.take(&txn_id, &owner) {
+        Ok(txn) => txn,
+        Err(error) => return error.error_response(),
     };
 
     if let Err(e) = txn.commit() {
@@ -1164,20 +1109,17 @@ async fn txn_commit(
 async fn txn_rollback(
     req: HttpRequest,
     txn_mgr: web::Data<TransactionManager>,
-    path: web::Path<u64>,
+    path: web::Path<String>,
 ) -> impl Responder {
-    if let Err(e) = require_permission(&req, Permission::Write) {
-        return *e;
-    }
+    let owner = match transactions::owner(&req, Permission::Write) {
+        Ok(owner) => owner,
+        Err(response) => return *response,
+    };
     let txn_id = path.into_inner();
 
-    let mut txn = match txn_mgr.take(txn_id) {
-        Some(t) => t,
-        None => {
-            return HttpResponse::NotFound()
-                .content_type("application/json")
-                .json(json!({ "error": "transaction not found" }));
-        }
+    let mut txn = match txn_mgr.take(&txn_id, &owner) {
+        Ok(txn) => txn,
+        Err(error) => return error.error_response(),
     };
 
     txn.rollback();
