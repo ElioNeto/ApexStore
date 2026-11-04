@@ -881,6 +881,7 @@ pub(crate) fn rewrite_for_migration(
     destination: &std::path::Path,
     source_encryption: &EncryptionConfig,
     target_encryption: &EncryptionConfig,
+    allow_legacy_zero: bool,
 ) -> Result<u64> {
     let filename = destination
         .file_name()
@@ -901,6 +902,10 @@ pub(crate) fn rewrite_for_migration(
     let mut output = WriteAheadLog::new_with_encryption(parent, cf, target_encryption)?;
     output.set_sync_interval(usize::MAX);
     let encryptor = Encryptor::new(source_encryption);
+    let legacy = Encryptor::new(&EncryptionConfig {
+        enabled: true,
+        key: [0; 32],
+    });
     let mut reader = BufReader::new(File::open(source)?);
     let mut count = 0;
     loop {
@@ -931,7 +936,13 @@ pub(crate) fn rewrite_for_migration(
             WAL_FRAME_VERSION_V1 => LogRecord::from(decode::<LogRecordV1>(&payload)?),
             WAL_FRAME_VERSION_V2 => decode::<LogRecord>(&payload)?,
             WAL_FRAME_VERSION_V3_ENCRYPTED => {
-                decode::<LogRecord>(&encryptor.decrypt_for_recovery(&payload)?)?
+                let plaintext = match encryptor.decrypt_for_recovery(&payload) {
+                    Err(LsmError::LegacyEncryptionMigrationRequired) if allow_legacy_zero => {
+                        legacy.decrypt_block(&payload)?
+                    }
+                    result => result?,
+                };
+                decode::<LogRecord>(&plaintext)?
             }
             _ => return Err(LsmError::WalCorruption),
         };

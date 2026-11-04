@@ -30,6 +30,28 @@ pub fn migrate_encryption(
     source_encryption: &EncryptionConfig,
     target_encryption: &EncryptionConfig,
 ) -> Result<MigrationReport> {
+    migrate_inner(source, output, source_encryption, target_encryption, false)
+}
+
+/// Explicitly authorize both the configured source key and the legacy zero key.
+/// This is only for offline migration of mixed datasets produced by old builds;
+/// normal database recovery must never silently use the legacy key.
+pub fn migrate_encryption_with_legacy_fallback(
+    source: &Path,
+    output: &Path,
+    source_encryption: &EncryptionConfig,
+    target_encryption: &EncryptionConfig,
+) -> Result<MigrationReport> {
+    migrate_inner(source, output, source_encryption, target_encryption, true)
+}
+
+fn migrate_inner(
+    source: &Path,
+    output: &Path,
+    source_encryption: &EncryptionConfig,
+    target_encryption: &EncryptionConfig,
+    allow_legacy_zero: bool,
+) -> Result<MigrationReport> {
     if !cfg!(any(
         target_os = "linux",
         target_os = "android",
@@ -101,6 +123,7 @@ pub fn migrate_encryption(
         staging.path(),
         source_encryption,
         target_encryption,
+        allow_legacy_zero,
         &mut report,
     )?;
     sync_directory(staging.path())?;
@@ -123,6 +146,7 @@ fn rewrite_directory(
     output: &Path,
     from: &EncryptionConfig,
     to: &EncryptionConfig,
+    allow_legacy_zero: bool,
     report: &mut MigrationReport,
 ) -> Result<()> {
     let mut entries = std::fs::read_dir(source)?.collect::<std::io::Result<Vec<_>>>()?;
@@ -166,15 +190,16 @@ fn rewrite_directory(
                 None
             };
             std::fs::create_dir(&target)?;
-            rewrite_directory(&input, &target, from, to, report)?;
+            rewrite_directory(&input, &target, from, to, allow_legacy_zero, report)?;
             sync_directory(&target)?;
         } else if input.extension().is_some_and(|ext| ext == "sst") {
-            rewrite_sstable(&input, &target, from, to)?;
+            rewrite_sstable(&input, &target, from, to, allow_legacy_zero)?;
             report.sstables += 1;
         } else if name.to_str().is_some_and(|name| {
             name == "wal.log" || (name.starts_with("wal-") && name.ends_with(".log"))
         }) {
-            report.wal_frames += super::wal::rewrite_for_migration(&input, &target, from, to)?;
+            report.wal_frames +=
+                super::wal::rewrite_for_migration(&input, &target, from, to, allow_legacy_zero)?;
         } else {
             std::fs::copy(&input, &target)?;
             File::open(&target)?.sync_all()?;
@@ -189,13 +214,25 @@ fn rewrite_sstable(
     target: &Path,
     from: &EncryptionConfig,
     to: &EncryptionConfig,
+    allow_legacy_zero: bool,
 ) -> Result<()> {
-    let reader = SstableReader::open_with_encryption(
-        source.to_path_buf(),
-        StorageConfig::default(),
-        GlobalBlockCache::new(1, 4096),
-        from,
-    )?;
+    let open = |encryption| {
+        SstableReader::open_with_encryption(
+            source.to_path_buf(),
+            StorageConfig::default(),
+            GlobalBlockCache::new(1, 4096),
+            encryption,
+        )
+    };
+    let reader = match open(from) {
+        Err(LsmError::LegacyEncryptionMigrationRequired) if allow_legacy_zero => {
+            open(&EncryptionConfig {
+                enabled: true,
+                key: [0; 32],
+            })?
+        }
+        result => result?,
+    };
     let metadata = reader.metadata();
     let max_block = metadata
         .blocks
