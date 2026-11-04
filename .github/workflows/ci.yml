@@ -24,6 +24,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 2
+  RUST_TEST_THREADS: 2
   # Fail on warnings everywhere. The toolchain is pinned via rust-toolchain.toml,
   # so a new stable release cannot turn CI red without a reviewed commit.
   RUSTFLAGS: "-D warnings"

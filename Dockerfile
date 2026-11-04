@@ -1,7 +1,8 @@
 # ApexStore - High-Performance LSM-Tree Key-Value Store
 # Multi-stage Dockerfile for optimized production builds
 
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+FROM rust:1.99.1-bookworm AS chef
+RUN cargo install cargo-chef --version 0.1.78 --locked
 LABEL stage=builder
 WORKDIR /app
 
@@ -13,11 +14,11 @@ RUN cargo chef prepare --recipe-path recipe.json
 # Stage 2: Build dependencies (cached layer)
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --features api --recipe-path recipe.json
+RUN cargo chef cook --locked --release --features api --recipe-path recipe.json
 
 # Build the application
 COPY . .
-RUN cargo build --release --bin apexstore-server --features api
+RUN cargo build --locked --release --bin apexstore-server --features api
 
 # Stage 3: Runtime image
 FROM debian:bookworm-slim AS runtime
