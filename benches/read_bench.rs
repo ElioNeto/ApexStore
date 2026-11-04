@@ -1,3 +1,5 @@
+mod common;
+
 use apexstore::infra::config::LsmConfig;
 use apexstore::storage::cache::GlobalBlockCache;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -77,9 +79,7 @@ fn bench_read_memtable(c: &mut Criterion) {
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
                 let values: Vec<Vec<u8>> = (0..nk).map(|i| generate_value(i, 100)).collect();
 
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
                 let benchmark_keys: Vec<String> = keys.iter().step_by(nk / 1000).cloned().collect();
                 let benchmark_values: Vec<Vec<u8>> =
@@ -131,9 +131,7 @@ fn bench_read_sstable_cold(c: &mut Criterion) {
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
                 let values: Vec<Vec<u8>> = (0..nk).map(|i| generate_value(i, 100)).collect();
 
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
                 engine.flush_memtable().unwrap();
 
@@ -185,9 +183,7 @@ fn bench_read_sstable_warm(c: &mut Criterion) {
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
                 let values: Vec<Vec<u8>> = (0..nk).map(|i| generate_value(i, 100)).collect();
 
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
                 engine.flush_memtable().unwrap();
 
@@ -244,9 +240,7 @@ fn bench_bloom_filter(c: &mut Criterion) {
                 let existing_keys: Vec<String> = (0..nk).map(|i| generate_key(i, 10)).collect();
                 let values: Vec<Vec<u8>> = (0..nk).map(|i| generate_value(i, 100)).collect();
 
-                for (key, value) in existing_keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, existing_keys.iter().zip(values.iter())).unwrap();
 
                 engine.flush_memtable().unwrap();
 
@@ -290,9 +284,7 @@ fn bench_read_latency(c: &mut Criterion) {
         let keys: Vec<String> = (0..1_000).map(|i| generate_key(i, 10)).collect();
         let values: Vec<Vec<u8>> = (0..1_000).map(|i| generate_value(i, 100)).collect();
 
-        for (key, value) in keys.iter().zip(values.iter()) {
-            engine.set(key.clone(), value.clone()).unwrap();
-        }
+        common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
         b.iter(|| {
             for key in keys.iter() {
@@ -320,9 +312,7 @@ fn bench_read_latency(c: &mut Criterion) {
         let keys: Vec<String> = (0..1_000).map(|i| generate_key(i, 10)).collect();
         let values: Vec<Vec<u8>> = (0..1_000).map(|i| generate_value(i, 100)).collect();
 
-        for (key, value) in keys.iter().zip(values.iter()) {
-            engine.set(key.clone(), value.clone()).unwrap();
-        }
+        common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
         engine.flush_memtable().unwrap();
 
@@ -368,9 +358,7 @@ fn bench_scan_sequential(c: &mut Criterion) {
                 let keys: Vec<String> = (0..nk).map(|i| generate_key(i, ks)).collect();
                 let values: Vec<Vec<u8>> = (0..nk).map(|i| generate_value(i, vs)).collect();
 
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    engine.set(key.clone(), value.clone()).unwrap();
-                }
+                common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
                 engine.flush_memtable().unwrap();
 
@@ -407,9 +395,7 @@ fn bench_read_memtable_latency(c: &mut Criterion) {
         let keys: Vec<String> = (0..1_000).map(|i| generate_key(i, 10)).collect();
         let values: Vec<Vec<u8>> = (0..1_000).map(|i| generate_value(i, 100)).collect();
 
-        for (key, value) in keys.iter().zip(values.iter()) {
-            engine.set(key.clone(), value.clone()).unwrap();
-        }
+        common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
         b.iter(|| {
             for key in keys.iter() {
@@ -444,9 +430,7 @@ fn bench_read_sstable_warm_latency(c: &mut Criterion) {
         let keys: Vec<String> = (0..1_000).map(|i| generate_key(i, 10)).collect();
         let values: Vec<Vec<u8>> = (0..1_000).map(|i| generate_value(i, 100)).collect();
 
-        for (key, value) in keys.iter().zip(values.iter()) {
-            engine.set(key.clone(), value.clone()).unwrap();
-        }
+        common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
         engine.flush_memtable().unwrap();
 
@@ -488,9 +472,7 @@ fn bench_read_negative_bloom(c: &mut Criterion) {
         let existing_keys: Vec<String> = (0..10_000).map(|i| generate_key(i, 10)).collect();
         let values: Vec<Vec<u8>> = (0..10_000).map(|i| generate_value(i, 100)).collect();
 
-        for (key, value) in existing_keys.iter().zip(values.iter()) {
-            engine.set(key.clone(), value.clone()).unwrap();
-        }
+        common::populate(&engine, existing_keys.iter().zip(values.iter())).unwrap();
 
         engine.flush_memtable().unwrap();
 
@@ -530,9 +512,7 @@ fn bench_scan_1000_keys(c: &mut Criterion) {
         let keys: Vec<String> = (0..1_000).map(|i| generate_key(i, 10)).collect();
         let values: Vec<Vec<u8>> = (0..1_000).map(|i| generate_value(i, 100)).collect();
 
-        for (key, value) in keys.iter().zip(values.iter()) {
-            engine.set(key.clone(), value.clone()).unwrap();
-        }
+        common::populate(&engine, keys.iter().zip(values.iter())).unwrap();
 
         engine.flush_memtable().unwrap();
 
