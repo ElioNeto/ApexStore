@@ -121,6 +121,13 @@ apply individual client limits at the proxy as well. Configurable trusted-proxy
 CIDRs and right-to-left forwarding-chain resolution are not implemented yet.
 Do not rely on the old leftmost `X-Forwarded-For` behavior for attribution.
 
+Audit events (`apexstore::audit`) include `client_ip` from the same identity
+policy as rate limiting: the TCP peer, or `unknown` when no peer is available.
+Forwarding headers cannot supply an audit identity. Events preserve the
+actual HTTP response status for middleware errors (for example, 429 for an
+admission refusal) and retain the authenticated principal. Authentication
+failures rejected before the audit middleware are not recorded by this layer.
+
 ## LSM Engine Configuration
 
 ### Storage Settings
