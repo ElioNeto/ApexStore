@@ -186,6 +186,15 @@ jobs:
       - run: npm test -- --watch=false --browsers=ChromeHeadlessNoSandbox
       - run: npm audit --audit-level=high
 
+  container:
+    name: Container persistence and health
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - run: docker build -t apexstore:ci .
+      - run: bash scripts/test-container.sh apexstore:ci
+
   scripts:
     name: CI script regression tests
     runs-on: ubuntu-latest
@@ -203,7 +212,7 @@ jobs:
   report-status:
     name: Report status
     if: always() && github.event_name == 'push'
-    needs: [workflows, fmt, clippy, test, build, msrv, audit, env-example, frontend, scripts]
+    needs: [workflows, fmt, clippy, test, build, msrv, audit, env-example, frontend, scripts, container]
     runs-on: ubuntu-latest
     permissions:
       contents: read

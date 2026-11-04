@@ -54,6 +54,7 @@ successful `CI` run via `workflow_run`.
 | `Security audit` | `cargo audit` (no advisory suppressions) |
 | `.env.example drift` | `scripts/check-env-example.sh` |
 | `Frontend` | `npm ci`, build, test, `npm audit --audit-level=high` |
+| `Container persistence and health` | Build the image, wait for its health check, write/flush/recreate and read the persisted value |
 | `CI script regression tests` | Python and Node regression suites |
 | `Report status` | opens/updates a tracking issue on failure (push only) |
 
