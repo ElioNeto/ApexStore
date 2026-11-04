@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve WAL record timestamps, TTLs and range tombstones during recovery; order point reads against range deletions (#415).
 - Restore container data-volume settings, working health probes, frontend builds, pinned CI tools, release-profile tests and environment documentation checks (#426).
 - Measure compaction duration with a monotonic clock and verify exact output metrics without assuming a minimum execution time.
+- Enforce GraphQL Read/Write/Delete permissions on every field, cap scan/key results, and reject excessive query depth and complexity (#432).
 
 - Preserve unselected SSTables when applying multiple compaction groups; cover manual/background compaction and tombstone-only generation updates (#430).
 - Separate authentication and access-control flags and require authentication when configuration is missing (#431).
@@ -29,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### API compatibility notes
 
 - The server uses `HttpAuthentication::with_fn(request_validator)` to honor explicit authentication disablement without a Bearer header. Only `GET /health/liveness` is public; readiness, startup, detailed health and data routes still require authentication. Custom Actix applications can use the same validator.
+- Direct GraphQL schema callers must attach an authenticated `ApiToken` to request data or explicitly opt out with `AuthEnabled(false)`. The HTTP handler supplies authorization from the bearer middleware; missing context denies access.
 
 - `require_permission` now returns `Result<(), Box<HttpResponse>>`; callers returning its error response directly must dereference it (`return *response`).
 - Applications assembling their own Actix app must register `Data<AuthEnabled>` and `Data<AccessControlEnabled>` instead of shared `Data<bool>` values. Missing authentication configuration now requires a valid token.
