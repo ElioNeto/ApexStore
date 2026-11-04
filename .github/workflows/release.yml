@@ -9,10 +9,18 @@ on:
 
 permissions:
   contents: write  # Required to commit version bump, create tags, and releases
+  issues: write
+  actions: read
+  checks: write
 
 jobs:
+  validation:
+    uses: ./.github/workflows/pr-validation.yml
+    secrets: inherit
+
   release:
     name: Bump version and create release
+    needs: [validation]
     runs-on: ubuntu-latest
     
     # Skip if commit was made by github-actions bot (avoid infinite loop)
@@ -24,6 +32,9 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify publishable dependencies
+        run: python3 scripts/check_release_dependencies.py
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable

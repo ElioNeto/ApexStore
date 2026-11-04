@@ -3,8 +3,7 @@ name: CI / PR Validation
 on:
   pull_request:
     branches: [ main ]
-  push:
-    branches: [ main ]
+  workflow_call:
 
 permissions:
   contents: read
@@ -40,7 +39,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   # Job 3: Segurança (Rápido)
   audit:
@@ -61,7 +60,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all-features --workspace
+      - run: cargo test --locked --all-features --workspace
 
   # Job 5: Build Release e Docs (Pesado)
   build_and_docs:
@@ -72,12 +71,26 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release
-      - run: cargo doc --no-deps --all-features
+      - run: cargo build --locked --release
+      - run: cargo doc --locked --no-deps --all-features
+
+  scripts:
+    name: CI script regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+      - run: npm ci --prefix scripts
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - run: node --import ./scripts/node_modules/tsx/dist/loader.mjs --test scripts/workflow-agent.test.ts
 
   report-status:
     if: always()
-    needs: [fmt, clippy, audit, test, build_and_docs]
+    needs: [fmt, clippy, audit, test, build_and_docs, scripts]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

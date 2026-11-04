@@ -10,6 +10,7 @@ Output: bench_table.txt   (injected into README by the CI workflow)
 """
 from __future__ import annotations
 import re
+import sys
 from collections import defaultdict
 
 # ---------------------------------------------------------------------------
@@ -35,9 +36,14 @@ with open("bench_output.txt") as f:
             if name:
                 parts = m.group(1).split()
                 # Criterion parts: [low_val low_unit med_val med_unit high_val high_unit]
-                median = f"{parts[2]}\u202f{parts[3]}" if len(parts) >= 4 else parts[0]
+                if len(parts) != 6:
+                    sys.exit(f"Malformed Criterion measurement: {line.strip()}")
+                median = f"{parts[2]}\u202f{parts[3]}"
                 results.append((name, median))
             name = None
+
+if not results:
+    sys.exit("No Criterion measurements found; refusing to publish an empty summary.")
 
 # ---------------------------------------------------------------------------
 # 2. Categories  (order defines display order)
