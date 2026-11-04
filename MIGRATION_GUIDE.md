@@ -311,6 +311,24 @@ For rotation from a real key, replace `--legacy-zero-key` with
 source. The target must always be selected explicitly: `--target-key-file` or
 `--plaintext`. Migration never generates or prints a key.
 
+Older compaction bugs can leave a mixture of real-key and legacy zero-key files
+in the same database, or both kinds of frames in one WAL. For that case, supply
+the existing real key **and** explicitly authorize the legacy key:
+
+```bash
+apexstore-cli --db /data/old migrate-encryption \
+  --source-key-file /run/secrets/old.key --legacy-zero-key \
+  --output /data/migrated --target-key-file /run/secrets/new.key
+```
+
+Use `--plaintext` instead of `--target-key-file` for an unencrypted destination.
+The legacy fallback is limited to this explicit offline command; normal startup
+still fails on legacy data. A wrong real key or a file/frame encrypted under any
+other key aborts migration and preserves the originals. All successfully read
+frames, including interleaved real-key and zero-key records, retain their order.
+Library callers opt in with `migrate_encryption_with_legacy_fallback`; the original
+`migrate_encryption` function does not enable this fallback.
+
 The command acquires the source database lock and refuses live nested databases.
 It rewrites SSTables and every WAL frame into a private staging directory,
 retaining record timestamps, expiration, tombstones, range tombstones, column
@@ -320,7 +338,9 @@ also converted. Bloom filters are rebuilt from the retained records. The command
 does not reconstruct missing manifests or repair corrupted records.
 
 Any checksum, decoding, authentication or record-count failure aborts migration;
-partial WAL frames are rejected rather than discarded. Symlinks and special
+partial WAL frames are rejected rather than discarded. If re-encoding or
+encryption overhead would exceed the WAL reader's frame-size limit, migration
+also aborts before writing that frame. Symlinks and special
 files are refused. Failed conversion removes its staging directory and leaves
 the original data intact. Successful conversion publishes the staged directory
 with an OS-enforced atomic rename without replacement and reports SSTable/frame/file

@@ -59,11 +59,11 @@ struct MigrationArgs {
     /// New destination directory under an existing parent; must not exist.
     #[arg(long)]
     output: std::path::PathBuf,
-    /// Explicitly authorize reading the insecure legacy all-zero key.
-    #[arg(long, conflicts_with = "source_key_file")]
+    /// Authorize the legacy all-zero key, optionally alongside --source-key-file.
+    #[arg(long)]
     legacy_zero_key: bool,
     /// Key for already encrypted source data; omit for plaintext sources.
-    #[arg(long, conflicts_with = "legacy_zero_key")]
+    #[arg(long)]
     source_key_file: Option<std::path::PathBuf>,
     /// New nonzero AES-256 key file, stored outside the database directory.
     #[arg(
@@ -81,7 +81,10 @@ fn migrate_command(
     source: &std::path::Path,
     args: MigrationArgs,
 ) -> crate::infra::error::Result<()> {
-    use crate::storage::{encryption::EncryptionConfig, migration::migrate_encryption};
+    use crate::storage::{
+        encryption::EncryptionConfig,
+        migration::{migrate_encryption, migrate_encryption_with_legacy_fallback},
+    };
     let source = source.canonicalize()?;
     for path in [&args.source_key_file, &args.target_key_file]
         .into_iter()
@@ -93,7 +96,7 @@ fn migrate_command(
             ));
         }
     }
-    let from = if args.legacy_zero_key {
+    let from = if args.legacy_zero_key && args.source_key_file.is_none() {
         EncryptionConfig {
             enabled: true,
             key: [0; 32],
@@ -120,7 +123,11 @@ fn migrate_command(
                 .ok_or(crate::LsmError::EncryptionKeyRequired)?,
         ))?
     };
-    let report = migrate_encryption(&source, &args.output, &from, &to)?;
+    let report = if args.legacy_zero_key {
+        migrate_encryption_with_legacy_fallback(&source, &args.output, &from, &to)?
+    } else {
+        migrate_encryption(&source, &args.output, &from, &to)?
+    };
     println!("{}", serde_json::to_string(&report)?);
     Ok(())
 }

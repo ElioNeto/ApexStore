@@ -494,3 +494,132 @@ fn migration_refuses_symlinks_and_key_files_inside_the_source() {
     assert!(!output.exists());
     assert_eq!(std::fs::read(external).unwrap(), b"do not modify");
 }
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_vendor = "apple",
+    target_os = "redox"
+))]
+#[test]
+fn explicit_mixed_key_migration_preserves_real_and_legacy_data() {
+    for encrypted in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        let output = dir.path().join("output");
+        make_legacy(&source);
+        let real_sst = source.join("sstables/real.sst");
+        let mut builder = SstableBuilder::new_with_encryption(
+            real_sst.clone(),
+            StorageConfig::default(),
+            124,
+            &target(),
+        )
+        .unwrap();
+        builder
+            .add(
+                b"real-table",
+                &LogRecord::new(b"real-table".to_vec(), b"real-sst-value".to_vec()),
+            )
+            .unwrap();
+        builder.finish().unwrap();
+        std::fs::write(
+            source.join("disk.sst.manifest"),
+            br#"{"column_families":{"other":["legacy.sst"],"default":["real.sst"]}}"#,
+        )
+        .unwrap();
+        let wal = WriteAheadLog::new_with_encryption(&source, "default", &target()).unwrap();
+        let mut latest = LogRecord::new(b"wal".to_vec(), b"real-last".to_vec());
+        latest.timestamp = 60;
+        wal.write_record(&latest).unwrap();
+        let mut real = LogRecord::new(b"real-wal".to_vec(), b"real-wal-value".to_vec());
+        real.timestamp = 70;
+        wal.write_record(&real).unwrap();
+        wal.sync().unwrap();
+        drop(wal);
+        let before = source_bytes(&source);
+        let before_real_sst = std::fs::read(&real_sst).unwrap();
+        let old_key = dir.path().join("old.key");
+        let new_key = dir.path().join("new.key");
+        std::fs::write(&old_key, hex::encode([0x41; 32])).unwrap();
+        std::fs::write(&new_key, hex::encode([0x42; 32])).unwrap();
+        let mut args = vec![
+            "migrate-encryption",
+            "--source-key-file",
+            old_key.to_str().unwrap(),
+            "--output",
+            output.to_str().unwrap(),
+        ];
+        if encrypted {
+            args.extend(["--target-key-file", new_key.to_str().unwrap()]);
+        } else {
+            args.push("--plaintext");
+        }
+        let wrong_key = dir.path().join("wrong.key");
+        std::fs::write(&wrong_key, hex::encode([0x55; 32])).unwrap();
+        let mut wrong_args = args.clone();
+        wrong_args[2] = wrong_key.to_str().unwrap();
+        wrong_args.push("--legacy-zero-key");
+        let wrong = cli(&source, &wrong_args);
+        assert!(
+            !wrong.status.success(),
+            "legacy authorization must not discard data under another key"
+        );
+        assert!(String::from_utf8_lossy(&wrong.stderr).contains("authentication"));
+        assert!(!output.exists());
+        assert_eq!(source_bytes(&source), before);
+        assert_eq!(std::fs::read(&real_sst).unwrap(), before_real_sst);
+        let refused = cli(&source, &args);
+        assert!(
+            !refused.status.success(),
+            "legacy fallback must require explicit authorization"
+        );
+        assert!(!output.exists());
+        assert_eq!(source_bytes(&source), before);
+        args.push("--legacy-zero-key");
+        let result = cli(&source, &args);
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(report["sstables"], 2);
+        assert_eq!(report["wal_frames"], 5);
+        assert_eq!(source_bytes(&source), before);
+        assert_eq!(std::fs::read(real_sst).unwrap(), before_real_sst);
+        let bytes = std::fs::read(output.join("wal.log")).unwrap();
+        let mut offset = 0;
+        let mut frames = 0;
+        while offset < bytes.len() {
+            let length = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+            assert_eq!(bytes[offset + 4], if encrypted { 3 } else { 2 });
+            offset += 4 + length + 4;
+            frames += 1;
+        }
+        assert_eq!(offset, bytes.len());
+        assert_eq!(frames, 4, "mixed WAL frames must not be deduplicated");
+        let mut cfg = LsmConfig::default();
+        cfg.core.dir_path = output;
+        cfg.storage.encryption_enabled = encrypted;
+        cfg.storage.encryption_key_path = Some(new_key.to_str().unwrap().into());
+        let engine = LsmEngine::new_from_config(&cfg, GlobalBlockCache::new(1, 4096)).unwrap();
+        assert_eq!(engine.get("wal").unwrap(), Some(b"real-last".to_vec()));
+        assert_eq!(
+            engine.get("real-wal").unwrap(),
+            Some(b"real-wal-value".to_vec())
+        );
+        assert_eq!(
+            engine.get("real-table").unwrap(),
+            Some(b"real-sst-value".to_vec())
+        );
+        assert_eq!(
+            engine.get_cf("other", b"live").unwrap(),
+            Some(b"retained".to_vec())
+        );
+        assert_eq!(
+            engine.get_cf("other", b"pending").unwrap(),
+            Some(b"private".to_vec())
+        );
+    }
+}
