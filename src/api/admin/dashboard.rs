@@ -12,7 +12,7 @@ use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
 #[get("/dashboard")]
 pub async fn admin_dashboard(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Admin) {
-        return e;
+        return *e;
     }
     // Fetch engine stats
     let stats = engine.stats_all().unwrap_or_default();

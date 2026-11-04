@@ -1,5 +1,6 @@
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
+use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::trace as sdk_trace;
@@ -33,7 +34,7 @@ fn otlp_endpoint() -> Option<String> {
 /// Otherwise the standard `tracing_subscriber::fmt` layer is used (console).
 pub fn init_tracing() {
     if let Some(endpoint) = otlp_endpoint() {
-        let tracer = opentelemetry_otlp::new_pipeline()
+        let provider = opentelemetry_otlp::new_pipeline()
             .tracing()
             .with_exporter(
                 opentelemetry_otlp::new_exporter()
@@ -42,7 +43,7 @@ pub fn init_tracing() {
                     .with_timeout(Duration::from_secs(5)),
             )
             .with_trace_config(
-                sdk_trace::config()
+                sdk_trace::Config::default()
                     .with_resource(Resource::new(vec![
                         KeyValue::new("service.name", "apexstore"),
                         KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
@@ -52,6 +53,8 @@ pub fn init_tracing() {
             .install_batch(opentelemetry_sdk::runtime::Tokio)
             .expect("Failed to install OTLP trace exporter");
 
+        let tracer = provider.tracer("apexstore");
+        global::set_tracer_provider(provider);
         let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
         let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));

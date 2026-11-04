@@ -3,6 +3,7 @@
 use super::error::AuthError;
 use super::manager::TokenManager;
 use super::token::{ApiToken, Permission};
+use crate::api::config::AuthEnabled;
 use actix_web::dev::ServiceRequest;
 use actix_web::web;
 use actix_web::Error;
@@ -26,9 +27,9 @@ pub async fn bearer_validator(
 ) -> Result<ServiceRequest, (Error, ServiceRequest)> {
     // Check if auth is enabled via the flag stored in app_data by start_server
     let auth_enabled = req
-        .app_data::<web::Data<bool>>()
-        .map(|flag| *flag.as_ref())
-        .unwrap_or(false);
+        .app_data::<web::Data<AuthEnabled>>()
+        .map(|flag| flag.get_ref().0)
+        .unwrap_or(true);
 
     if !auth_enabled {
         return Ok(req);
@@ -72,15 +73,18 @@ pub fn extract_token(req: &actix_web::HttpRequest) -> Option<ApiToken> {
 /// Call this at the top of any handler that needs permission control:
 /// ```ignore
 /// if let Err(resp) = require_permission(&req, Permission::Read) {
-///     return resp;
+///     return *resp;
 /// }
 /// ```
-pub fn require_permission(req: &HttpRequest, expected: Permission) -> Result<(), HttpResponse> {
+pub fn require_permission(
+    req: &HttpRequest,
+    expected: Permission,
+) -> Result<(), Box<HttpResponse>> {
     // Check if auth is enabled via the flag stored in app_data by start_server
     let auth_enabled = req
-        .app_data::<web::Data<bool>>()
-        .map(|flag| *flag.as_ref())
-        .unwrap_or(false);
+        .app_data::<web::Data<AuthEnabled>>()
+        .map(|flag| flag.get_ref().0)
+        .unwrap_or(true);
 
     if !auth_enabled {
         return Ok(());
@@ -91,9 +95,13 @@ pub fn require_permission(req: &HttpRequest, expected: Permission) -> Result<(),
             if token.has_permission(expected) {
                 Ok(())
             } else {
-                Err(AuthError::InsufficientPermissions.error_response())
+                Err(Box::new(
+                    AuthError::InsufficientPermissions.error_response(),
+                ))
             }
         }
-        None => Err(AuthError::InsufficientPermissions.error_response()),
+        None => Err(Box::new(
+            AuthError::InsufficientPermissions.error_response(),
+        )),
     }
 }

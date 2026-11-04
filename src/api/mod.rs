@@ -26,6 +26,7 @@ pub mod rate_limiter;
 pub mod sync;
 pub mod test_helpers;
 pub mod timeout_middleware;
+mod tls;
 
 use self::access_control::AccessControl;
 pub use self::auth::{require_permission, Permission, TokenManager};
@@ -179,7 +180,7 @@ async fn get_key(
     path: web::Path<String>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
     let key = path.into_inner();
     match engine.get_cf("default", key.as_bytes()) {
@@ -207,7 +208,7 @@ async fn put_key(
     body: web::Json<SetBody>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Write) {
-        return e;
+        return *e;
     }
 
     // Reject writes when engine is in read-only mode
@@ -278,7 +279,7 @@ async fn get_key_ttl(
     path: web::Path<String>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
     let key = path.into_inner();
 
@@ -339,7 +340,7 @@ async fn update_key_ttl(
     body: web::Json<TtlUpdateBody>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Write) {
-        return e;
+        return *e;
     }
 
     // Reject writes when engine is in read-only mode
@@ -398,7 +399,7 @@ async fn batch_delete_keys(
     body: web::Json<BatchDeleteBody>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Delete) {
-        return e;
+        return *e;
     }
 
     // Reject writes when engine is in read-only mode
@@ -446,7 +447,7 @@ async fn delete_keys_by_prefix(
     query: web::Query<KeysQuery>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Delete) {
-        return e;
+        return *e;
     }
 
     // Reject writes when engine is in read-only mode
@@ -502,7 +503,7 @@ async fn delete_key(
     path: web::Path<String>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Delete) {
-        return e;
+        return *e;
     }
 
     // Reject writes when engine is in read-only mode
@@ -541,7 +542,7 @@ async fn get_keys(
     query: web::Query<KeysQuery>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
     let limit = query
         .limit
@@ -597,7 +598,7 @@ async fn keys_range(
     query: web::Query<ScanQuery>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
     let limit = query
         .limit
@@ -672,7 +673,7 @@ async fn keys_range(
 #[get("/metrics")]
 async fn get_metrics(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
     let metrics = engine.metrics();
     HttpResponse::Ok()
@@ -684,7 +685,7 @@ async fn get_metrics(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Res
 #[get("/stats")]
 async fn get_stats(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
     match engine.stats("default") {
         Ok(stats) => HttpResponse::Ok()
@@ -714,7 +715,7 @@ async fn admin_rate_limits(
     rate_limiter: web::Data<RateLimiterState>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Admin) {
-        return e;
+        return *e;
     }
     let summary = rate_limiter.get_state();
     HttpResponse::Ok()
@@ -726,7 +727,7 @@ async fn admin_rate_limits(
 #[post("/admin/flush")]
 async fn admin_flush(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Admin) {
-        return e;
+        return *e;
     }
 
     // Reject writes when engine is in read-only mode
@@ -753,7 +754,7 @@ async fn admin_flush(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Res
 #[post("/admin/compact")]
 async fn admin_compact(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Admin) {
-        return e;
+        return *e;
     }
 
     // Reject writes when engine is in read-only mode
@@ -853,7 +854,7 @@ pub struct TtlUpdateBody {
 #[get("/stats/all")]
 async fn get_stats_all(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
     match engine.stats("default") {
         Ok(stats) => HttpResponse::Ok()
@@ -885,7 +886,7 @@ async fn post_key(
     body: web::Json<FrontendSetBody>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Write) {
-        return e;
+        return *e;
     }
 
     // Reject writes when engine is in read-only mode
@@ -971,7 +972,7 @@ async fn begin_txn(
     txn_mgr: web::Data<TransactionManager>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Write) {
-        return e;
+        return *e;
     }
     let id = txn_mgr.begin(&engine);
     HttpResponse::Ok()
@@ -989,7 +990,7 @@ async fn txn_put(
     body: web::Json<TxnPutBody>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Write) {
-        return e;
+        return *e;
     }
     let txn_id = path.into_inner();
 
@@ -1036,7 +1037,7 @@ async fn txn_delete(
     body: web::Json<TxnDeleteBody>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Delete) {
-        return e;
+        return *e;
     }
     let txn_id = path.into_inner();
 
@@ -1079,7 +1080,7 @@ async fn txn_commit(
     path: web::Path<u64>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Write) {
-        return e;
+        return *e;
     }
     let txn_id = path.into_inner();
 
@@ -1111,7 +1112,7 @@ async fn txn_rollback(
     path: web::Path<u64>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Write) {
-        return e;
+        return *e;
     }
     let txn_id = path.into_inner();
 
@@ -1138,7 +1139,7 @@ async fn search_keys(
     query: web::Query<SearchQuery>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
 
     let limit = query
@@ -1246,7 +1247,7 @@ async fn query_by_index(
     query: web::Query<IndexQuery>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
 
     let field = match query.index {
@@ -1296,7 +1297,7 @@ async fn create_index(
     path: web::Path<(String, String)>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Write) {
-        return e;
+        return *e;
     }
 
     let (key, field) = path.into_inner();
@@ -1326,7 +1327,7 @@ async fn create_index(
 #[get("/keys/indexes")]
 async fn list_indexes(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
 
     match engine.list_indexes("default") {
@@ -1350,7 +1351,7 @@ async fn value_search_keys(
     query: web::Query<ValueSearchQuery>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
 
     let q = match query.q {
@@ -1391,7 +1392,7 @@ async fn batch_keys(
     body: web::Json<BatchBody>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Write) {
-        return e;
+        return *e;
     }
 
     // Reject writes when engine is in read-only mode
@@ -1460,7 +1461,7 @@ async fn scan_keys(
     query: web::Query<ScanQuery>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Read) {
-        return e;
+        return *e;
     }
     let limit = query
         .limit
@@ -1709,78 +1710,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     let host = config.host.clone();
     let port = config.port;
 
-    // Build TLS config if enabled
-    let tls_config = if config.tls_enabled {
-        let cert_path = config.tls_cert_path.as_ref().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "TLS enabled but TLS_CERT_PATH not set",
-            )
-        })?;
-        let key_path = config.tls_key_path.as_ref().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "TLS enabled but TLS_KEY_PATH not set",
-            )
-        })?;
-
-        use std::io::BufReader;
-
-        let cert_file = std::fs::File::open(cert_path).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Cannot open cert file: {}", e),
-            )
-        })?;
-        let key_file = std::fs::File::open(key_path).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Cannot open key file: {}", e),
-            )
-        })?;
-
-        let mut cert_reader = BufReader::new(cert_file);
-        let mut key_reader = BufReader::new(key_file);
-
-        let raw_certs: Vec<Vec<u8>> = rustls_pemfile::certs(&mut cert_reader).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to parse cert: {}", e),
-            )
-        })?;
-        let certs: Vec<rustls::Certificate> =
-            raw_certs.into_iter().map(rustls::Certificate).collect();
-
-        // Read private key (PKCS#8 format)
-        let mut raw_keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to parse key: {}", e),
-            )
-        })?;
-        if raw_keys.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "No private key found in key file (PKCS#8)",
-            ));
-        }
-        let key = rustls::PrivateKey(raw_keys.remove(0));
-
-        let tls_server_config = rustls::ServerConfig::builder()
-            .with_safe_defaults()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)
-            .map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("TLS config error: {}", e),
-                )
-            })?;
-
-        Some(tls_server_config)
-    } else {
-        None
-    };
+    let tls_config = tls::load_tls_config(&config)?;
 
     if config.tls_enabled {
         tracing::info!(target: "apexstore::api", "HTTPS server listening on {}:{}", host, config.tls_port);
@@ -1822,7 +1752,7 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     rl_state.set_endpoint_limit("/admin/flush", 5);
     let rate_limiter_state = web::Data::new(rl_state);
     let token_manager = web::Data::new(TokenManager::new_with_engine(engine.clone()));
-    let auth_enabled = web::Data::new(config.auth.enabled);
+    let auth_enabled = web::Data::new(config::AuthEnabled(config.auth.enabled));
     let graphql_schema = web::Data::new(graphql::build_schema(engine.clone()));
     let note_engine = web::Data::new(crate::notes::NoteEngine::new(engine.clone()));
     let time_travel_engine = web::Data::new(Mutex::new(
@@ -1838,7 +1768,8 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
 
     // Shared access control state
     let access_controller = web::Data::new(AccessController::new());
-    let access_control_enabled = web::Data::new(config.access_control_enabled);
+    let access_control_enabled =
+        web::Data::new(config::AccessControlEnabled(config.access_control_enabled));
 
     let mut server_builder = HttpServer::new(move || {
         // CSRF protection is handled by the Bearer token authentication middleware.
@@ -1878,7 +1809,8 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     .backlog(config.backlog);
 
     if let Some(tls_config) = tls_config {
-        server_builder = server_builder.bind_rustls((host.clone(), config.tls_port), tls_config)?;
+        server_builder =
+            server_builder.bind_rustls_0_23((host.clone(), config.tls_port), tls_config)?;
     } else {
         server_builder = server_builder.bind((host.clone(), port))?;
     }
