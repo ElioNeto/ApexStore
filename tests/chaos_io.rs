@@ -48,21 +48,16 @@ fn test_chaos_sstable_deleted_after_flush() {
     let result = engine.get("key_0000").unwrap();
     assert!(result.is_some(), "Data should be present before deletion");
 
-    // Locate and delete one SSTable file
-    let sst_dir = db_path.join("sstables");
-    if sst_dir.exists() {
-        let sst_files: Vec<_> = std::fs::read_dir(&sst_dir)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == "sst"))
-            .collect();
-
-        if let Some(first_sst) = sst_files.first() {
-            eprintln!("Deleting SSTable: {:?}", first_sst);
-            std::fs::remove_file(first_sst).unwrap();
-        }
-    }
+    // Require a persisted fixture and retain its bytes to verify recovery.
+    let sst_files: Vec<_> = std::fs::read_dir(db_path.join("sstables"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "sst"))
+        .collect();
+    assert!(!sst_files.is_empty());
+    let missing_path = &sst_files[0];
+    let original = std::fs::read(missing_path).unwrap();
+    std::fs::remove_file(missing_path).unwrap();
 
     // Engine should still be able to read surviving data without panicking.
     // Some keys may still be served from the in-memory Table.data (which
@@ -83,12 +78,29 @@ fn test_chaos_sstable_deleted_after_flush() {
         "Engine should accept new writes after SSTable deletion"
     );
 
-    // Verify scan still works
-    let scan_result = engine.scan();
-    assert!(
-        scan_result.is_ok(),
-        "Engine scan should survive missing SSTable file: {:?}",
-        scan_result.err()
+    // A complete scan must report missing persisted data, rather than return
+    // a partial success assembled from cached values.
+    assert!(matches!(
+        engine.scan(),
+        Err(apexstore::LsmError::Io(error))
+            if error.kind() == std::io::ErrorKind::NotFound
+    ));
+
+    std::fs::write(missing_path, original).unwrap();
+    let records: std::collections::BTreeMap<_, _> = engine
+        .scan_cf("default", None, None, Some(501))
+        .unwrap()
+        .into_iter()
+        .collect();
+    assert_eq!(records.len(), 501);
+    for index in 0..500 {
+        let key = format!("key_{index:04}").into_bytes();
+        let value = format!("value_{index:04}").into_bytes();
+        assert_eq!(records.get(&key), Some(&value));
+    }
+    assert_eq!(
+        records.get(b"new_key_after_deletion".as_slice()),
+        Some(&b"new_value".to_vec())
     );
 }
 

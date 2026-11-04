@@ -30,9 +30,9 @@ pub struct ApiToken {
 pub enum Permission {
     /// Read-only access
     Read,
-    /// Write access (includes read)
+    /// Write access (grant Read separately)
     Write,
-    /// Delete access (includes read)
+    /// Delete access (grant Read separately)
     Delete,
     /// Administrative access (all permissions)
     Admin,

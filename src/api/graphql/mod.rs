@@ -5,6 +5,7 @@
 
 use crate::api::auth::{ApiToken, Permission};
 use crate::api::config::AuthEnabled;
+use crate::api::keyspace;
 use crate::core::engine::{LsmEngine, MAX_SCAN_LIMIT};
 use async_graphql::*;
 use std::sync::Arc;
@@ -67,6 +68,9 @@ impl Query {
     /// Get the value for a given key.
     #[graphql(guard = "PermissionGuard(Permission::Read)")]
     async fn get(&self, ctx: &Context<'_>, key: String) -> Option<String> {
+        if keyspace::is_reserved(key.as_bytes()) {
+            return None;
+        }
         let engine = ctx.data::<Arc<LsmEngine>>().ok()?;
         match engine.get(key.as_bytes()) {
             Ok(Some(value)) => Some(String::from_utf8_lossy(&value).to_string()),
@@ -90,7 +94,7 @@ impl Query {
             .map(|l| (l.max(1) as usize).min(MAX_SCAN_LIMIT))
             .unwrap_or(crate::core::engine::DEFAULT_SCAN_LIMIT);
 
-        match engine.scan_cf("default", None, None, Some(limit)) {
+        match keyspace::scan(engine, None, None, limit) {
             Ok(results) => results
                 .into_iter()
                 .map(|(k, v)| KeyValue {
@@ -111,7 +115,7 @@ impl Query {
             None => return Vec::new(),
         };
 
-        match engine.scan_cf("default", None, None, Some(MAX_SCAN_LIMIT)) {
+        match keyspace::scan(engine, None, None, MAX_SCAN_LIMIT) {
             Ok(keys) => keys
                 .into_iter()
                 .map(|(k, _)| String::from_utf8_lossy(&k).to_string())
@@ -147,6 +151,9 @@ impl Mutation {
     /// Set a key-value pair.
     #[graphql(guard = "PermissionGuard(Permission::Write)")]
     async fn set(&self, ctx: &Context<'_>, key: String, value: String) -> bool {
+        if keyspace::is_reserved(key.as_bytes()) {
+            return false;
+        }
         let engine = ctx.data::<Arc<LsmEngine>>().ok();
         let engine = match engine {
             Some(e) => e,
@@ -161,6 +168,9 @@ impl Mutation {
     /// Delete a key.
     #[graphql(guard = "PermissionGuard(Permission::Delete)")]
     async fn delete(&self, ctx: &Context<'_>, key: String) -> bool {
+        if keyspace::is_reserved(key.as_bytes()) {
+            return false;
+        }
         let engine = ctx.data::<Arc<LsmEngine>>().ok();
         let engine = match engine {
             Some(e) => e,

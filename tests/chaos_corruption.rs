@@ -3,9 +3,9 @@
 //! These tests simulate data corruption scenarios (corrupted SSTable files)
 //! and verify that the engine handles them gracefully without panicking.
 //!
-//! The engine's VersionSet has a quarantine mechanism that skips SSTables
-//! that fail to read — these tests validate that mechanism works correctly
-//! with corrupted data.
+//! Legacy point reads can use cached values or quarantine damaged SSTables.
+//! Scans require complete persisted versions and report corruption instead of
+//! silently returning a successful partial result.
 
 use apexstore::core::engine::Engine;
 use apexstore::infra::config::LsmConfig;
@@ -41,23 +41,19 @@ fn test_chaos_corrupted_sstable() {
     }
     engine.flush_memtable().unwrap();
 
-    // Corrupt an SSTable file by writing garbage after the header
-    let sst_dir = db_path.join("sstables");
-    if sst_dir.exists() {
-        let sst_files: Vec<_> = std::fs::read_dir(&sst_dir)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == "sst"))
-            .collect();
-
-        if let Some(sst) = sst_files.first() {
-            eprintln!("Corrupting SSTable: {:?}", sst);
-            let mut file = std::fs::OpenOptions::new().write(true).open(sst).unwrap();
-            // Seek past the magic number and header, then write garbage
-            file.seek(SeekFrom::Start(8)).unwrap();
-            file.write_all(&[0xFF; 200]).unwrap();
-        }
+    // Require a real SSTable and corrupt its payload while preserving a copy
+    // for the recovery check. Missing fixtures must fail this chaos test.
+    let sst = std::fs::read_dir(db_path.join("sstables"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.extension().is_some_and(|extension| extension == "sst"))
+        .expect("flush must create an SSTable");
+    let original = std::fs::read(&sst).unwrap();
+    {
+        let mut file = std::fs::OpenOptions::new().write(true).open(&sst).unwrap();
+        file.seek(SeekFrom::Start(8)).unwrap();
+        file.write_all(&[0xFF; 200]).unwrap();
+        file.sync_all().unwrap();
     }
 
     // Engine should survive and return results gracefully.
@@ -96,12 +92,32 @@ fn test_chaos_corrupted_sstable() {
         "New writes must work after SSTable corruption"
     );
 
-    // Scan must still work
-    let scan_result = engine.scan();
-    assert!(
-        scan_result.is_ok(),
-        "Scan must survive corrupted SSTable: {:?}",
-        scan_result.err()
+    // Scans now read persisted versions and must report a damaged block,
+    // rather than return a successful but incomplete/cached result.
+    assert!(matches!(
+        engine.scan(),
+        Err(apexstore::LsmError::CorruptedData(_))
+    ));
+
+    // Restore the real file and reopen: verify every expected value, including
+    // the write performed while the damaged SSTable was present.
+    std::fs::write(&sst, original).unwrap();
+    drop(engine);
+    let mut config = LsmConfig::default();
+    config.core.dir_path = db_path;
+    config.core.memtable_max_size = SMALL_MEMTABLE;
+    let engine = Engine::new_from_config(&config, GlobalBlockCache::new(1, 4096)).unwrap();
+    let recovered: std::collections::BTreeMap<_, _> = engine.scan().unwrap().into_iter().collect();
+    assert_eq!(recovered.len(), 101);
+    for i in 0..100 {
+        assert_eq!(
+            recovered.get(format!("k{i:04}").as_bytes()),
+            Some(&format!("v{i:04}").into_bytes())
+        );
+    }
+    assert_eq!(
+        recovered.get(b"post_corruption_key".as_slice()),
+        Some(&b"post_corruption_val".to_vec())
     );
 }
 

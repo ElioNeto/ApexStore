@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use parking_lot::RwLock;
 use tracing;
 
-use crate::core::engine::EngineCore;
 use crate::core::engine::EngineOptions;
+use crate::core::engine::{Engine, EngineCore};
 use crate::core::log_record::LogRecord;
 use crate::core::memtable::MemTable;
 use crate::core::table::Table;
@@ -160,11 +160,16 @@ impl<C: Cache> Transaction<C> {
         let start = std::time::Instant::now();
         let core = self.core.read();
 
-        // 2a. Check memtables (newest first) — point writes take precedence
-        // over range tombstones.
+        let covering_tombstone_ts = Engine::<C>::covering_range_tombstone_ts(&core, cf, key);
+
+        // 2a. Compare persisted write order, just as the engine's point reader does.
         if let Some(memtables) = core.memtables().get(cf) {
             for mem in memtables.iter().rev() {
                 if let Some(v) = mem.data.get(key) {
+                    if covering_tombstone_ts.is_some_and(|timestamp| timestamp > v.timestamp) {
+                        self.metrics.record_get(start.elapsed().as_micros() as u64);
+                        return Ok(None);
+                    }
                     // Skip tombstones (deleted records)
                     if v.is_deleted {
                         let elapsed_us = start.elapsed().as_micros() as u64;
@@ -216,27 +221,17 @@ impl<C: Cache> Transaction<C> {
             }
         }
 
-        // 2b. After memtable lookup, check if key falls within a range
-        // tombstone.  This is done after the memtable check so point writes
-        // take precedence.
-        if Self::key_in_range_tombstone(&core, cf, key) {
-            let elapsed_us = start.elapsed().as_micros() as u64;
-            self.metrics.record_get(elapsed_us);
-            tracing::debug!(
-                target: "apexstore::engine",
-                operation = "transaction.get_cf",
-                txn_id = self.txn_id,
-                cf = cf,
-                key = %key_str,
-                found = false,
-                reason = "range_tombstone",
-                duration_us = elapsed_us,
-            );
-            return Ok(None);
-        }
-
-        // 2c. Check SSTables via version_set
-        let result = core.version_set().get(cf, key);
+        // 2b. Preserve ordering for writes already flushed to an SSTable.
+        let result = if let Some(tombstone_ts) = covering_tombstone_ts {
+            core.version_set()
+                .get_record(cf, key)?
+                .filter(|record| {
+                    !record.is_deleted && !record.is_expired() && record.timestamp >= tombstone_ts
+                })
+                .map(|record| record.value)
+        } else {
+            core.version_set().get(cf, key)
+        };
 
         // 2d. Check TTL expiry for keys stored in SSTable / in-memory Table.
         // The version_set.get() above checks LogRecord.is_expired() for
@@ -465,26 +460,6 @@ impl<C: Cache> Transaction<C> {
             }
         }
         Ok(false)
-    }
-
-    /// Check whether `key` falls within any active range tombstone
-    /// (both engine-level and memtable-level).
-    fn key_in_range_tombstone(core: &EngineCore<C>, cf: &str, key: &[u8]) -> bool {
-        // Check engine-level range tombstones
-        if let Some(tombstones) = core.range_tombstones().get(cf) {
-            if tombstones.iter().any(|rt| rt.covers(key)) {
-                return true;
-            }
-        }
-        // Check memtable-level range tombstones
-        if let Some(memtables) = core.memtables().get(cf) {
-            for mem in memtables.iter() {
-                if mem.contains_range_tombstone(key) {
-                    return true;
-                }
-            }
-        }
-        false
     }
 }
 
