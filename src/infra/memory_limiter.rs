@@ -61,11 +61,18 @@ impl MemoryLimiter {
     pub fn release(&self, bytes: usize) {
         // Saturating subtraction — if we somehow release more than allocated,
         // just go to zero rather than wrapping around.
-        let _ = self
-            .current
-            .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |c| {
-                Some(c.saturating_sub(bytes))
-            });
+        let mut current = self.current.load(Ordering::Relaxed);
+        loop {
+            match self.current.compare_exchange_weak(
+                current,
+                current.saturating_sub(bytes),
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return,
+                Err(actual) => current = actual,
+            }
+        }
     }
 
     /// Returns the current tracked memory usage in bytes.
@@ -134,6 +141,25 @@ mod tests {
         assert!(limiter.try_allocate(10));
         limiter.release(100); // more than allocated
         assert_eq!(limiter.usage(), 0); // saturates at 0
+    }
+
+    #[test]
+    fn test_concurrent_releases() {
+        let limiter = MemoryLimiter::new(10_000);
+        assert!(limiter.try_allocate(10_000));
+        let barrier = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    barrier.wait();
+                    for _ in 0..1_000 {
+                        limiter.release(1);
+                    }
+                });
+            }
+        });
+        assert_eq!(limiter.usage(), 2_000);
+        assert_eq!(limiter.peak(), 10_000);
     }
 
     #[test]
