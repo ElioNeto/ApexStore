@@ -946,6 +946,19 @@ pub(crate) fn rewrite_for_migration(
             }
             _ => return Err(LsmError::WalCorruption),
         };
+        // Re-encoding old frame versions and adding GCM's 12-byte nonce and
+        // 16-byte tag can grow an otherwise valid source beyond the reader limit.
+        let encryption_overhead = if target_encryption.enabled {
+            12 + 16
+        } else {
+            0
+        };
+        let max_payload = MAX_WAL_RECORD_BYTES - 1 - encryption_overhead;
+        if encode(&record)?.len() > max_payload {
+            return Err(LsmError::InvalidArgument(
+                "migrated WAL frame would exceed the supported size limit".into(),
+            ));
+        }
         output.write_record(&record)?;
         count += 1;
     }
@@ -956,6 +969,48 @@ pub(crate) fn rewrite_for_migration(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migration_refuses_encryption_expansion_past_the_wal_frame_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let output = root.path().join("output");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir(&output).unwrap();
+        let plaintext = EncryptionConfig::default();
+        let target = EncryptionConfig {
+            enabled: true,
+            key: [0x41; 32],
+        };
+        let mut record = LogRecord::new(b"large".to_vec(), vec![7; MAX_WAL_RECORD_BYTES - 128]);
+        let overhead = encode(&record).unwrap().len() - record.value.len();
+        record.value.resize(MAX_WAL_RECORD_BYTES - 1 - overhead, 7);
+        assert_eq!(encode(&record).unwrap().len() + 1, MAX_WAL_RECORD_BYTES);
+        let wal = WriteAheadLog::new_with_encryption(&source, "default", &plaintext).unwrap();
+        wal.write_record(&record).unwrap();
+        wal.sync().unwrap();
+        assert_eq!(
+            wal.recover().unwrap().len(),
+            1,
+            "the plaintext source frame is valid"
+        );
+        drop(wal);
+        let before = std::fs::read(source.join("wal.log")).unwrap();
+        let result = rewrite_for_migration(
+            &source.join("wal.log"),
+            &output.join("wal.log"),
+            &plaintext,
+            &target,
+            false,
+        );
+        assert!(
+            matches!(result, Err(LsmError::InvalidArgument(_))),
+            "migration must not produce a frame its reader rejects"
+        );
+        assert_eq!(std::fs::read(source.join("wal.log")).unwrap(), before);
+        assert_eq!(std::fs::metadata(output.join("wal.log")).unwrap().len(), 0);
+    }
+
     use std::fs;
     use tempfile::TempDir;
 

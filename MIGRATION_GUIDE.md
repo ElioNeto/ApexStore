@@ -338,7 +338,9 @@ also converted. Bloom filters are rebuilt from the retained records. The command
 does not reconstruct missing manifests or repair corrupted records.
 
 Any checksum, decoding, authentication or record-count failure aborts migration;
-partial WAL frames are rejected rather than discarded. Symlinks and special
+partial WAL frames are rejected rather than discarded. If re-encoding or
+encryption overhead would exceed the WAL reader's frame-size limit, migration
+also aborts before writing that frame. Symlinks and special
 files are refused. Failed conversion removes its staging directory and leaves
 the original data intact. Successful conversion publishes the staged directory
 with an OS-enforced atomic rename without replacement and reports SSTable/frame/file

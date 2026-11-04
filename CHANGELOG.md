@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — v2.2 (Hardening) → v2.3 (Bug fixes, Features & Resilience)
 
-- Support explicit offline migration of datasets mixing a real encryption key with the legacy zero key, including interleaved WAL frames; reject unknown keys while retaining every original file.
+- Support explicit offline migration of datasets mixing a real encryption key with the legacy zero key, including interleaved WAL frames; reject unknown keys and output frames exceeding the reader size limit while retaining every original file.
 
 - Identify rate-limit buckets by the transport peer, preventing forged or malformed forwarding headers from bypassing limits; document shared budgets behind reverse proxies until trusted-proxy configuration is implemented.
 
