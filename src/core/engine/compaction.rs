@@ -58,6 +58,8 @@ pub trait CompactionStrategy: Send + Sync {
     fn pick_tables(&self, tables: &[Table], options: &EngineOptions) -> Vec<Vec<usize>>;
 
     /// Execute compaction on the given tables and return new tables.
+    /// Built-in strategies use `options.encryption`, the loaded runtime key;
+    /// `storage_config` supplies layout settings, not a key to reload.
     ///
     /// `range_tombstones` is the list of active range tombstones that should be
     /// applied during compaction (keys falling within any range tombstone are dropped).
@@ -94,6 +96,7 @@ fn is_key_in_range_tombstones(key: &[u8], tombstones: &[RangeTombstone]) -> bool
 fn execute_compaction(
     tables: &[Table],
     storage_config: &StorageConfig,
+    encryption: &crate::storage::encryption::EncryptionConfig,
     output_dir: &Path,
     output_prefix: &str,
     level: Option<usize>,
@@ -126,23 +129,15 @@ fn execute_compaction(
     let mut merge_iter = MergeIterator::new(iters);
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
 
-    // Build EncryptionConfig from the infra StorageConfig
-    let encryption = if storage_config.encryption_enabled {
-        crate::storage::encryption::EncryptionConfig::from_key_path(
-            storage_config.encryption_key_path.as_deref(),
-        )
-        .unwrap_or_default()
-    } else {
-        crate::storage::encryption::EncryptionConfig::default()
-    };
-
+    // Use the key already loaded by the engine. The copied StorageConfig has
+    // no key path and cannot reconstruct the active encryption configuration.
     // Create output SSTable — use encrypted builder if encryption is enabled
     let output_path = output_dir.join(format!("{}_{}.sst", output_prefix, timestamp));
     let mut builder = SstableBuilder::new_with_encryption(
         output_path.clone(),
         (*storage_config).clone(),
         timestamp,
-        &encryption,
+        encryption,
     )?;
 
     let mut merged_data: std::collections::BTreeMap<Vec<u8>, Vec<u8>> =
@@ -197,7 +192,7 @@ fn execute_compaction(
     // Create new Table from the SSTable (for its metadata: bloom filter,
     // min/max keys) and then populate its in-memory data so subsequent
     // compaction passes can see the records via table.iter().
-    let mut new_table = Table::from_sstable_path(&result_path, Some(&encryption))?;
+    let mut new_table = Table::from_sstable_path(&result_path, Some(encryption))?;
     new_table.data = merged_data;
     if let Some(lvl) = level {
         new_table.level = lvl;
@@ -276,7 +271,7 @@ impl CompactionStrategy for SizeTieredCompaction {
     fn execute(
         &self,
         tables: Vec<Table>,
-        _options: &EngineOptions,
+        options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &Path,
         range_tombstones: &[RangeTombstone],
@@ -284,6 +279,7 @@ impl CompactionStrategy for SizeTieredCompaction {
         execute_compaction(
             &tables,
             storage_config,
+            &options.encryption,
             output_dir,
             "sst",
             None,
@@ -356,7 +352,7 @@ impl CompactionStrategy for LeveledCompaction {
     fn execute(
         &self,
         tables: Vec<Table>,
-        _options: &EngineOptions,
+        options: &EngineOptions,
         storage_config: &StorageConfig,
         output_dir: &Path,
         range_tombstones: &[RangeTombstone],
@@ -364,6 +360,7 @@ impl CompactionStrategy for LeveledCompaction {
         execute_compaction(
             &tables,
             storage_config,
+            &options.encryption,
             output_dir,
             "sst_L1",
             Some(1),
