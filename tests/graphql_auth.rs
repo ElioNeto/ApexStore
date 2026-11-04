@@ -1,6 +1,6 @@
 use actix_web::{http::StatusCode, test, web, App};
 use actix_web_httpauth::middleware::HttpAuthentication;
-use apexstore::api::auth::{bearer_validator, Permission, TokenManager};
+use apexstore::api::auth::{request_validator, Permission, TokenManager};
 use apexstore::api::config::AuthEnabled;
 use apexstore::api::{configure, graphql::build_schema, test_helpers::test_engine};
 use apexstore::core::engine::MAX_SCAN_LIMIT;
@@ -32,7 +32,7 @@ async fn graphql_enforces_each_field_permission() {
             .app_data(web::Data::new(build_schema(engine.clone())))
             .app_data(web::Data::new(manager))
             .app_data(web::Data::new(AuthEnabled(true)))
-            .wrap(HttpAuthentication::bearer(bearer_validator))
+            .wrap(HttpAuthentication::with_fn(request_validator))
             .configure(configure),
     )
     .await;
@@ -92,7 +92,7 @@ async fn graphql_guards_apply_to_aliases_fragments_and_selected_operations() {
             .app_data(web::Data::new(build_schema(engine.clone())))
             .app_data(web::Data::new(manager))
             .app_data(web::Data::new(AuthEnabled(true)))
-            .wrap(HttpAuthentication::bearer(bearer_validator))
+            .wrap(HttpAuthentication::with_fn(request_validator))
             .configure(configure),
     )
     .await;
