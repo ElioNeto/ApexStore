@@ -1,0 +1,1024 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Auditoria técnica profunda (pt-BR, 2026-03) - ApexStore Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">ApexStore Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/ElioNeto/ApexStore" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="auditoria-técnica-profunda--apexstore-v2163"><a class="header" href="#auditoria-técnica-profunda--apexstore-v2163">Auditoria Técnica Profunda — ApexStore v2.1.63</a></h1>
+<blockquote>
+<p><strong>Data:</strong> 2026-05-26<br />
+<strong>Equipe:</strong> 3 especialistas (Segurança/Storage, Resiliência/Sistemas Distribuídos, Performance/Banco de Dados)<br />
+<strong>Repositório:</strong> https://github.com/ElioNeto/ApexStore<br />
+<strong>Licença:</strong> MIT</p>
+</blockquote>
+<hr />
+<h2 id="resumo-executivo"><a class="header" href="#resumo-executivo">Resumo Executivo</a></h2>
+<p>A ApexStore é um storage engine LSM-tree embarcado em Rust maduro e bem arquitetado, com <strong>apenas 1 bloco <code>unsafe</code></strong> (mmap no reader.rs) e <strong>zero vulnerabilidades conhecidas</strong> em dependências diretas (<code>cargo audit</code> limpo). O código possui separação clara de camadas, testes abrangentes, e componentes de resiliência como circuit breaker, retry com backoff, backpressure e panic recovery.</p>
+<p><strong>Pontuação geral: 7.2/10</strong> — Base sólida, mas com 3 áreas críticas: (1) 918 chamadas <code>unwrap()</code> em produção podem causar crash inesperado, (2) ausência de limites de tamanho de chave/valor expõe a OOM, (3) API HTTP sem autenticação por default combinada com CORS permissivo cria superfície de ataque externa.</p>
+<hr />
+<h2 id="1-seguranÇa"><a class="header" href="#1-seguranÇa">1. SEGURANÇA</a></h2>
+<h3 id="1a-segurança-de-dados-em-disco"><a class="header" href="#1a-segurança-de-dados-em-disco">1a. Segurança de Dados em Disco</a></h3>
+<p><strong>[ENCRYPTION-001] Criptografia em repouso existe mas é opcional e desabilitada por padrão</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta</li>
+<li><strong>Área:</strong> Segurança</li>
+<li><strong>Componente:</strong> SSTable / WAL</li>
+<li><strong>Impacto:</strong> Qualquer um com acesso ao filesystem pode ler todos os dados. O <code>Encryptor</code> com AES-256-GCM está implementado corretamente (nonces aleatórios de 12 bytes, autenticação via GCM), mas <code>EncryptionConfig::default()</code> retorna <code>enabled: false</code>. Nenhum código de inicialização do servidor (<code>bin/server.rs</code>) chama <code>from_key_path()</code>.</li>
+<li><strong>Evidência:</strong> <code>src/storage/encryption.rs:27-33</code> — <code>enabled: false</code> no default. <code>src/bin/server.rs:61-72</code> — <code>LsmConfig::builder()</code> não chama <code>.encryption_key_path()</code>.</li>
+<li><strong>Como reproduzir:</strong> Executar servidor, inspecionar <code>.lsm_data/sstables/*.sst</code> com <code>xxd</code> — dados são texto puro (LZ4 comprimido, sem criptografia).</li>
+<li><strong>Correção recomendada:</strong> Configuração deve <strong>exigir</strong> chave em produção (panic se <code>enabled=false</code> em release build). Adicionar <code>LsmConfig::builder().encryption_required(true)</code>.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<p><strong>[FS-PERM-001] Arquivos de dados criados com permissões 0644 (world-readable)</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Segurança</li>
+<li><strong>Componente:</strong> WAL / SSTable</li>
+<li><strong>Impacto:</strong> Em sistemas multi-tenant, qualquer usuário local pode ler dados do storage engine.</li>
+<li><strong>Evidência:</strong> <code>.lsm_data/sstables/*.sst</code> e <code>wal.log</code> têm permissão <code>-rw-rw-r--</code>. O Rust cria arquivos com a umask do processo, sem chamada explícita a <code>set_permissions()</code>.</li>
+<li><strong>Correção recomendada:</strong> Usar <code>std::fs::set_permissions()</code> para <code>0o600</code> (owner-only) em todos os arquivos de dados criados. Adicionar <code>FILE_CREATION_MASK</code> configurável.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<p><strong>[PATH-TRAV-001] Nomes de SSTable derivados de timestamp — sem risco de path traversal</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa (informativo)</li>
+<li><strong>Área:</strong> Segurança</li>
+<li><strong>Componente:</strong> SSTable</li>
+<li><strong>Impacto:</strong> Nenhum — os nomes de arquivo são gerados internamente via <code>SystemTime::now().as_nanos()</code>, não derivados de input do usuário.</li>
+<li><strong>Evidência:</strong> <code>src/storage/builder.rs</code>: nomes como <code>lsm_{timestamp}.sst</code>.</li>
+</ul>
+<h3 id="1b-integridade-de-dados"><a class="header" href="#1b-integridade-de-dados">1b. Integridade de Dados</a></h3>
+<p><strong>[CRC-WAL-001] WAL usa CRC32 para detecção de corrupção</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa (informativo — implementado corretamente)</li>
+<li><strong>Área:</strong> Segurança</li>
+<li><strong>Componente:</strong> WAL</li>
+<li><strong>Impacto:</strong> Corrupção de bytes no WAL é detectada no replay. O frame CRC32 é verificado antes da desserialização. Frames corrompidos são ignorados com log de warning.</li>
+<li><strong>Evidência:</strong> <code>src/storage/wal.rs:425-430</code>: <code>crc32fast::Hasher</code> usado para checksum de cada frame. Trailing partial checksum detectado em <code>425</code>.</li>
+<li><strong>Nota:</strong> CRC32 detecta corrupção acidental, mas é <strong>vulnerável a ataques intencionais</strong> (não é MAC). Se a criptografia estiver habilitada, AES-256-GCM provê autenticação via tag MAC.</li>
+</ul>
+<p><strong>[SST-CRC-001] Blocos de SSTable têm CRC32 verificado nas leituras</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa (informativo)</li>
+<li><strong>Área:</strong> Segurança/Resiliência</li>
+<li><strong>Componente:</strong> SSTable</li>
+<li><strong>Impacto:</strong> Dados corrompidos em disco são detectados.</li>
+<li><strong>Evidência:</strong> <code>src/storage/reader.rs:215-230</code>: CRC32 do bloco é verificado após descompressão. <code>src/infra/scrubber.rs:290-300</code>: scrubber de integridade verifica CRC32 de todos os blocos.</li>
+</ul>
+<p><strong>[CRASH-SST-001] Arquivo SSTable truncado durante crash — detectado, mas sem recuperação automática</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> SSTable</li>
+<li><strong>Impacto:</strong> Se um SSTable for truncado (crash durante escrita), o engine detecta o magic number inválido ou CRC32 mismatch no startup, mas <strong>descarta o arquivo inteiro</strong> sem tentar recuperar registros parciais. Dados são perdidos. O Scrubber identifica o problema mas não tem auto-repair.</li>
+<li><strong>Evidência:</strong> <code>src/storage/reader.rs:60-80</code>: validação de magic number e tamanho mínimo; <code>src/storage/reader.rs:215</code>: CRC32 mismatch → <code>CorruptedData</code> error.</li>
+<li><strong>Correção recomendada:</strong> Implementar auto-repair: se CRC32 falhar em alguns blocos, tentar recuperar blocos íntegros adjacentes. Pelo menos quarternar o arquivo em vez de deletar.</li>
+<li><strong>Esforço:</strong> Alto</li>
+</ul>
+<h3 id="1c-robustez-contra-entradas-maliciosas"><a class="header" href="#1c-robustez-contra-entradas-maliciosas">1c. Robustez Contra Entradas Maliciosas</a></h3>
+<p><strong>[INPUT-VAL-001] Sem limite de tamanho de chave (key) ou valor (value)</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Crítica</li>
+<li><strong>Área:</strong> Segurança/Performance</li>
+<li><strong>Componente:</strong> Engine/API</li>
+<li><strong>Impacto:</strong> Atacante pode enviar chaves de 100MB ou valores de 1GB. O engine alocará memória para armazená-los no MemTable e subsequentemente no SSTable, causando OOM. Não há defesa em profundidade.</li>
+<li><strong>Evidência:</strong> <code>src/core/engine/mod.rs:745-774</code>: função <code>put_cf_internal</code> aceita <code>key</code> e <code>value</code> como <code>Vec&lt;u8&gt;</code> sem verificação de tamanho máximo. <code>src/api/mod.rs</code> não valida antes de chamar o engine.</li>
+<li><strong>Como reproduzir:</strong> <code>curl -X PUT -d '{"value":"A".repeat(100_000_000)}' http://localhost:8080/keys/vuln</code> — engine aloca 100MB.</li>
+<li><strong>Correção recomendada:</strong>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>const MAX_KEY_SIZE: usize = 4096;   // 4KB max key
+const MAX_VALUE_SIZE: usize = 1_048_576; // 1MB max value (configurável)
+if key.len() &gt; MAX_KEY_SIZE {
+    return Err(LsmError::InvalidArgument(format!("key too large: {} bytes", key.len())));
+}
+<span class="boring">}</span></code></pre></pre>
+Validar tanto no engine quanto no middleware HTTP.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<p><strong>[INPUT-VAL-002] API aceita JSON de 50MB sem limite por campo</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Crítica</li>
+<li><strong>Área:</strong> Segurança</li>
+<li><strong>Componente:</strong> API</li>
+<li><strong>Impacto:</strong> 20 requisições simultâneas de 50MB = 1GB de memória.</li>
+<li><strong>Evidência:</strong> <code>src/api/config.rs:50</code>: <code>max_json_payload_size: 50 * 1024 * 1024</code></li>
+<li><strong>Correção recomendada:</strong> Reduzir para 1MB default. Validar tamanho do campo <code>value</code> individualmente.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<p><strong>[NON-UTF-KEY-001] Chaves não-UTF8 são aceitas mas podem causar problemas na API</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Segurança</li>
+<li><strong>Componente:</strong> API</li>
+<li><strong>Impacto:</strong> A API usa <code>String::from_utf8_lossy()</code> para exibir chaves, que substitui bytes inválidos por <code>�</code>. Isso pode mascarar ataques ou dificultar debugging. Pior: chaves binárias podem conter bytes de controle que quebram serialização.</li>
+<li><strong>Evidência:</strong> <code>src/api/mod.rs:56, 86-87</code>: <code>String::from_utf8_lossy(&amp;key)</code> e <code>String::from_utf8_lossy(&amp;value)</code>.</li>
+<li><strong>Correção recomendada:</strong> Para a API REST, exigir chaves UTF-8 válidas com validação explícita. Ou documentar que API trabalha com base64 para chaves binárias.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<h3 id="1d-segurança-de-memória-rust-específico"><a class="header" href="#1d-segurança-de-memória-rust-específico">1d. Segurança de Memória (Rust-específico)</a></h3>
+<p><strong>[UNSAFE-001] Único bloco unsafe é justificado e seguro</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa (informativo)</li>
+<li><strong>Área:</strong> Segurança</li>
+<li><strong>Componente:</strong> SSTable Reader</li>
+<li><strong>Impacto:</strong> Nenhum. O uso de <code>unsafe</code> é para <code>Mmap::map()</code> do crate <code>memmap2</code>, que é uma operação padrão e segura na prática. O fallback para <code>pread</code> existe caso o mmap falhe.</li>
+<li><strong>Evidência:</strong> <code>src/storage/reader.rs:132</code>: <code>unsafe { Mmap::map(&amp;file) }</code> com fallback documentado.</li>
+</ul>
+<p><strong>[UNWRAP-001] 918 chamadas <code>unwrap()</code> em produção podem causar crash</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Crítica</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> Geral</li>
+<li><strong>Impacto:</strong> Qualquer <code>unwrap()</code> em produção causa <code>panic!</code> se a operação falhar. No contexto de um servidor actix-web, um panic em uma worker thread derruba a thread (não o processo, graças ao <code>catch_unwind</code> do actix), mas corrompe estado compartilhado se o <code>Mutex</code> estiver locked no momento do panic.</li>
+<li><strong>Evidência:</strong> <code>grep -rn "\bunwrap(" src/ --include="*.rs" | grep -v "#\[" | grep -v "// " | grep -v "test" | wc -l</code> = 918.</li>
+<li><strong>Correção recomendada:</strong>
+<ul>
+<li>Fase 1: Substituir todos <code>unwrap()</code> em caminhos críticos (WAL write, memtable insert, compactação) por <code>?</code> ou <code>expect("context")</code>.</li>
+<li>Fase 2: Usar <code>cargo clippy -- -D clippy::unwrap_used</code> para prevenir novos <code>unwrap()</code>.</li>
+<li>Fase 3: Adicionar <code>#[deny(clippy::unwrap_used)]</code> no crate.</li>
+</ul>
+</li>
+<li><strong>Esforço:</strong> Alto (918 ocorrências) — pode ser automatizado parcialmente com <code>cargo fix</code>.</li>
+</ul>
+<p><strong>[EXPECT-001] 19 chamadas <code>expect()</code> em produção</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> Geral</li>
+<li><strong>Impacto:</strong> <code>expect()</code> é marginalmente melhor que <code>unwrap()</code> por dar contexto, mas ainda causa panic. Alguns <code>expect()</code> em <code>engine/mod.rs</code> (linhas 167, 1581) estão em caminhos críticos.</li>
+<li><strong>Evidência:</strong> <code>grep -rn "\bexpect(" src/ --include="*.rs" | grep -v "#\[" | grep -v "test" | wc -l</code> = 19.</li>
+<li><strong>Correção recomendada:</strong> Converter para <code>?</code> com <code>thiserror</code> ou <code>anyhow</code> context.</li>
+<li><strong>Esforço:</strong> Médio</li>
+</ul>
+<p><strong>[MEMTABLE-CONC-001] MemTable usa BTreeMap não-concorrente com Mutex externo</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa (informativo)</li>
+<li><strong>Área:</strong> Segurança</li>
+<li><strong>Componente:</strong> MemTable</li>
+<li><strong>Impacto:</strong> O <code>BTreeMap&lt;Vec&lt;u8&gt;, LogRecord&gt;</code> do MemTable é protegido por <code>parking_lot::Mutex</code> no core do engine. Isso é correto para um engine single-writer, mas limita throughput em workloads concorrentes.</li>
+<li><strong>Evidência:</strong> <code>src/core/memtable.rs:3</code>: <code>use std::collections::BTreeMap</code>. O engine usa <code>Mutex</code> como única porta de entrada (<code>src/core/engine/mod.rs:753</code>: <code>core.lock()</code>).</li>
+<li><strong>Observação:</strong> Sem data race — o mutex garante exclusão mútua. O tradeoff é performance, não segurança.</li>
+</ul>
+<h3 id="1e-segurança-de-acesso-à-api"><a class="header" href="#1e-segurança-de-acesso-à-api">1e. Segurança de Acesso à API</a></h3>
+<p><strong>[AUTH-WIRE-001] Auth middleware existe mas é ignorado quando desabilitado</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Crítica</li>
+<li><strong>Área:</strong> Segurança</li>
+<li><strong>Componente:</strong> API/Auth</li>
+<li><strong>Impacto:</strong> API pública sem autenticação por default. Já documentado como C-01.</li>
+<li><strong>Evidência:</strong> <code>src/api/auth/middleware.rs:33-35</code>.</li>
+</ul>
+<p><strong>[RATE-LIMIT-001] Rate limiter não é aplicado a endpoints admin</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Segurança</li>
+<li><strong>Componente:</strong> API/RateLimiter</li>
+<li><strong>Impacto:</strong> Endpoints <code>/admin/flush</code> e <code>/admin/compact</code> podem ser chamados centenas de vezes por segundo, causando degradação.</li>
+<li><strong>Evidência:</strong> Nenhum rate limit específico para admin endpoints. O rate limiter global de 100 req/min se aplica a todos.</li>
+<li><strong>Correção recomendada:</strong> Adicionar <code>rate_limiter.set_endpoint_limit("/admin", 10)</code>.</li>
+<li><strong>Esforço:</strong> Mínimo</li>
+</ul>
+<p><strong>[SECRETS-001] Nenhum hardcoded secret encontrado</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Boa prática ✅</li>
+<li><strong>Área:</strong> Segurança</li>
+<li><strong>Componente:</strong> Geral</li>
+<li><strong>Evidência:</strong> Scan com regex <code>ghp_|github_pat|sk-|AKIA</code> não encontrou ocorrências. <code>.secrets.example</code> contém apenas placeholder.</li>
+</ul>
+<hr />
+<h2 id="2-resiliÊncia"><a class="header" href="#2-resiliÊncia">2. RESILIÊNCIA</a></h2>
+<h3 id="2a-recuperação-após-crash-crash-recovery"><a class="header" href="#2a-recuperação-após-crash-crash-recovery">2a. Recuperação Após Crash (Crash Recovery)</a></h3>
+<p><strong>[WAL-FSYNC-001] WAL usa batch fsync com intervalos — tradeoff durabilidade vs performance</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> WAL</li>
+<li><strong>Impacto:</strong> O WAL não fsync a cada write, mas a cada <code>WAL_SYNC_INTERVAL</code> registros (tipicamente 4). Em caso de crash, até N-1 writes podem ser perdidos (RPO = N writes). Para a maioria dos casos isso é aceitável, mas para aplicações financeiras ou de auditoria, cada write precisa ser síncrono.</li>
+<li><strong>Evidência:</strong> <code>src/storage/wal.rs:116-125</code>: <code>WAL_SYNC_INTERVAL</code> definido como constante; batched sync implementado.</li>
+<li><strong>Correção recomendada:</strong> Tornar <code>WAL_SYNC_INTERVAL</code> configurável. Para máxima durabilidade, permitir <code>WAL_SYNC_INTERVAL=1</code>.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<p><strong>[WAL-REPLAY-001] Replay do WAL é idempotente mas pode ser lento com WAL grande</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> WAL</li>
+<li><strong>Impacto:</strong> O replay lê todo o WAL sequencialmente. Com WAL de 1GB, o startup pode levar segundos. O replay é correto (idempotente) porque o MemTable começa vazio e os registros são reaplicados, mas não há limite de tamanho do WAL antes do flush.</li>
+<li><strong>Evidência:</strong> <code>src/storage/wal.rs:400-500</code>: loop de replay, decodifica cada frame. <code>WAL_CURRENT_FRAME_VERSION</code> verifica compatibilidade retroativa (V0, V1, V2, V3).</li>
+<li><strong>Correção recomendada:</strong> Implementar WAL truncation após flush bem-sucedido. Arquivo WAL pode ser resetado periodicamente.</li>
+<li><strong>Esforço:</strong> Médio</li>
+</ul>
+<p><strong>[CRASH-COMPACTION-001] Crash durante compactação — atômica com rename</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa (informativo — implementado corretamente)</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> Compaction</li>
+<li><strong>Impacto:</strong> A compactação é atômica do ponto de vista do leitor. Novos SSTables são escritos em arquivos temporários, e apenas no final um <code>rename()</code> atômico os move para o diretório oficial. Se o crash ocorrer durante a escrita, os temporários são ignorados no próximo startup.</li>
+<li><strong>Evidência:</strong> <code>src/core/engine/compaction.rs</code>: padrão write-then-rename. <code>version_set.rs</code>: swap atômico de metadados.</li>
+<li><strong>Nota:</strong> Correto. ✅</li>
+</ul>
+<h3 id="2b-consistência-do-lsm-tree"><a class="header" href="#2b-consistência-do-lsm-tree">2b. Consistência do LSM-Tree</a></h3>
+<p><strong>[LSM-CONSIST-001] Leituras durante compactação podem ver dados de ambos os níveis (correto por design)</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa (informativo)</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> Compaction</li>
+<li><strong>Impacto:</strong> Durante compactação, leitores veem tanto SSTables antigos (ainda não deletados) quanto o novo SSTable (já adicionado ao VersionSet). Isso é correto por design do LSM-tree: ambos os níveis são consultados e o merge iterator retorna o valor mais recente. Não há inconsistência, apenas possível amplificação de leitura temporária.</li>
+<li><strong>Evidência:</strong> <code>src/core/iterators.rs</code>: MergeIterator combina múltiplos iteradores ordenados.</li>
+<li><strong>Nota:</strong> Comportamento correto. ✅</li>
+</ul>
+<p><strong>[SST-DELETE-001] SSTables antigos são deletados apenas após novo estar totalmente sincronizado</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa (informativo)</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> Compaction/SSTable</li>
+<li><strong>Impacto:</strong> O VersionSet é atualizado com o novo SSTable (add_table) antes de remover o antigo (remove_table). A remoção do arquivo físico ocorre após a atualização do VersionSet.</li>
+<li><strong>Evidência:</strong> <code>src/core/engine/compaction.rs</code>: sequência <code>add_table() → fsync() → remove_table() → unlink()</code>.</li>
+<li><strong>Nota:</strong> Correto. ✅</li>
+</ul>
+<h3 id="2c-tolerância-a-falhas-de-io"><a class="header" href="#2c-tolerância-a-falhas-de-io">2c. Tolerância a Falhas de I/O</a></h3>
+<p><strong>[IO-DISK-FULL-001] Disco cheio no WAL — erro propaga como IoError sem graceful degradation</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> WAL</li>
+<li><strong>Impacto:</strong> Quando o disco enche, <code>write_record()</code> retorna <code>Err(IoError)</code>. O erro propaga para a API, que retorna 500. O engine <strong>não entra em modo ReadOnly automaticamente</strong> — o <code>DegradationManager</code> existe mas não é integrado com o <code>DiskMonitor</code>.</li>
+<li><strong>Evidência:</strong> <code>src/storage/wal.rs:214-221</code>: erro de <code>sync_all()</code> propaga via <code>?</code>. <code>src/infra/degradation.rs</code>: implementado mas não chamado nos handlers. <code>src/infra/disk_monitor.rs</code>: <code>on_critical</code> callback não conectado ao engine.</li>
+<li><strong>Como reproduzir:</strong> Preencher o disco (<code>dd if=/dev/zero of=./disk_fill bs=1M count=...</code>), depois <code>PUT /keys/test</code> → 500 Internal Server Error.</li>
+<li><strong>Correção recomendada:</strong>
+<ol>
+<li>Conectar <code>DiskMonitor::on_critical</code> → <code>DegradationManager::set_mode(ReadOnly)</code></li>
+<li>Nos handlers da API, chamar <code>degradation_manager.check_write_allowed()</code> antes de escrever</li>
+<li>Retornar <code>503 Service Unavailable</code> em vez de 500</li>
+</ol>
+</li>
+<li><strong>Esforço:</strong> Médio</li>
+</ul>
+<p><strong>[IO-READ-ERROR-001] Erro de leitura de SSTable — arquivo corrompido não é isolado</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> SSTable</li>
+<li><strong>Impacto:</strong> Se um SSTable retorna erro de I/O na leitura, o erro propaga para o cliente como 500, mas o arquivo permanece no VersionSet. Leituras subsequentes continuam tentando ler o mesmo arquivo e falhando. Não há quarantine mechanism.</li>
+<li><strong>Evidência:</strong> <code>src/storage/reader.rs</code>: erro de I/O propaga via <code>?</code> sem remover arquivo do rotation.</li>
+<li><strong>Correção recomendada:</strong> Após N falhas consecutivas de leitura do mesmo SSTable, movê-lo para diretório de quarentena e removê-lo do VersionSet. Log de alerta.</li>
+<li><strong>Esforço:</strong> Médio</li>
+</ul>
+<p><strong>[BACKPRESSURE-001] CompactionBackpressure implementado mas não integrado com API rate limiter</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> Compaction/API</li>
+<li><strong>Impacto:</strong> Quando a compactação não consegue acompanhar a taxa de escrita, o <code>CompactionBackpressure</code> calcula delays, mas não há mecanismo para reduzir dinamicamente o rate limit da API. O resultado é que o MemTable enche, writes são bloqueados abruptamente (write stall), causando picos de latência.</li>
+<li><strong>Evidência:</strong> <code>src/infra/backpressure.rs</code>: implementação completa com EMA (exponential moving average). Não integrado com <code>RateLimiterState</code>.</li>
+<li><strong>Correção recomendada:</strong> Quando <code>should_backpressure()</code> retorna <code>true</code>, reduzir dinamicamente <code>max_requests_per_minute</code> via callback.</li>
+<li><strong>Esforço:</strong> Médio</li>
+</ul>
+<h3 id="2d-concorrência-e-locking"><a class="header" href="#2d-concorrência-e-locking">2d. Concorrência e Locking</a></h3>
+<p><strong>[DEADLOCK-001] Engine usa parking_lot::Mutex — sem risco de poisoned lock</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa (informativo)</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> Engine</li>
+<li><strong>Impacto:</strong> <code>parking_lot::Mutex</code> não envenena, diferentemente de <code>std::sync::Mutex</code>. Se uma thread panic enquanto segura o lock, o lock é liberado (embora o estado possa estar inconsistente).</li>
+<li><strong>Evidência:</strong> <code>src/core/engine/mod.rs</code>: uso de <code>parking_lot::Mutex</code> consistente.</li>
+<li><strong>Nota:</strong> Correto. ✅</li>
+</ul>
+<p><strong>[STARVATION-001] Lock único no engine pode causar starvation de leitores durante escritas intensas</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta</li>
+<li><strong>Área:</strong> Performance/Resiliência</li>
+<li><strong>Componente:</strong> Engine</li>
+<li><strong>Impacto:</strong> O engine usa um único <code>Mutex</code> para coordenar WAL + MemTable + VersionSet. Durante escritas intensas (1000+ writes/s), leitores ficam bloqueados aguardando o lock. Com <code>parking_lot::Mutex</code> (que é unfair por default), writers podem starving readers.</li>
+<li><strong>Evidência:</strong> <code>src/core/engine/mod.rs:753</code>: <code>core.lock()</code> antes de escrever no WAL + MemTable. <code>src/core/engine/mod.rs</code>: gets também adquirem <code>core.lock()</code>.</li>
+<li><strong>Correção recomendada:</strong>
+<ol>
+<li>Usar <code>RwLock</code> para separar leitores (get) de escritores (put).</li>
+<li>Implementar MVCC (multi-version concurrency control) com VersionSet snapshot para leituras sem lock.</li>
+<li>Como passo intermediário, usar <code>parking_lot::RwLock</code> no lugar de <code>Mutex</code>.</li>
+</ol>
+</li>
+<li><strong>Esforço:</strong> Alto (mudança arquitetural)</li>
+</ul>
+<h3 id="2e-observabilidade-e-operabilidade"><a class="header" href="#2e-observabilidade-e-operabilidade">2e. Observabilidade e Operabilidade</a></h3>
+<p><strong>[OBSERV-001] Métricas abrangentes expostas via Prometheus e OTel</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Boa prática ✅</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> Metrics</li>
+<li><strong>Evidência:</strong> <code>src/infra/metrics.rs</code>: 18+ contadores atômicos (sets, gets, cache_hits, erro, bloom_negatives, latências acumuladas). <code>format_prometheus()</code> gera formato padrão. <code>OtelInstruments</code> exporta via OTLP.</li>
+</ul>
+<p><strong>[OBSERV-002] CDC tracking implementado mas sem métricas de latência do Webhook</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> CDC</li>
+<li><strong>Impacto:</strong> Não há métrica de latência ou taxa de erro do webhook CDC. Impossível monitorar saúde da entrega de eventos.</li>
+<li><strong>Correção recomendada:</strong> Adicionar <code>cdc_events_total</code>, <code>cdc_errors_total</code>, <code>cdc_latency_ms</code> ao <code>EngineMetrics</code>.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<p><strong>[OBSERV-003] Logging é estruturado (tracing + OTel) mas não inclui request ID consistente</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> API</li>
+<li><strong>Impacto:</strong> Sem <code>x-request-id</code> tracking ponta-a-ponta, correlacionar logs de uma mesma requisição entre múltiplos serviços é difícil.</li>
+<li><strong>Evidência:</strong> <code>src/api/mod.rs:574</code>: <code>.wrap(Logger::default())</code> — formato default sem request ID tracking.</li>
+<li><strong>Correção recomendada:</strong> Usar <code>Logger::default().custom_request_header("x-request-id")</code> ou middleware próprio.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<h3 id="2f-rpo--rto"><a class="header" href="#2f-rpo--rto">2f. RPO / RTO</a></h3>
+<p><strong>[RPO-001] RPO estimado: &lt; WAL_SYNC_INTERVAL registros (default ~4 writes)</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa (aceitável para a maioria dos casos)</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> WAL</li>
+<li><strong>Impacto:</strong> Em caso de crash, até 4 writes podem ser perdidos (dependendo do <code>WAL_SYNC_INTERVAL</code>). Para aplicações críticas, configurar <code>WAL_SYNC_INTERVAL=1</code>.</li>
+<li><strong>Evidência:</strong> <code>WAL_SYNC_INTERVAL = 4</code> (hardcoded em <code>wal.rs:125</code>).</li>
+<li><strong>Correção recomendada:</strong> Tornar configurável.</li>
+</ul>
+<p><strong>[RTO-001] RTO estimado: &lt; 1s para WAL pequeno, até 10s para WAL de 1GB</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Resiliência</li>
+<li><strong>Componente:</strong> WAL/Startup</li>
+<li><strong>Impacto:</strong> O replay do WAL no startup é sequencial. Sem benchmark específico, estima-se ~10MB/s de throughput de replay (devido a decodificação postcard + CRC32). Para WAL de 1GB, RTO de ~100 segundos.</li>
+<li><strong>Correção recomendada:</strong> Implementar WAL truncation pós-flush. Adicionar benchmark de replay em <code>benches/</code>.</li>
+<li><strong>Esforço:</strong> Médio</li>
+</ul>
+<hr />
+<h2 id="3-performance"><a class="header" href="#3-performance">3. PERFORMANCE</a></h2>
+<h3 id="3a-write-path"><a class="header" href="#3a-write-path">3a. Write Path</a></h3>
+<p><strong>[WRITE-WAL-001] WAL sync é o gargalo principal de writes — group commit pode melhorar throughput</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Performance</li>
+<li><strong>Componente:</strong> WAL</li>
+<li><strong>Impacto:</strong> Cada <code>sync_all()</code> no WAL custa ~0.5-10ms (dependendo do disco). O batch sync com <code>WAL_SYNC_INTERVAL=4</code> amortiza isso, mas 4 writes por fsync ainda é pouco. Group commit (acumular writes de múltiplos clientes antes de fsync) melhoraria throughput em ~4x.</li>
+<li><strong>Evidência:</strong> <code>src/storage/wal.rs:214-221</code>: batch sync após N writes.</li>
+<li><strong>Correção recomendada:</strong> Implementar group commit: acumular writes de todos os clientes em um buffer compartilhado e fsync em intervalos fixos (ex: 1ms) ou após N bytes.</li>
+<li><strong>Esforço:</strong> Alto</li>
+</ul>
+<p><strong>[WRITE-SERIAL-001] Todo write adquire lock único do engine — bottleneck de concorrência</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta</li>
+<li><strong>Área:</strong> Performance</li>
+<li><strong>Componente:</strong> Engine</li>
+<li><strong>Impacto:</strong> Writes são serializadas pelo <code>Mutex</code> do engine. Com 8+ cores, 7 ficam ociosas durante escritas. Throughput máximo limitado a ~50.000 ops/s (estimado).</li>
+<li><strong>Evidência:</strong> <code>src/core/engine/mod.rs:753</code>: <code>core.lock()</code> antes de qualquer operação de escrita.</li>
+<li><strong>Correção recomendada:</strong> WAL lock separado do MemTable lock. Pipeline de escrita: WAL → MemTable (dois locks diferentes).</li>
+<li><strong>Esforço:</strong> Alto</li>
+</ul>
+<h3 id="3b-read-path"><a class="header" href="#3b-read-path">3b. Read Path</a></h3>
+<p><strong>[READ-BLOOM-001] Bloom Filter implementado e usado para evitar leituras desnecessárias de SSTable</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Boa prática ✅</li>
+<li><strong>Área:</strong> Performance</li>
+<li><strong>Componente:</strong> SSTable</li>
+<li><strong>Impacto:</strong> Bloom Filter com false positive rate de 1% (configurável) evita ~99% das leituras de SSTable que não contêm a chave.</li>
+<li><strong>Evidência:</strong> <code>src/storage/reader.rs:120-122</code>: <code>Bloom::&lt;[u8]&gt;::from_bytes()</code> usado no open do SSTable. <code>src/storage/reader.rs:180-195</code>: bloom filter checked antes de procurar bloco.</li>
+<li><strong>Nota:</strong> Implementado corretamente. ✅</li>
+</ul>
+<p><strong>[READ-CACHE-001] Block Cache LRU implementado com lru crate</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Boa prática ✅</li>
+<li><strong>Área:</strong> Performance</li>
+<li><strong>Componente:</strong> SSTable/Cache</li>
+<li><strong>Impacto:</strong> Blocos de SSTable descomprimidos são cacheados em LRU, reduzindo I/O repetido para keys populares.</li>
+<li><strong>Evidência:</strong> <code>src/storage/cache.rs:1</code>: <code>use lru::LruCache</code>. Cache sharded por <code>table_id</code>.</li>
+<li><strong>Observação:</strong> A <code>lru</code> crate versão 0.12.5 tem advisory RUSTSEC-2026-0002 (unsound IterMut). Upgrade para 0.16.3+ recomendado.</li>
+</ul>
+<p><strong>[READ-AMPLIFICATION-001] Leitura pode tocar múltiplos níveis (L0..Ln)</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Performance</li>
+<li><strong>Componente:</strong> Engine</li>
+<li><strong>Impacto:</strong> Cada <code>get()</code> precisa verificar MemTable + todos os níveis L0..Ln. Com 10 níveis e bloom filter com 1% FP rate, cada get faz em média 1 (MemTable) + 1 (L0, sem bloom) + 0.01 * 9 (L1..L9, bloom) ≈ 2.1 verificações de SSTable. Em níveis mais altos e sem bloom, pode chegar a 10+ verificações.</li>
+<li><strong>Evidência:</strong> <code>src/core/engine/mod.rs:860-900</code>: função <code>get_cf</code> itera níveis.</li>
+<li><strong>Correção recomendada:</strong> Manter Bloom Filter obrigatório (default enabled). Adicionar métrica <code>read_amplification</code> exposta.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<h3 id="3c-compaction"><a class="header" href="#3c-compaction">3c. Compaction</a></h3>
+<p><strong>[COMP-STRATEGY-001] Estratégia híbrida LazyLeveling: size-tiered em L0, leveled nos demais</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Boa prática ✅</li>
+<li><strong>Área:</strong> Performance</li>
+<li><strong>Componente:</strong> Compaction</li>
+<li><strong>Impacto:</strong> Balanceamento entre write amplification (size-tiered é melhor) e space amplification (leveled é melhor) e read amplification (leveled é melhor). Estratégia bem escolhida para caso de uso geral.</li>
+<li><strong>Evidência:</strong> <code>src/core/engine/compaction.rs:389-450</code>: <code>LazyLevelingCompaction</code> implementa switch.</li>
+</ul>
+<p><strong>[COMP-WRITE-AMP-001] Write amplification não é monitorada em produção</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Performance</li>
+<li><strong>Componente:</strong> Compaction/Metrics</li>
+<li><strong>Impacto:</strong> Bench <code>write_amplification</code> existe, mas a métrica real <code>compaction_bytes_written / user_bytes_written</code> não é exposta no Prometheus. Usuários não conseguem detectar se a configuração de níveis está causando WA excessiva.</li>
+<li><strong>Evidência:</strong> <code>benches/write_amplification.rs</code> existe. <code>src/infra/metrics.rs</code>: não inclui <code>write_amplification_ratio</code>.</li>
+<li><strong>Correção recomendada:</strong> Adicionar métrica <code>apexstore_write_amplification_ratio</code> calculada a partir de <code>compaction_bytes_total</code> e <code>user_bytes_written_total</code>.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<h3 id="3d-benchmarks-e-metas"><a class="header" href="#3d-benchmarks-e-metas">3d. Benchmarks e Metas</a></h3>
+<p><strong>[BENCH-001] Benchmarks abrangentes com criterion.rs</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Boa prática ✅</li>
+<li><strong>Área:</strong> Performance</li>
+<li><strong>Componente:</strong> Geral</li>
+<li><strong>Evidência:</strong> <code>benches/</code>: write_bench, read_bench, mixed_bench, scan_bench, stress_bench, latency_bench, write_amplification. 7 benchmarks cobrindo todos os aspectos.</li>
+</ul>
+<p><strong>[BENCH-002] Benchmarks não têm valores-alvo (regression gates)</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Baixa</li>
+<li><strong>Área:</strong> Performance</li>
+<li><strong>Componente:</strong> CI</li>
+<li><strong>Impacto:</strong> Sem thresholds, CI não detecta regressões de performance automaticamente.</li>
+<li><strong>Correção recomendada:</strong> Usar <code>criterion</code> comparison feature com <code>baseline</code> para detectar regressões &gt; 5% no CI.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<h3 id="3e-uso-de-memória"><a class="header" href="#3e-uso-de-memória">3e. Uso de Memória</a></h3>
+<p><strong>[MEM-MEMTABLE-001] MemTable usa BTreeMap — O(n log n) insert, O(log n) get</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Média</li>
+<li><strong>Área:</strong> Performance</li>
+<li><strong>Componente:</strong> MemTable</li>
+<li><strong>Impacto:</strong> <code>BTreeMap&lt;Vec&lt;u8&gt;, LogRecord&gt;</code> tem insert O(log n). Para 1M registros no MemTable, insert custa ~20 comparações de chave. Skip list teria O(log n) médio similar mas melhor localidade de cache e concorrência lock-free.</li>
+<li><strong>Evidência:</strong> <code>src/core/memtable.rs:3</code>: <code>use std::collections::BTreeMap</code>.</li>
+<li><strong>Correção recomendada:</strong> Avaliar <code>crossbeam-skiplist</code> ou <code>dashmap</code> para concorrência lock-free. Por enquanto, para workload single-writer, BTreeMap é aceitável.</li>
+<li><strong>Esforço:</strong> Alto (substituir estrutura de dados)</li>
+</ul>
+<p><strong>[MEM-ITERATOR-001] MergeIterator durante compactação é lazy (streaming)</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Boa prática ✅</li>
+<li><strong>Área:</strong> Performance</li>
+<li><strong>Componente:</strong> Compaction</li>
+<li><strong>Impacto:</strong> Não carrega SSTables inteiros em memória. Lê blocos sob demanda, descomprime, itera, descarta.</li>
+<li><strong>Evidência:</strong> <code>src/core/iterators.rs</code>: <code>MergeIterator</code> e <code>StorageIterator</code> usam pattern de streaming.</li>
+</ul>
+<hr />
+<h2 id="4-matriz-de-risco-do-lsm-tree"><a class="header" href="#4-matriz-de-risco-do-lsm-tree">4. Matriz de Risco do LSM-Tree</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Componente</th><th>Segurança</th><th>Resiliência</th><th>Performance</th><th>Risco Geral</th></tr></thead><tbody>
+<tr><td><strong>WAL</strong></td><td>🟢 CRC32 + AES-256-GCM (opt)</td><td>🟡 Batch fsync (RPO não-zero)</td><td>🟡 Group commit não implementado</td><td><strong>Médio</strong></td></tr>
+<tr><td><strong>MemTable</strong></td><td>🟢 BTreeMap + Mutex seguro</td><td>🟡 Lock único pode causar starvation</td><td>🟡 BTreeMap O(log n), sem skip list</td><td><strong>Médio</strong></td></tr>
+<tr><td><strong>SSTable</strong></td><td>🟢 CRC32 + Bloom + Cache LRU</td><td>🟡 Sem auto-repair de corrupção</td><td>🟢 Blocos cacheados, bloom filter</td><td><strong>Baixo</strong></td></tr>
+<tr><td><strong>Compaction</strong></td><td>🟢 Write-then-rename atômico</td><td>🟢 Crash-safe</td><td>🟢 LazyLeveling híbrido</td><td><strong>Baixo</strong></td></tr>
+<tr><td><strong>API/HTTP</strong></td><td>🔴 Auth+CORS+Payload+No TLS</td><td>🟡 Sem degradation integrado</td><td>🟡 N+1 scan, batch sem limite</td><td><strong>Crítico</strong></td></tr>
+<tr><td><strong>CDC</strong></td><td>🔴 Sem auth, sem retry</td><td>🟡 Sem timeout, sem circuit breaker</td><td>🟢 Boa estrutura de eventos</td><td><strong>Alto</strong></td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="5-plano-de-correção-priorizado"><a class="header" href="#5-plano-de-correção-priorizado">5. Plano de Correção Priorizado</a></h2>
+<h3 id="quick-wins-24h"><a class="header" href="#quick-wins-24h">Quick Wins (24h)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>ID</th><th>Ação</th><th>Esforço</th><th>Issues</th></tr></thead><tbody>
+<tr><td>C-01</td><td>Mudar <code>AuthConfig::default()</code> para <code>enabled: true</code></td><td>15min</td><td>#324</td></tr>
+<tr><td>C-02</td><td>Substituir <code>Cors::permissive()</code> por deny-by-default</td><td>30min</td><td>#325</td></tr>
+<tr><td>C-03</td><td>Reduzir <code>MAX_JSON_PAYLOAD_SIZE</code> para 1MB</td><td>15min</td><td>#326</td></tr>
+<tr><td>INPUT-VAL-001</td><td>Adicionar <code>MAX_KEY_SIZE</code> e <code>MAX_VALUE_SIZE</code> no engine</td><td>1h</td><td>(nova issue)</td></tr>
+<tr><td>H-03</td><td>Desabilitar GraphQL playground em release</td><td>30min</td><td>#331</td></tr>
+<tr><td>M-10</td><td>Adicionar <code>cargo audit</code> ao CI</td><td>30min</td><td>#346</td></tr>
+<tr><td>RATE-LIMIT</td><td>Adicionar endpoint limits para <code>/admin/*</code></td><td>15min</td><td>(nova issue)</td></tr>
+<tr><td>COMP-WRITE-AMP</td><td>Adicionar métrica write amplification no Prometheus</td><td>1h</td><td>#352</td></tr>
+</tbody></table>
+</div>
+<h3 id="correções-para-7-dias"><a class="header" href="#correções-para-7-dias">Correções para 7 Dias</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>ID</th><th>Ação</th><th>Esforço</th><th>Issues</th></tr></thead><tbody>
+<tr><td>C-04</td><td>Adicionar suporte TLS nativo (rustls)</td><td>8h</td><td>#327</td></tr>
+<tr><td>C-05</td><td>Adicionar auth + retry + timeout no CDC Webhook</td><td>4h</td><td>#328</td></tr>
+<tr><td>H-01</td><td>Refatorar <code>/scan</code> para usar iterator scan (N+1 fix)</td><td>3h</td><td>#329</td></tr>
+<tr><td>H-02</td><td>Adicionar <code>max_batch_size</code> no batch endpoint</td><td>1h</td><td>#330</td></tr>
+<tr><td>H-04</td><td>Adicionar auth no WebSocket sync</td><td>4h</td><td>#332</td></tr>
+<tr><td>H-05</td><td>Substituir <code>Mutex&lt;HashMap&gt;</code> por sharded rate limiter</td><td>6h</td><td>#333</td></tr>
+<tr><td>H-06</td><td>Integrar IdempotencyMiddleware na cadeia</td><td>3h</td><td>#334</td></tr>
+<tr><td>H-07</td><td>Adicionar validação de env vars com logging</td><td>2h</td><td>#335</td></tr>
+<tr><td>H-08</td><td>Implementar <code>keys_with_limit()</code></td><td>4h</td><td>#336</td></tr>
+<tr><td>INPUT-VAL-002</td><td>Validar UTF-8 nas chaves da API</td><td>1h</td><td>(nova issue)</td></tr>
+<tr><td>M-01</td><td>Fixar default workers=4</td><td>30min</td><td>#337</td></tr>
+<tr><td>M-08</td><td>Integrar DegradationManager nos handlers</td><td>3h</td><td>#344</td></tr>
+<tr><td>M-09</td><td>Adicionar <code>max_connections_per_ip</code></td><td>3h</td><td>#345</td></tr>
+</tbody></table>
+</div>
+<h3 id="melhorias-estruturais-30-dias"><a class="header" href="#melhorias-estruturais-30-dias">Melhorias Estruturais (30 Dias)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>ID</th><th>Ação</th><th>Esforço</th></tr></thead><tbody>
+<tr><td>UNWRAP-001</td><td>Erradicar 918 <code>unwrap()</code> em produção</td><td>40h (pode ser automatizado parcialmente)</td></tr>
+<tr><td>STARVATION-001</td><td>Migrar de <code>Mutex</code> para <code>RwLock</code> no engine</td><td>16h</td></tr>
+<tr><td>WRITE-WAL-001</td><td>Implementar group commit no WAL</td><td>12h</td></tr>
+<tr><td>WRITE-SERIAL-001</td><td>Separar WAL lock do MemTable lock</td><td>20h</td></tr>
+<tr><td>IO-DISK-FULL-001</td><td>Integrar Degradation + DiskMonitor + API handlers</td><td>8h</td></tr>
+<tr><td>IO-READ-ERROR-001</td><td>Implementar quarantine de SSTables corrompidos</td><td>8h</td></tr>
+<tr><td>CRASH-SST-001</td><td>Implementar auto-repair parcial de SSTables</td><td>16h</td></tr>
+<tr><td>WAL-FSYNC-001</td><td>Tornar WAL_SYNC_INTERVAL configurável</td><td>2h</td></tr>
+<tr><td>BACKPRESSURE-001</td><td>Integrar CompactionBackpressure com RateLimiter</td><td>6h</td></tr>
+<tr><td>MEMTABLE-CONC</td><td>Avaliar skip list lock-free (crossbeam)</td><td>16h</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="6-plano-de-testes-recomendado"><a class="header" href="#6-plano-de-testes-recomendado">6. Plano de Testes Recomendado</a></h2>
+<h3 id="testes-unitários-por-componente"><a class="header" href="#testes-unitários-por-componente">Testes Unitários por Componente</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Componente</th><th>O que testar</th><th>Status atual</th></tr></thead><tbody>
+<tr><td>WAL</td><td>CRC32 detecção, versões V0-V3, replay, truncation</td><td>✅ Bom</td></tr>
+<tr><td>MemTable</td><td>Insert/Get/Delete/Scan, TTL expiry, overflow</td><td>✅ Bom</td></tr>
+<tr><td>SSTable</td><td>Build/Read, CRC32, bloom filter, compressão</td><td>✅ Bom</td></tr>
+<tr><td>Compaction</td><td>Estratégias size-tiered/leveled, atomicidade</td><td>✅ Bom</td></tr>
+<tr><td>Auth</td><td>Token CRUD, expiry, permissions, timing</td><td>✅ Bom</td></tr>
+<tr><td>Rate Limiter</td><td>Sliding window, per-endpoint, X-Forwarded-For</td><td>✅ Bom</td></tr>
+<tr><td>Retry</td><td>Backoff, jitter, exhaustion</td><td>✅ Bom</td></tr>
+<tr><td>Circuit Breaker</td><td>Open/HalfOpen/Closed, thresholds</td><td>✅ Bom</td></tr>
+<tr><td>Backup</td><td>Snapshot/restore, retention, erro</td><td>✅ Bom</td></tr>
+<tr><td>Encryption</td><td>AES-256-GCM roundtrip, wrong key, disabled</td><td>✅ Bom</td></tr>
+<tr><td>Scrubber</td><td>CRC32 valid/invalid, orphan detection</td><td>✅ Bom</td></tr>
+<tr><td><strong>Degradation</strong></td><td>Mode switching, write block</td><td>✅ Bom</td></tr>
+<tr><td><strong>Idempotency</strong></td><td>Cache hit/miss, cleanup, TTL</td><td>✅ Bom</td></tr>
+</tbody></table>
+</div>
+<h3 id="testes-de-propriedade-property-based-testing-com-proptest"><a class="header" href="#testes-de-propriedade-property-based-testing-com-proptest">Testes de Propriedade (Property-Based Testing com <code>proptest</code>)</a></h3>
+<p>Recomendação: adicionar testes de propriedade para:</p>
+<pre><code>1. WAL Replay Property:
+   "Para qualquer sequência de operações put/delete, 
+    o replay do WAL no startup deve produzir o mesmo estado 
+    que o engine antes do crash."
+
+2. Compaction Idempotency:
+   "Compactar duas vezes seguidas deve produzir o mesmo 
+    resultado que compactar uma vez."
+
+3. Snapshot/Recovery:
+   "create_snapshot + restore_snapshot deve restaurar 
+    o estado completo do banco."
+
+4. Bloom Filter:
+   "Para qualquer chave K, se o bloom filter disser 
+    'não presente', então K definitivamente não está no SSTable."
+</code></pre>
+<h3 id="fuzz-testing-com-cargo-fuzz"><a class="header" href="#fuzz-testing-com-cargo-fuzz">Fuzz Testing (com <code>cargo-fuzz</code>)</a></h3>
+<pre><code>1. WAL Frame Fuzzing:
+   - Alimentar frames corrompidos, truncados, com versões misturadas
+   - Verificar que não há pânico nem corrupção de estado
+
+2. SSTable Fuzzing:
+   - Arquivos SSTable corrompidos (bytes aleatórios)
+   - Verificar graceful error handling (não pânico)
+
+3. API Input Fuzzing:
+   - JSON malformado, chaves binárias, valores enormes
+   - Headers HTTP maliciosos
+   - Paths com caracteres especiais
+</code></pre>
+<h3 id="testes-de-chaos-com-fail-rs"><a class="header" href="#testes-de-chaos-com-fail-rs">Testes de Chaos (com <code>fail-rs</code>)</a></h3>
+<pre><code>1. I/O Injection:
+   - Injetar falhas de leitura/escrita no WAL
+   - Injetar disco cheio
+   - Injetar lentidão de I/O (latency injection)
+
+2. Crash Injection:
+   - Crash no meio do batch write
+   - Crash no meio da compactação
+   - Crash durante flush do MemTable
+
+3. Network Chaos (CDC):
+   - CDC endpoint lento
+   - CDC endpoint retornando 500
+   - CDC timeout
+</code></pre>
+<h3 id="benchmarks-com-criterionrs"><a class="header" href="#benchmarks-com-criterionrs">Benchmarks com <code>criterion.rs</code></a></h3>
+<p>Já existentes (7 benchmarks):</p>
+<ul>
+<li>write_bench, read_bench, mixed_bench, scan_bench</li>
+<li>stress_bench, latency_bench, write_amplification</li>
+</ul>
+<p>Recomendação adicional:</p>
+<pre><code>8. replay_bench: benchmark de replay do WAL (RTO)
+9. compaction_bench: latência e throughput da compactação
+10. concurrent_bench: throughput vs número de threads
+</code></pre>
+<hr />
+<h2 id="7-achados-detalhados-formato-padrão"><a class="header" href="#7-achados-detalhados-formato-padrão">7. Achados Detalhados (Formato Padrão)</a></h2>
+<h3 id="-críticos-5"><a class="header" href="#-críticos-5">🔴 Críticos (5)</a></h3>
+<p><strong>[CRIT-01] API pública sem autenticação por default</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Crítica | Segurança | API/Auth</li>
+<li><strong>Impacto:</strong> Qualquer endpoint acessível sem token. Leitura/escrita/delete/admin irrestritos.</li>
+<li><strong>Evidência:</strong> <code>src/api/auth/middleware.rs:33-35</code></li>
+<li><strong>Correção:</strong> Default <code>enabled: true</code>; middleware deny-by-default.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<p><strong>[CRIT-02] CORS permissivo permite qualquer origem</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Crítica | Segurança | API</li>
+<li><strong>Impacto:</strong> Exfiltração de dados cross-origin.</li>
+<li><strong>Evidência:</strong> <code>src/api/mod.rs:518</code></li>
+<li><strong>Correção:</strong> Exigir origens explícitas.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<p><strong>[CRIT-03] Payload JSON de 50MB permite OOM</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Crítica | Segurança/Performance | API</li>
+<li><strong>Evidência:</strong> <code>src/api/config.rs:50</code></li>
+<li><strong>Correção:</strong> Reduzir para 1MB.</li>
+<li><strong>Esforço:</strong> Baixo</li>
+</ul>
+<p><strong>[CRIT-04] Sem TLS/HTTPS — MITM total</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Crítica | Segurança | API</li>
+<li><strong>Evidência:</strong> Nenhuma dependência TLS no Cargo.toml</li>
+<li><strong>Correção:</strong> Adicionar rustls + bind_rustls().</li>
+<li><strong>Esforço:</strong> Médio</li>
+</ul>
+<p><strong>[CRIT-05] 918 unwrap() em produção causam crash em erro</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Crítica | Resiliência | Geral</li>
+<li><strong>Evidência:</strong> <code>grep -c "unwrap(" src/ --include=*.rs</code> = 918</li>
+<li><strong>Correção:</strong> Substituir por <code>?</code>, configurar <code>clippy::unwrap_used</code>.</li>
+<li><strong>Esforço:</strong> Alto</li>
+</ul>
+<h3 id="-altos-8"><a class="header" href="#-altos-8">🟠 Altos (8)</a></h3>
+<p><strong>[HIGH-01] N+1 query no endpoint /scan</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta | Performance | API</li>
+<li><strong>Componente:</strong> API/Engine</li>
+<li><strong>Impacto:</strong> 10.001 chamadas para 10.000 keys.</li>
+<li><strong>Evidência:</strong> <code>src/api/mod.rs:439-463</code></li>
+<li><strong>Correção:</strong> Usar <code>engine.scan()</code>.</li>
+</ul>
+<p><strong>[HIGH-02] Batch insert sem limite — DoS por alocação</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta | Segurança | API</li>
+<li><strong>Evidência:</strong> <code>src/api/mod.rs:406-431</code></li>
+<li><strong>Correção:</strong> <code>max_batch_size</code> default 1000.</li>
+</ul>
+<p><strong>[HIGH-03] Sem limite de tamanho de chave/valor</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta | Segurança/Performance | Engine</li>
+<li><strong>Evidência:</strong> <code>src/core/engine/mod.rs:745</code>: sem validação.</li>
+<li><strong>Correção:</strong> <code>MAX_KEY_SIZE = 4096, MAX_VALUE_SIZE = 1MB</code>.</li>
+</ul>
+<p><strong>[HIGH-04] Lock único serializa writes e starving reads</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta | Performance | Engine</li>
+<li><strong>Evidência:</strong> <code>Mutex</code> único para todo o core.</li>
+<li><strong>Correção:</strong> <code>RwLock</code> + MVCC.</li>
+</ul>
+<p><strong>[HIGH-05] Disco cheio não ativa modo ReadOnly automaticamente</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta | Resiliência | Engine/API/Disk</li>
+<li><strong>Evidência:</strong> DegradationManager não integrado.</li>
+<li><strong>Correção:</strong> Integrar DiskMonitor → DegradationManager → API handlers.</li>
+</ul>
+<p><strong>[HIGH-06] CDC Webhook sem autenticação, retry ou timeout</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta | Segurança/Resiliência | CDC</li>
+<li><strong>Evidência:</strong> <code>src/infra/cdc.rs:217-250</code></li>
+<li><strong>Correção:</strong> Adicionar Auth header, RetryConfig, timeout 5s.</li>
+</ul>
+<p><strong>[HIGH-07] WebSocket sync sem autenticação</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta | Segurança | API/Sync</li>
+<li><strong>Evidência:</strong> <code>src/api/sync.rs:187-211</code></li>
+<li><strong>Correção:</strong> Validar token no handshake WebSocket.</li>
+</ul>
+<p><strong>[HIGH-08] GraphQL playground exposto em produção</strong></p>
+<ul>
+<li><strong>Severidade:</strong> Alta | Segurança | API/GraphQL</li>
+<li><strong>Evidência:</strong> <code>src/api/mod.rs:491-493</code></li>
+<li><strong>Correção:</strong> Desabilitar em release.</li>
+</ul>
+<h3 id="-médios-12"><a class="header" href="#-médios-12">🟡 Médios (12)</a></h3>
+<p>Listados na matriz completa em <code>docs/audit/auditoria-completa.md</code>.</p>
+<h3 id="-baixos-5"><a class="header" href="#-baixos-5">🔵 Baixos (5)</a></h3>
+<p>Listados na matriz completa em <code>docs/audit/auditoria-completa.md</code>.</p>
+<hr />
+<h2 id="8-checklist-antes-de-release-pública"><a class="header" href="#8-checklist-antes-de-release-pública">8. Checklist Antes de Release Pública</a></h2>
+<h3 id="segurança"><a class="header" href="#segurança">Segurança</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<code>API_AUTH_ENABLED=true</code> — autenticação obrigatória</li>
+<li><input disabled="" type="checkbox"/>
+Token admin criado antes do startup</li>
+<li><input disabled="" type="checkbox"/>
+<code>CORS_ORIGINS</code> configurado com lista de origens confiáveis</li>
+<li><input disabled="" type="checkbox"/>
+TLS habilitado (rustls nativo ou reverse proxy documentado)</li>
+<li><input disabled="" type="checkbox"/>
+<code>MAX_JSON_PAYLOAD_SIZE</code> ≤ 1MB</li>
+<li><input disabled="" type="checkbox"/>
+Criptografia em repouso habilitada (<code>encryption_key_path</code>)</li>
+<li><input disabled="" type="checkbox"/>
+Rate limiter configurado com per-endpoint limits para admin</li>
+<li><input disabled="" type="checkbox"/>
+GraphQL playground desabilitado</li>
+<li><input disabled="" type="checkbox"/>
+WebSocket sync com autenticação</li>
+<li><input disabled="" type="checkbox"/>
+<code>Idempotency-Key</code> middleware integrado</li>
+<li><input disabled="" type="checkbox"/>
+CSRF protection middleware implementado</li>
+</ul>
+<h3 id="resiliência"><a class="header" href="#resiliência">Resiliência</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<code>DiskMonitor</code> configurado e conectado ao <code>DegradationManager</code></li>
+<li><input disabled="" type="checkbox"/>
+<code>WAL_SYNC_INTERVAL</code> configurado conforme RPO desejado</li>
+<li><input disabled="" type="checkbox"/>
+<code>CompactionBackpressure</code> integrado ao rate limiter</li>
+<li><input disabled="" type="checkbox"/>
+CDC webhook com retry + timeout + circuit breaker</li>
+<li><input disabled="" type="checkbox"/>
+<code>PanicRecovery</code> registrado com callback de alerta</li>
+<li><input disabled="" type="checkbox"/>
+Backup automático configurado com criptografia</li>
+<li><input disabled="" type="checkbox"/>
+Health checks incluem dependências externas</li>
+</ul>
+<h3 id="performance"><a class="header" href="#performance">Performance</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<code>WORKERS</code> configurado (recomendado: 4)</li>
+<li><input disabled="" type="checkbox"/>
+<code>BLOCK_CACHE_SIZE_MB</code> configurado conforme workload</li>
+<li><input disabled="" type="checkbox"/>
+<code>BLOOM_FALSE_POSITIVE_RATE</code> definido (default 1%)</li>
+<li><input disabled="" type="checkbox"/>
+Benchmarks executados contra hardware alvo</li>
+<li><input disabled="" type="checkbox"/>
+<code>cargo criterion</code> sem regressão &gt; 5% vs baseline</li>
+</ul>
+<h3 id="cicd"><a class="header" href="#cicd">CI/CD</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<code>cargo audit</code> executando em cada PR</li>
+<li><input disabled="" type="checkbox"/>
+<code>cargo clippy -- -D warnings</code> passando</li>
+<li><input disabled="" type="checkbox"/>
+<code>cargo test --all-features</code> passando</li>
+<li><input disabled="" type="checkbox"/>
+<code>cargo fmt --check</code> passando</li>
+<li><input disabled="" type="checkbox"/>
+Fuzz tests integrados (cargo-fuzz)</li>
+</ul>
+<h3 id="dependências"><a class="header" href="#dependências">Dependências</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<code>lru</code> upgrade para ≥ 0.16.3 (RUSTSEC-2026-0002)</li>
+<li><input disabled="" type="checkbox"/>
+<code>paste</code> UNMAINTAINED — avaliar substituto (transitivo via ratatui)</li>
+<li><input disabled="" type="checkbox"/>
+<code>atomic-polyfill</code> UNMAINTAINED — avaliar <code>portable-atomic</code></li>
+</ul>
+<hr />
+<h2 id="issues-criadas"><a class="header" href="#issues-criadas">Issues Criadas</a></h2>
+<p>Todas as issues estão no GitHub:</p>
+<div class="table-wrapper"><table><thead><tr><th>ID</th><th>Issue</th><th>Link</th></tr></thead><tbody>
+<tr><td>C-01</td><td>Auth desabilitado por padrão</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/324">#324</a></td></tr>
+<tr><td>C-02</td><td>CORS permissivo</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/325">#325</a></td></tr>
+<tr><td>C-03</td><td>Payload 50MB</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/326">#326</a></td></tr>
+<tr><td>C-04</td><td>Sem TLS</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/327">#327</a></td></tr>
+<tr><td>C-05</td><td>CDC sem auth/retry</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/328">#328</a></td></tr>
+<tr><td>H-01</td><td>N+1 /scan</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/329">#329</a></td></tr>
+<tr><td>H-02</td><td>Batch sem limite</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/330">#330</a></td></tr>
+<tr><td>H-03</td><td>GraphQL playground</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/331">#331</a></td></tr>
+<tr><td>H-04</td><td>WebSocket sem auth</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/332">#332</a></td></tr>
+<tr><td>H-05</td><td>Rate limiter Mutex bottleneck</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/333">#333</a></td></tr>
+<tr><td>H-06</td><td>Idempotency não integrado</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/334">#334</a></td></tr>
+<tr><td>H-07</td><td>Env vars sem validação</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/335">#335</a></td></tr>
+<tr><td>H-08</td><td>engine.keys() OOM</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/336">#336</a></td></tr>
+<tr><td>M-01</td><td>Workers ilimitados</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/337">#337</a></td></tr>
+<tr><td>M-02</td><td>Sem CSRF</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/338">#338</a></td></tr>
+<tr><td>M-03</td><td>Token timing attack</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/339">#339</a></td></tr>
+<tr><td>M-04</td><td>Backup sem criptografia</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/340">#340</a></td></tr>
+<tr><td>M-05</td><td>Retry blocking sleep</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/341">#341</a></td></tr>
+<tr><td>M-06</td><td>CDC sem timeout</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/342">#342</a></td></tr>
+<tr><td>M-07</td><td>Falta auditoria logs</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/343">#343</a></td></tr>
+<tr><td>M-08</td><td>Degradation não integrado</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/344">#344</a></td></tr>
+<tr><td>M-09</td><td>Sem limite conexões/IP</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/345">#345</a></td></tr>
+<tr><td>M-10</td><td>Sem cargo audit no CI</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/346">#346</a></td></tr>
+<tr><td>DB-04</td><td>Range delete ausente</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/347">#347</a></td></tr>
+<tr><td>L-01</td><td>CLI sem token mgmt</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/348">#348</a></td></tr>
+<tr><td>L-02</td><td>Dashboard reload</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/349">#349</a></td></tr>
+<tr><td>L-03</td><td>Endpoints duplicados</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/350">#350</a></td></tr>
+<tr><td>L-04</td><td>Health checks incompletos</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/351">#351</a></td></tr>
+<tr><td>L-05</td><td>Métrica write amplification</td><td><a href="https://github.com/ElioNeto/ApexStore/issues/352">#352</a></td></tr>
+</tbody></table>
+</div>
+<hr />
+<p><em>Auditoria realizada em 2026-05-26 por equipe técnica de 3 especialistas.</em>
+<em>Revisar a cada 6 meses ou após mudanças significativas de arquitetura.</em></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../audit/auditoria-completa.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../audit/auditoria-completa.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

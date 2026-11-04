@@ -1,0 +1,729 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Codebase Audit — August 2026 - ApexStore Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">ApexStore Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/ElioNeto/ApexStore" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="codebase-audit--august-2026"><a class="header" href="#codebase-audit--august-2026">Codebase Audit — August 2026</a></h1>
+<p><strong>Scope:</strong> <code>apex-store-rs</code> v2.2.7 at commit <code>fc024b7</code> (branch <code>main</code>).
+<strong>Method:</strong> static reading of all 37k lines of Rust under <code>src/</code>, plus a reproducible
+build in the containerised toolchain added by this audit (<code>Dockerfile.dev</code>, Rust 1.92).
+Every finding below is anchored to a <code>file:line</code> and, where the claim is behavioural,
+to a command whose output is quoted.</p>
+<p><strong>Baseline established during the audit:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Check</th><th>Result</th></tr></thead><tbody>
+<tr><td><code>cargo test --all-features --workspace</code></td><td><strong>642 passed, 0 failed, 9 ignored</strong></td></tr>
+<tr><td><code>cargo clippy --all-targets --all-features</code></td><td>1 warning (<code>src/notes/search.rs:76</code>, now fixed)</td></tr>
+<tr><td><code>cargo audit</code> (cargo-audit 0.22.2)</td><td><strong>2 vulnerabilities, 13 warnings</strong></td></tr>
+<tr><td><code>cargo audit</code> (cargo-audit 0.21.2)</td><td>aborts: <code>unsupported CVSS version: 4.0</code></td></tr>
+<tr><td><code>cargo run --release</code></td><td>fails: cannot choose between four binaries</td></tr>
+</tbody></table>
+</div>
+<p>The test suite being fully green while the defects below are live is itself the
+headline result: the gaps are in what is <em>not</em> covered, not in what is.</p>
+<hr />
+<h2 id="severity-summary"><a class="header" href="#severity-summary">Severity summary</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>ID</th><th>Severity</th><th>Area</th><th>Title</th></tr></thead><tbody>
+<tr><td>C-01</td><td>Critical</td><td>Security</td><td><code>web::Data&lt;bool&gt;</code> TypeId collision disables authentication entirely</td></tr>
+<tr><td>C-02</td><td>Critical</td><td>Security</td><td>Encryption at rest silently falls back to an all-zero AES key</td></tr>
+<tr><td>C-03</td><td>Critical</td><td>Durability</td><td><code>DIR_PATH</code> in <code>docker-compose.yml</code> is never read; container data is not persisted</td></tr>
+<tr><td>C-04</td><td>Critical</td><td>Durability</td><td>SSTable corruption detection and quarantine are wired to inverted signals</td></tr>
+<tr><td>H-01</td><td>High</td><td>Security</td><td><code>X-Forwarded-For</code> is trusted unconditionally: rate-limit bypass and unbounded memory</td></tr>
+<tr><td>H-02</td><td>High</td><td>Correctness</td><td>Per-endpoint rate-limit counters never decay, permanently locking out clients</td></tr>
+<tr><td>H-03</td><td>High</td><td>Durability</td><td>WAL recovery deduplication discards range tombstones</td></tr>
+<tr><td>H-04</td><td>High</td><td>Resilience</td><td><code>panic = "abort"</code> makes every <code>catch_unwind</code> recovery path dead in release</td></tr>
+<tr><td>H-05</td><td>High</td><td>Security</td><td>Two live RustSec advisories; the CI audit job cannot run</td></tr>
+<tr><td>H-06</td><td>High</td><td>CI</td><td><code>ci.yml</code> runs no tests, no clippy and no build on <code>main</code></td></tr>
+<tr><td>M-01</td><td>Medium</td><td>Docs</td><td>Container health checks probe a route that does not exist, with a binary that is not installed</td></tr>
+<tr><td>M-02</td><td>Medium</td><td>Docs</td><td>Documented environment variables did not match the code (15 missing, 5 dead)</td></tr>
+<tr><td>M-03</td><td>Medium</td><td>Docs</td><td>README and QUICKSTART commands fail as written</td></tr>
+<tr><td>M-04</td><td>Medium</td><td>CI</td><td>Benchmark automation commits an empty result on every run</td></tr>
+<tr><td>M-05</td><td>Medium</td><td>CI</td><td>CI pipes an unpinned remote installer into <code>bash</code></td></tr>
+<tr><td>M-06</td><td>Medium</td><td>Testing</td><td>No test covers authentication, rate limiting or engine-level encryption</td></tr>
+<tr><td>M-07</td><td>Medium</td><td>Frontend</td><td>Angular 17 is out of support and has no CI at all</td></tr>
+<tr><td>L-01</td><td>Low</td><td>Design</td><td><code>MemTable</code> uses <code>DashMap</code> but exposes <code>&amp;mut self</code>, forcing an outer lock</td></tr>
+<tr><td>L-02</td><td>Low</td><td>Design</td><td><code>Engine</code> is a single 2300-line <code>impl</code> block</td></tr>
+<tr><td>L-03</td><td>Low</td><td>Docs</td><td>Version number disagrees across <code>Cargo.toml</code>, <code>ROADMAP.md</code> and <code>Dockerfile</code></td></tr>
+<tr><td>L-04</td><td>Low</td><td>Hygiene</td><td><code>.gitignore</code> contained <code>*.sh</code>, silently hiding every new shell script</td></tr>
+</tbody></table>
+</div>
+<p>Items marked <strong>fixed in this pass</strong> below were corrected as part of the audit; the
+rest are filed as issues because they change on-disk formats, runtime behaviour, or
+need tests that do not exist yet.</p>
+<hr />
+<h2 id="critical"><a class="header" href="#critical">Critical</a></h2>
+<h3 id="c-01--webdatabool-typeid-collision-disables-authentication-entirely"><a class="header" href="#c-01--webdatabool-typeid-collision-disables-authentication-entirely">C-01 — <code>web::Data&lt;bool&gt;</code> TypeId collision disables authentication entirely</a></h3>
+<p><strong>Status:</strong> fixed in this pass.</p>
+<p><code>actix-web</code> keys application data by <code>TypeId</code>. Registering two <code>web::Data&lt;bool&gt;</code>
+values means the second overwrites the first, and <em>every</em> reader of <code>Data&lt;bool&gt;</code>
+observes the survivor.</p>
+<p><code>start_server</code> registered exactly that pair:</p>
+<ul>
+<li><code>src/api/mod.rs:1825</code> — <code>web::Data::new(config.auth.enabled)</code></li>
+<li><code>src/api/mod.rs:1841</code> — <code>web::Data::new(config.access_control_enabled)</code></li>
+</ul>
+<p>with the access-control flag registered second (<code>src/api/mod.rs:1872</code>), so it won.
+Three readers were affected:</p>
+<ul>
+<li><code>src/api/auth/middleware.rs:29</code> (<code>bearer_validator</code>)</li>
+<li><code>src/api/auth/middleware.rs:81</code> (<code>require_permission</code>)</li>
+<li><code>src/api/access_control.rs:80</code> (<code>AccessControlMiddleware::call</code>)</li>
+</ul>
+<p><code>ACCESS_CONTROL_ENABLED</code> defaults to <code>false</code> (<code>src/api/config.rs:73</code>). Therefore, with
+<code>API_AUTH_ENABLED=true</code> and access control left at its default, <code>bearer_validator</code>
+returned <code>Ok(req)</code> for every request and <code>require_permission</code> returned <code>Ok(())</code> at all
+59 call sites. <strong>Authentication and the entire permission model were inert.</strong></p>
+<p>CHANGELOG records this exact behaviour being fixed once before, as issue #178
+("<code>API_AUTH_ENABLED</code> has no effect"). Adding the access-control middleware later
+silently reintroduced it, because nothing in the type system objected and no test
+exercises the authenticated path (see M-06).</p>
+<p>Both readers also used <code>.unwrap_or(false)</code>, so a missing flag meant "allow" — a
+fail-open default on the security-critical path.</p>
+<p><strong>Fix applied:</strong> distinct newtypes, <code>api::auth::AuthEnabled</code> and
+<code>api::access_control::AccessControlEnabled</code>, so the two flags occupy different
+<code>TypeId</code>s and a future third flag cannot collide either. The auth readers now fail
+<em>closed</em> when the flag is absent.</p>
+<h3 id="c-02--encryption-at-rest-silently-falls-back-to-an-all-zero-aes-key"><a class="header" href="#c-02--encryption-at-rest-silently-falls-back-to-an-all-zero-aes-key">C-02 — Encryption at rest silently falls back to an all-zero AES key</a></h3>
+<p><strong>Status:</strong> partially mitigated (failure is now logged); behavioural fix filed as an issue.</p>
+<p><code>EncryptionConfig::default()</code> is <code>{ key: [0u8; 32], enabled: true }</code>
+(<code>src/storage/encryption.rs:35</code>). An all-zero AES-256 key is publicly known, so data
+"encrypted" with it is readable by anyone.</p>
+<p><code>StorageConfig::default()</code> sets <code>encryption_enabled: true</code> with
+<code>encryption_key_path: None</code> (<code>src/infra/config.rs:148</code>), and <code>src/bin/server.rs</code>
+never reads any encryption variable nor calls <code>.encryption_key_path(...)</code>. The
+conversion at <code>src/core/engine/mod.rs:147</code> then did:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>.map(|path| EncryptionConfig::from_key_path(Some(path)))
+.unwrap_or_else(|| Err(LsmError::InvalidArgument(
+    "Encryption enabled but no key path provided".to_string())))
+.unwrap_or_default()          // &lt;-- the error is constructed, then discarded
+<span class="boring">}</span></code></pre></pre>
+<p>The explicit diagnostic was built and thrown away. <strong>Out of the box, the server
+encrypts every SSTable block and WAL frame with an all-zero key and reports
+success.</strong> An unreadable or malformed key file took the same path.</p>
+<p>Three further defects compound it:</p>
+<ol>
+<li><code>src/core/engine/compaction.rs:135</code> and <code>src/core/engine/version_set.rs:68</code> return
+<code>EncryptionConfig::default()</code> in the <code>else</code> branch taken when
+<code>encryption_enabled == false</code> — so <em>disabling</em> encryption turns it <em>on</em> with a zero
+key for those paths, while <code>EngineOptions::from</code> correctly yields <code>enabled: false</code>.
+Flush and compaction therefore disagree about whether output is encrypted.</li>
+<li><code>#[serde(default)]</code> on <code>encryption_enabled</code> (<code>src/infra/config.rs:98</code>) yields
+<code>false</code>, while <code>Default::default()</code> yields <code>true</code>. The same field has two
+contradictory defaults depending on how the config was constructed.</li>
+<li><code>src/infra/health/scrubber.rs:194</code> returns <code>valid: false</code> for every <code>LSMSST04</code>
+file: <em>"Cannot verify CRC32 of encrypted SSTable without encryption key"</em>. With
+encryption on by default, the integrity scrubber reports 100% of SSTables as
+invalid, indistinguishable from genuine corruption.</li>
+</ol>
+<p>The doc comments actively pointed the wrong way — <code>from_key_path</code>'s said
+<code>None</code> "returns a default (disabled) config", and <code>core/table.rs:87</code> told callers to
+"pass <code>EncryptionConfig::default()</code> … when encryption is not needed".</p>
+<p><code>src/api/test_helpers.rs:44</code> shows the confusion was known: it sets
+<code>encryption_key_path = Some("/dev/null")</code> to force a bypass.</p>
+<p><strong>Fix applied:</strong> the swallowed failures now emit <code>tracing::error!</code> on the
+<code>apexstore::security</code> target naming the all-zero fallback, and the misleading doc
+comments were corrected. Changing the default itself would make existing zero-key
+SSTables and WAL frames unreadable, so it needs a migration path and is filed
+separately.</p>
+<h3 id="c-03--dir_path-in-docker-composeyml-is-never-read-container-data-is-not-persisted"><a class="header" href="#c-03--dir_path-in-docker-composeyml-is-never-read-container-data-is-not-persisted">C-03 — <code>DIR_PATH</code> in <code>docker-compose.yml</code> is never read; container data is not persisted</a></h3>
+<p><strong>Status:</strong> fixed in this pass.</p>
+<p><code>src/bin/server.rs:29</code> reads <code>DATA_DIR</code>, defaulting to <code>./.lsm_data</code>. No binary reads
+<code>DIR_PATH</code>. But <code>docker-compose.yml</code> set <code>DIR_PATH=/data</code> and mounted the
+<code>apexstore-data</code> volume at <code>/data</code>.</p>
+<p>Consequently the server wrote to <code>/app/.lsm_data</code> — inside the container's writable
+layer, not the volume. <strong>Every write was lost when the container was recreated,
+while the deployment appeared to have a persistent volume.</strong></p>
+<p><code>INDEX_INTERVAL</code> in the same file had the same problem: the server reads
+<code>SPARSE_INDEX_INTERVAL</code> (<code>src/bin/server.rs:46</code>).</p>
+<p><strong>Fix applied:</strong> <code>docker-compose.yml</code> now sets <code>DATA_DIR=/data</code> and
+<code>SPARSE_INDEX_INTERVAL</code>; the <code>Dockerfile</code> declares <code>ENV DATA_DIR=/data</code> and
+<code>VOLUME ["/data"]</code> so the image is durable without extra configuration.</p>
+<h3 id="c-04--sstable-corruption-detection-and-quarantine-are-wired-to-inverted-signals"><a class="header" href="#c-04--sstable-corruption-detection-and-quarantine-are-wired-to-inverted-signals">C-04 — SSTable corruption detection and quarantine are wired to inverted signals</a></h3>
+<p><strong>Status:</strong> filed as an issue.</p>
+<p><code>Table::from_sstable_path</code> (<code>src/core/table.rs:89</code>) handles a failed meta-block read
+as <code>Err(_) =&gt; (Vec::new(), Vec::new(), None)</code> (<code>src/core/table.rs:113</code>) and returns
+<code>Ok</code>. It returns <code>Err</code> only when the meta block <em>was</em> read and the bloom filter then
+failed to deserialise.</p>
+<p><code>discover_sstables_from_disk</code> (<code>src/core/engine/mod.rs:2993</code>) quarantines on <code>Err</code> —
+moving the file into <code>sstables/quarantine/</code>. The two are therefore inverted:</p>
+<ul>
+<li>A genuinely unreadable SSTable (wrong key, truncated meta block, bit rot) returns
+<code>Ok</code> and is registered with an <strong>empty min/max key range and no bloom filter</strong>. Key
+pruning treats it as covering nothing, so its data becomes invisible. No warning, no
+quarantine, no metric.</li>
+<li>A file whose meta block reads fine but whose bloom filter fails to deserialise
+returns <code>Err</code> and is <strong>moved out of the data directory</strong> on startup.</li>
+</ul>
+<p>The same function also carries the comment <em>"For now, we'll create an empty table -
+in production this would read the SSTable"</em> (<code>src/core/table.rs:94</code>), and is called
+from five sites including the compaction and snapshot-restore paths.</p>
+<hr />
+<h2 id="high"><a class="header" href="#high">High</a></h2>
+<h3 id="h-01--x-forwarded-for-is-trusted-unconditionally"><a class="header" href="#h-01--x-forwarded-for-is-trusted-unconditionally">H-01 — <code>X-Forwarded-For</code> is trusted unconditionally</a></h3>
+<p><strong>Status:</strong> filed as an issue.</p>
+<p><code>get_client_ip</code> (<code>src/api/rate_limiter.rs</code>) returns the first address in
+<code>X-Forwarded-For</code> whenever the header parses, with no trusted-proxy allow-list and no
+way to disable the behaviour. Any client can therefore:</p>
+<ul>
+<li><strong>Bypass rate limiting entirely</strong> by varying the header per request; each forged
+value gets its own fresh budget.</li>
+<li><strong>Grow the tracking map without bound.</strong> <code>shard.retain(...)</code> only drops entries
+whose timestamp window has emptied, so one request per forged address keeps an entry
+alive for 60s. Millions of forged addresses are millions of live <code>IpTrack</code> values.</li>
+<li><strong>Forge audit-log attribution</strong>, since the audit middleware resolves the client the
+same way.</li>
+</ul>
+<p><code>.expect("rate limiter shard lock poisoned")</code> on the same path turns any panic under
+the lock into a process abort (see H-04).</p>
+<h3 id="h-02--per-endpoint-rate-limit-counters-never-decay"><a class="header" href="#h-02--per-endpoint-rate-limit-counters-never-decay">H-02 — Per-endpoint rate-limit counters never decay</a></h3>
+<p><strong>Status:</strong> filed as an issue.</p>
+<p><code>IpTrack::prune</code> (<code>src/api/rate_limiter.rs</code>) trims <code>timestamps</code> to the 60-second
+window but leaves <code>endpoint_counts</code> untouched; the comment says the counters are
+"pruned implicitly when the whole <code>IpTrack</code> is removed", which requires <code>timestamps</code>
+to become empty.</p>
+<p>The middleware records a timestamp on every request, so any client sending at least
+one request per minute never empties the window, and <code>endpoint_counts</code> increases
+monotonically for the process lifetime. Once <code>count &gt;= limit</code>, <code>is_rate_limited</code>
+returns <code>true</code> forever: <strong>a legitimate client that trips a per-endpoint limit once is
+locked out of that endpoint permanently.</strong> The window does not slide.</p>
+<p><code>endpoint_counts</code> is also keyed on the raw <code>req.path()</code>, so <code>/keys/&lt;random&gt;</code> generates
+an unbounded number of map entries per client.</p>
+<h3 id="h-03--wal-recovery-deduplication-discards-range-tombstones"><a class="header" href="#h-03--wal-recovery-deduplication-discards-range-tombstones">H-03 — WAL recovery deduplication discards range tombstones</a></h3>
+<p><strong>Status:</strong> filed as an issue.</p>
+<p><code>deduplicate_records</code> (<code>src/storage/wal.rs:789</code>) keys on <code>(column_family, key)</code> and
+keeps the last occurrence. <code>LogRecord::range_tombstone(start, end)</code> sets
+<code>key = start</code> (<code>src/core/log_record.rs:95</code>).</p>
+<p>So a range tombstone and any point write to its start key collide. Replaying</p>
+<pre><code class="language-text">delete_range(b"a", b"z")
+put(b"a", v)
+</code></pre>
+<p>keeps only the <code>put</code>, dropping the tombstone — and with it the deletion of every key
+in <code>b"b" ..= b"y"</code>. <strong>Deleted keys silently reappear after a restart.</strong></p>
+<p>The dedup pass was introduced for issue #191 (stale value after restart) before range
+deletes landed in #192; the two were never reconciled.</p>
+<h3 id="h-04--panic--abort-makes-every-catch_unwind-recovery-path-dead-in-release"><a class="header" href="#h-04--panic--abort-makes-every-catch_unwind-recovery-path-dead-in-release">H-04 — <code>panic = "abort"</code> makes every <code>catch_unwind</code> recovery path dead in release</a></h3>
+<p><strong>Status:</strong> filed as an issue.</p>
+<p><code>Cargo.toml</code> sets <code>panic = "abort"</code> under <code>[profile.release]</code>. <code>catch_unwind</code> cannot
+catch anything when panics abort, so in release builds:</p>
+<ul>
+<li>The whole <code>src/infra/panic_recovery.rs</code> module is inert, including
+<code>spawn_protected</code>, the panic history, and the <code>on_panic</code> callbacks.</li>
+<li>The compaction thread guard at <code>src/core/engine/mod.rs:1876</code> does not protect
+anything: a panic during compaction takes down the server.</li>
+<li>Every <code>.expect(...)</code> and slice index in a request path becomes a process kill.</li>
+</ul>
+<p>This only manifests in release. Tests run under the <code>dev</code> profile with unwinding, so
+the suite exercises code that cannot behave that way in production. For a server that
+documents resilience features (circuit breaker, degradation manager, watchdog),
+<code>panic = "abort"</code> and <code>panic_recovery</code> are mutually exclusive; one has to go.</p>
+<h3 id="h-05--two-live-rustsec-advisories-the-ci-audit-job-cannot-run"><a class="header" href="#h-05--two-live-rustsec-advisories-the-ci-audit-job-cannot-run">H-05 — Two live RustSec advisories; the CI audit job cannot run</a></h3>
+<p><strong>Status:</strong> one fixed, one accepted with a recorded rationale; tooling fixed.</p>
+<p><code>cargo audit</code> with the version pinned by the toolchain (0.21.2) aborts before
+scanning:</p>
+<pre><code class="language-text">error: error loading advisory database: parse error:
+  .../libcrux-aesgcm/RUSTSEC-2026-0211.md: unsupported CVSS version: 4.0
+</code></pre>
+<p>Both CI audit steps therefore produce no signal, which is why the following went
+unnoticed. With <code>cargo-audit 0.22.2</code>:</p>
+<div class="table-wrapper"><table><thead><tr><th>ID</th><th>Crate</th><th>Issue</th></tr></thead><tbody>
+<tr><td>RUSTSEC-2026-0258</td><td><code>h2 0.3.27</code></td><td>unbounded empty DATA frames (DoS) — fixed in &gt;= 0.4.16</td></tr>
+<tr><td>RUSTSEC-2026-0222</td><td><code>wasmtime 44.0.2</code></td><td>stores mix up type indices between engines (3.8 low)</td></tr>
+</tbody></table>
+</div>
+<p><code>h2 0.3</code> sits directly under the HTTP server, so the DoS is reachable.</p>
+<p>Thirteen warnings accompany them, including <code>spin 0.9.8</code> <strong>yanked</strong>, and
+<code>ring 0.16.20</code> / <code>rustls-pemfile 1.0.4</code> unmaintained. Those two come from
+<code>rustls = "0.20"</code>, and <code>.cargo/audit.toml</code> ignores their advisories with the
+justification <em>"Cannot upgrade without upstream actix-web upgrading rustls"</em>. That is
+no longer true: <code>actix-web 4.12</code> exposes a <code>rustls-0_23</code> feature. Moving to it drops
+<code>ring 0.16</code> from the tree and makes both ignores unnecessary.</p>
+<p>The dependency graph also carries three simultaneous major versions of <code>rand</code>
+(0.7.3, 0.8.5, 0.9.2) across 573 crates.</p>
+<p><strong>Resolution.</strong> <code>actix-web</code>'s <code>rustls</code> feature is an alias for <code>rustls-0_20</code>;
+switching to <code>rustls-0_23</code> removed rustls 0.20, tokio-rustls 0.23, ring 0.16 and
+rustls-pemfile 1 from the tree, so both entries in <code>.cargo/audit.toml</code> are gone
+rather than re-justified. <code>wasmtime</code> moved from 44 to 47.0.4, outside the
+RUSTSEC-2026-0222 range. <code>cargo update</code> cleared the yanked <code>spin 0.9.8</code> and the
+<code>anyhow</code>, <code>event-listener</code> and <code>memmap2</code> advisories. Dependencies went from 573 to
+555 and audit warnings from 13 to 6.</p>
+<p><code>RUSTSEC-2026-0258</code> (h2) cannot be fixed by a version bump: <code>h2 0.3</code> comes from
+<code>actix-http</code>, which every <code>actix-web</code> 4.x release depends on, and the advisory's
+fix is h2 ≥ 0.4.16. It is now the single entry in <code>.cargo/audit.toml</code>, with the
+dependency chain, the exposure, the existing mitigations and a review date
+recorded in place of the previous unexplained ignore list.</p>
+<p>Bumping <code>wasmtime</code> raised the MSRV to <strong>1.94</strong> (the cranelift crates require it).
+The pinned toolchain moved to <strong>1.98</strong>, the current stable — 1.92 was never a
+deliberate choice, only the floor <code>wasmtime 44</code> imposed. The two numbers are now
+distinct and separately checked: <code>rust-toolchain.toml</code> pins the toolchain,
+<code>rust-version</code> in <code>Cargo.toml</code> declares the MSRV, and the CI <code>MSRV</code> job verifies
+the latter independently.</p>
+<p>The TLS wiring moved to the rustls 0.23 API. That also fixed a latent bug: the old
+code called <code>rustls_pemfile::pkcs8_private_keys</code> only, so an RSA (PKCS#1) or EC
+(SEC1) key was rejected with "No private key found". <code>rustls_pemfile::private_key</code>
+accepts all three.</p>
+<h3 id="h-06--ciyml-runs-no-tests-no-clippy-and-no-build-on-main"><a class="header" href="#h-06--ciyml-runs-no-tests-no-clippy-and-no-build-on-main">H-06 — <code>ci.yml</code> runs no tests, no clippy and no build on <code>main</code></a></h3>
+<p><strong>Status:</strong> filed as an issue.</p>
+<p><code>.github/workflows/ci.yml</code> triggers on push to <code>main</code> and runs three jobs:
+<code>actionlint</code>, <code>audit</code> (currently broken, see H-05), and <code>benchmark</code>. There is no
+<code>cargo test</code>, no <code>cargo clippy</code>, no <code>cargo build</code>.</p>
+<p><code>pr-validation.yml</code> does have those jobs, and also triggers on push to <code>main</code>, so the
+two workflows duplicate the <code>audit</code> job on every push. <code>benchmarks.yml</code> adds a third
+<code>clippy</code> + <code>fmt</code> run. Meanwhile:</p>
+<ul>
+<li>Every workflow uses <code>container: rust:latest</code> <strong>and</strong> <code>dtolnay/rust-toolchain@stable</code>
+— redundant, and unpinned, so a new stable release can break CI with no repository
+change. <code>cargo clippy --all-features</code> currently emits a warning on Rust 1.92, and CI
+runs with <code>-D warnings</code>.</li>
+<li>No <code>--locked</code> anywhere, so <code>Cargo.lock</code> is not enforced.</li>
+<li>No MSRV job, so the README's claim of Rust 1.70 was never tested (the real floor
+is 1.92).</li>
+<li><code>latency_bench</code> and <code>write_amplification</code> are declared in <code>Cargo.toml</code> but absent
+from the <code>benchmarks.yml</code> matrix, so they never run.</li>
+<li><code>benchmarks.yml</code> triggers on a <code>develop</code> branch that does not exist.</li>
+<li>No coverage job, and no <code>cargo fuzz</code> job despite <code>fuzz/</code> being present.</li>
+</ul>
+<hr />
+<h2 id="medium"><a class="header" href="#medium">Medium</a></h2>
+<h3 id="m-01--container-health-checks-probe-a-route-that-does-not-exist"><a class="header" href="#m-01--container-health-checks-probe-a-route-that-does-not-exist">M-01 — Container health checks probe a route that does not exist</a></h3>
+<p><strong>Status:</strong> fixed in this pass.</p>
+<p>The registered routes are <code>/health/liveness</code>, <code>/health/readiness</code>, <code>/health/startup</code>
+and <code>/health/check</code> (<code>src/api/mod.rs:1582-1585</code>). There is no <code>GET /health</code>.</p>
+<p>Both the <code>Dockerfile</code> <code>HEALTHCHECK</code> and the <code>docker-compose.yml</code> <code>healthcheck</code> probed
+<code>http://localhost:8080/health</code>, so both returned 404. Independently, the
+<code>Dockerfile</code> health check invoked <code>curl</code>, which the runtime image never installed —
+and used exec form (<code>CMD ["curl", …, "||", "exit", "1"]</code>), where <code>||</code> is passed as a
+literal argument rather than interpreted. Three separate reasons for the same probe to
+never succeed.</p>
+<p><code>QUICKSTART.md:71</code> and <code>docs/AUTHENTICATION.md:129</code> documented the same missing route.</p>
+<p><strong>Fix applied:</strong> <code>curl</code> added to the runtime image; both probes point at
+<code>/health/liveness</code> in shell form; both documents corrected.</p>
+<h3 id="m-02--documented-environment-variables-did-not-match-the-code"><a class="header" href="#m-02--documented-environment-variables-did-not-match-the-code">M-02 — Documented environment variables did not match the code</a></h3>
+<p><strong>Status:</strong> fixed in this pass, with a regression guard.</p>
+<p>Diffing <code>env::var(...)</code> call sites in <code>src/</code> against assignments in <code>.env.example</code>:</p>
+<p><strong>Read by the code, absent from <code>.env.example</code> (15):</strong> <code>ACCESS_CONTROL_ENABLED</code>,
+<code>CORS_ENABLED</code>, <code>CORS_ORIGINS</code>, <code>DATA_DIR</code>, <code>ENVIRONMENT</code>, <code>MAX_CONNECTIONS_PER_IP</code>,
+<code>OTEL_EXPORTER_OTLP_ENDPOINT</code>, <code>REPLICATION_ROLE</code>, <code>REPLICATION_SYNC_INTERVAL_MS</code>,
+<code>REPLICA_ENDPOINTS</code>, <code>SPARSE_INDEX_INTERVAL</code>, <code>TLS_CERT_PATH</code>, <code>TLS_ENABLED</code>,
+<code>TLS_KEY_PATH</code>, <code>TLS_PORT</code>.</p>
+<p>Every TLS, CORS and access-control setting was undiscoverable — the security-relevant
+half of the configuration surface.</p>
+<p><strong>Documented, read nowhere (5):</strong> <code>DIR_PATH</code>, <code>INDEX_INTERVAL</code>, <code>WAL_MAX_SIZE</code>,
+<code>WAL_ARCHIVE_ENABLED</code>, <code>WAL_CHECK_INTERVAL_SECS</code>. Operators setting these got silence
+— which is how C-03 stayed hidden.</p>
+<p>The README additionally advertised <code>WAL_SYNC_MODE=async</code> as giving "16x throughput".
+That variable appears nowhere in the codebase; the knob is the compile-time constant
+<code>WAL_SYNC_INTERVAL</code> (<code>src/storage/wal.rs:139</code>), with no environment binding at all.</p>
+<p><strong>Fix applied:</strong> <code>.env.example</code> rewritten to cover all 34 variables the code reads,
+with a commented block naming the ones that exist only as <code>LsmConfig</code> fields.
+<code>scripts/check-env-example.sh</code> (wired to <code>make env-check</code>) fails the build on future
+drift in either direction.</p>
+<h3 id="m-03--readme-and-quickstart-commands-fail-as-written"><a class="header" href="#m-03--readme-and-quickstart-commands-fail-as-written">M-03 — README and QUICKSTART commands fail as written</a></h3>
+<p><strong>Status:</strong> fixed in this pass.</p>
+<ul>
+<li>README Quick Start said <code>cargo run --release</code>. With four binaries and no
+<code>default-run</code>, cargo refuses: <em>"could not determine which binary to run"</em>.</li>
+<li>README's TLS example used <code>--bin server</code>; QUICKSTART used <code>--bin cli</code> six times.
+Neither name exists — the binaries are <code>apexstore-server</code>, <code>apexstore-cli</code>,
+<code>apexstore-tui</code>. <strong>Every runnable command in QUICKSTART.md failed.</strong></li>
+<li>The Rust badge claimed 1.70+; <code>--all-features</code> needs 1.92.</li>
+</ul>
+<p><strong>Fix applied:</strong> binary names corrected throughout, <code>default-run = "apexstore-server"</code>
+and <code>rust-version = "1.92"</code> added to <code>Cargo.toml</code>, URLs and the badge updated.</p>
+<p><code>src/main.rs</code> remains a 13-line stub that builds an engine at a hardcoded
+<code>/var/lib/apexstore/data</code> and exits, producing the fourth binary <code>apex-store-rs</code>;
+removing it is filed separately.</p>
+<h3 id="m-04--benchmark-automation-commits-an-empty-result-on-every-run"><a class="header" href="#m-04--benchmark-automation-commits-an-empty-result-on-every-run">M-04 — Benchmark automation commits an empty result on every run</a></h3>
+<p><strong>Status:</strong> filed as an issue.</p>
+<p><code>git log</code> shows 20+ consecutive identical commits, <code>docs: update benchmark results [skip ci]</code>. The README block they write currently reads <em>"No results parsed — check
+the run artifacts."</em></p>
+<p><code>scripts/format_bench.py</code> succeeds but yields an empty table, so
+<code>benchmarks.yml</code> takes the "no results parsed" branch, rewrites the same placeholder,
+and commits. The benchmark step itself is <code>continue-on-error: true</code>, so a failing
+benchmark still reaches the README rewrite. The result is history pollution plus a
+performance section that has not reflected reality since v2.1.39.</p>
+<h3 id="m-05--ci-pipes-an-unpinned-remote-installer-into-bash"><a class="header" href="#m-05--ci-pipes-an-unpinned-remote-installer-into-bash">M-05 — CI pipes an unpinned remote installer into <code>bash</code></a></h3>
+<p><strong>Status:</strong> filed as an issue.</p>
+<p><code>.github/workflows/benchmarks.yml</code> runs:</p>
+<pre><code class="language-yaml">curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/main/install.sh | bash
+</code></pre>
+<p>Unpinned code from a third-party <code>main</code> branch, executed in a job that holds
+<code>GITHUB_TOKEN</code> and pushes commits to <code>main</code>. Whoever controls that branch controls
+this repository's CI.</p>
+<h3 id="m-06--no-test-covers-authentication-rate-limiting-or-engine-level-encryption"><a class="header" href="#m-06--no-test-covers-authentication-rate-limiting-or-engine-level-encryption">M-06 — No test covers authentication, rate limiting or engine-level encryption</a></h3>
+<p><strong>Status:</strong> filed as an issue.</p>
+<p>Across the twelve files in <code>tests/</code>, <code>grep</code> finds no reference to <code>auth</code>, <code>Bearer</code>,
+<code>token</code>, <code>rate_limit</code>, or <code>RateLimit</code>. Only <code>proptest_sstable.rs</code> mentions
+encryption, at the block level.</p>
+<p>That is precisely why C-01 was reintroduced without any test turning red, and why the
+suite runs entirely on zero-key encryption without noticing: <code>restart.rs</code> uses the
+default config, so it writes <em>and</em> reads with the same all-zero key and passes.</p>
+<p>Also worth noting: <code>examples/</code> contains a single file for a crate advertising 40+
+features.</p>
+<h3 id="m-07--the-frontend-has-never-compiled-and-nothing-noticed"><a class="header" href="#m-07--the-frontend-has-never-compiled-and-nothing-noticed">M-07 — The frontend has never compiled, and nothing noticed</a></h3>
+<p><strong>Status:</strong> build errors fixed in this pass; the framework upgrade is filed as an
+issue.</p>
+<p>No workflow referenced <code>frontend</code>, <code>npm</code> or <code>node</code>, so the 30-plus pages under
+<code>frontend/src/app/pages/</code> were never built, linted, tested or dependency-scanned.
+Adding a <code>Frontend</code> job to CI turned it red immediately: <code>npm run build</code> fails on
+<code>main</code>. The dashboard has never produced a bundle.</p>
+<p>Nine errors across seven files, all of the same family — standalone components
+must list every directive and pipe their template uses, and these do not:</p>
+<div class="table-wrapper"><table><thead><tr><th>File</th><th>Error</th><th>Cause</th></tr></thead><tbody>
+<tr><td><code>vector-search.component.ts</code></td><td><code>NG8002</code> <code>ngClass</code>, <code>NG8004</code> pipe <code>number</code></td><td>missing <code>NgClass</code>, <code>DecimalPipe</code></td></tr>
+<tr><td><code>wasm-plugins.component.ts</code></td><td><code>NG8002</code> <code>ngClass</code> ×2</td><td>missing <code>NgClass</code></td></tr>
+<tr><td><code>tags.component.ts</code></td><td><em>"not statically analyzable"</em>, <code>NG8004</code> pipe <code>slice</code></td><td><code>FormsModule</code> imported from <code>@angular/common</code>, which does not export it, so it resolved to <code>undefined</code>; missing <code>SlicePipe</code></td></tr>
+<tr><td><code>graph.component.ts</code></td><td>same bad import</td><td><code>FormsModule</code> from <code>@angular/common</code></td></tr>
+<tr><td><code>time-travel.component.html</code></td><td><code>NG2</code> object possibly undefined</td><td><code>note.content?.length &gt; 200</code> compares <code>number | undefined</code></td></tr>
+<tr><td><code>sync-status.component.ts</code></td><td><code>TS7006</code> implicit <code>any</code></td><td>see below</td></tr>
+</tbody></table>
+</div>
+<p>The last one is not just a type error. <code>SyncService.lastSyncTimestamp</code> is a
+<code>signal&lt;number | null&gt;</code>, and the component did:</p>
+<pre><code class="language-ts">this.sync.lastSyncTimestamp.subscribe(ts =&gt; { ... });
+</code></pre>
+<p>Signals have no <code>subscribe</code>, so the callback never ran and the "last synced"
+label was permanently stuck on <code>Never</code>. The same component's auto-refresh timer
+called <code>lastSyncedLabel.update(l =&gt; l)</code> every five seconds, which writes the same
+value back — and signals compare for equality before propagating, so it notified
+nothing. Both are now replaced by a <code>computed</code> signal.</p>
+<p>Two more surfaced once those were cleared, and both are cascades rather than
+counts:</p>
+<ul>
+<li><code>server-config.component.html</code> filtered inline with
+<code>filtered().filter(c =&gt; c.group === group)</code>. Angular's template parser reads
+<code>=&gt;</code> as an assignment and rejects the binding (<code>NG5002</code>), so the filter had to
+move into the component.</li>
+<li><code>graph.component.html</code> used <code>@else if (fetched() &amp;&amp; graphData(); as data)</code>.
+<code>as</code> is only valid on a primary <code>@if</code>, so the binding never existed and all 33
+references to <code>data</code> in that branch failed. The trailing
+<code>@else if (fetched() &amp;&amp; !graphData())</code> was also unreachable, since the branch
+before it already consumed every <code>fetched()</code> case.</li>
+</ul>
+<p>And three that are logic bugs, not import hygiene:</p>
+<ul>
+<li><code>pubsub.component.ts</code> declared both a field <code>publishMessage = ''</code> and a method
+<code>publishMessage()</code>. The method's own body called
+<code>this.publishMessage.trim()</code>, which resolved to the method.</li>
+<li><code>health.component.ts</code> declared
+<code>signal&lt;'healthy' | 'degraded' | 'unhealthy'&gt;('unknown')</code> — an initial value
+outside its own union. <code>resilience.component.ts</code> did the same through its
+<code>HealthSummary</code> interface.</li>
+<li><code>sync-status.component.ts</code> imported <code>Time05Icon</code> and <code>DataIcon</code>, neither of
+which <code>@hugeicons/core-free-icons</code> exports, and its template used
+<code>&lt;app-hugeicons-icon&gt;</code> where the component's selector is <code>hugeicons-icon</code>.</li>
+</ul>
+<p>After the fixes <code>npm run build</code> exits 0 with one warning: one component
+stylesheet is 157 bytes over Angular's default 2 kB budget.</p>
+<p><code>npm audit</code> on the installed tree reports <strong>67 vulnerabilities (3 critical, 39
+high)</strong>.</p>
+<p><code>frontend/package.json</code> pins <code>@angular/* ^17.3.0</code>. Angular 17 left long-term
+support in 2025, so none of those get patched. <code>karma</code> is also deprecated in
+favour of the Angular CLI's own runner, and there are two spec files for
+thirty-plus components. <code>frontend/Dockerfile</code> exists but is absent from
+<code>docker-compose.yml</code>. The upgrade is tracked separately.</p>
+<hr />
+<h2 id="low"><a class="header" href="#low">Low</a></h2>
+<h3 id="l-01--memtable-uses-dashmap-but-exposes-mut-self"><a class="header" href="#l-01--memtable-uses-dashmap-but-exposes-mut-self">L-01 — <code>MemTable</code> uses <code>DashMap</code> but exposes <code>&amp;mut self</code></a></h3>
+<p><code>src/core/memtable.rs</code> stores <code>data: DashMap&lt;Vec&lt;u8&gt;, LogRecord&gt;</code>, but <code>put</code>,
+<code>insert</code> and friends take <code>&amp;mut self</code>, and <code>size_bytes</code> is a plain <code>usize</code> field.
+Callers must hold an exclusive borrow, so the engine serialises access behind its own
+lock and DashMap's per-shard concurrency is never reached — the sharding overhead is
+paid without the benefit. Either move <code>size_bytes</code> to an atomic and take <code>&amp;self</code>, or
+use a <code>BTreeMap</code> and drop the dependency. The README claim of "lock-free reads and
+writes to different keys" has been corrected in the meantime.</p>
+<h3 id="l-02--engine-is-a-single-2300-line-impl-block"><a class="header" href="#l-02--engine-is-a-single-2300-line-impl-block">L-02 — <code>Engine</code> is a single 2300-line <code>impl</code> block</a></h3>
+<p><code>src/core/engine/mod.rs</code> is 4935 lines, of which one <code>impl&lt;C: Cache&gt; Engine&lt;C&gt;</code>
+spans lines 855-3148. <code>src/api/mod.rs</code> is 1964 lines with all route handlers,
+middleware wiring and the transaction manager. Splitting along existing seams (reads,
+writes, snapshots, column families) would make the encryption and quarantine paths
+above far easier to reason about.</p>
+<h3 id="l-03--version-number-disagrees-across-three-files"><a class="header" href="#l-03--version-number-disagrees-across-three-files">L-03 — Version number disagrees across three files</a></h3>
+<p><code>Cargo.toml</code> says <code>2.2.7</code>; <code>ROADMAP.md</code> says "Current Version: v2.3.0"; the
+<code>Dockerfile</code> label said <code>1.4.0</code>; <code>CHANGELOG.md</code> has everything under
+<code>[Unreleased] — v2.2 -&gt; v2.3</code>. The <code>Dockerfile</code> label is fixed; the rest needs a
+release-process decision.</p>
+<h3 id="l-04--gitignore-contained-sh"><a class="header" href="#l-04--gitignore-contained-sh">L-04 — <code>.gitignore</code> contained <code>*.sh</code></a></h3>
+<p><strong>Status:</strong> fixed in this pass.</p>
+<p><code>.gitignore</code> ignored <code>*.sh</code> wholesale with a single <code>!scripts/format-benchmarks.sh</code>
+exception, so any new shell script a contributor wrote was invisible to <code>git status</code>.
+The pattern is now <code>!scripts/*.sh</code>, and <code>*.pem</code> / <code>*.key</code> were added so TLS material
+cannot be committed by accident. The ignore list also only covered <code>.lsm_data</code>,
+while <code>CoreConfig::default()</code> uses <code>./.lsmdata</code> — both spellings are now listed.</p>
+<p><code>.task-state.json</code> and <code>.apexstore/state.json</code> are committed agent scratch state,
+duplicating each other and referencing issues closed months ago. They are now in
+<code>.gitignore</code>, but untracking them is filed separately since it changes repository
+contents.</p>
+<hr />
+<h2 id="stale-content-in-the-previous-audits"><a class="header" href="#stale-content-in-the-previous-audits">Stale content in the previous audits</a></h2>
+<p><code>docs/audit/auditoria-completa.md</code> and <code>auditoria-tecnica-profunda.md</code> (March 2026,
+pt-BR) contain findings that no longer hold and should be marked resolved:</p>
+<ul>
+<li><strong>L-03 "Sem <code>cargo audit</code> no CI"</strong> — added in issue #183; it is now present but
+broken for a different reason (H-05).</li>
+<li><strong>H-05 "Rate Limiter Usa Mutex Simples (Gargalo)"</strong> — the limiter is now sharded 16
+ways (<code>NUM_SHARDS</code>, <code>src/api/rate_limiter.rs</code>). The real defect is H-02 above.</li>
+<li><strong>L-01 "CLI sem Gestão de Tokens"</strong> — added in issue #179 (<code>token create/list/revoke</code>).</li>
+<li><strong>M-10 "Dependência Bincode UNMAINTAINED"</strong> — the codec is <code>postcard</code>
+(<code>src/infra/codec.rs</code>); only a stale doc comment in <code>wal.rs</code> still said bincode,
+now corrected.</li>
+</ul>
+<p>They are also the only Portuguese documents in an otherwise English repository, which
+makes them invisible to most readers and to the published documentation site.
+<code>docs/SUMMARY.md</code> listed just four of the nine files under <code>docs/</code>, so
+<code>AUTHENTICATION.md</code>, <code>CLI_GUIDE.md</code>, <code>PERFORMANCE.md</code>, <code>WORKFLOWS.md</code> and both audits
+were never published to GitHub Pages at all; that is fixed in this pass.</p>
+<hr />
+<h2 id="what-was-changed-in-this-pass"><a class="header" href="#what-was-changed-in-this-pass">What was changed in this pass</a></h2>
+<p>Documentation, configuration and packaging only, plus the C-01 security fix and one
+clippy warning. No storage format, wire format or default engine behaviour was
+altered.</p>
+<div class="table-wrapper"><table><thead><tr><th>File</th><th>Change</th></tr></thead><tbody>
+<tr><td><code>Dockerfile.dev</code></td><td><strong>new</strong> — pinned Rust 1.92 toolchain image (clippy, rustfmt, cargo-audit 0.22, cargo-deny)</td></tr>
+<tr><td><code>docs/DEVELOPMENT.md</code></td><td><strong>new</strong> — how to build, test, lint and benchmark in the container</td></tr>
+<tr><td><code>scripts/check-env-example.sh</code></td><td><strong>new</strong> — fails the build when <code>.env.example</code> drifts from <code>src/</code></td></tr>
+<tr><td><code>Makefile</code></td><td>replaced three <code>act</code> targets with the full local pipeline</td></tr>
+<tr><td><code>src/api/auth/mod.rs</code>, <code>auth/middleware.rs</code>, <code>access_control.rs</code>, <code>mod.rs</code>, <code>test_helpers.rs</code></td><td>C-01: <code>AuthEnabled</code> / <code>AccessControlEnabled</code> newtypes, fail-closed auth</td></tr>
+<tr><td><code>src/core/engine/mod.rs</code></td><td>C-02: log the swallowed encryption-key failure</td></tr>
+<tr><td><code>src/storage/encryption.rs</code>, <code>src/core/table.rs</code></td><td>C-02: correct the inverted doc comments</td></tr>
+<tr><td><code>src/notes/search.rs</code></td><td>collapse the <code>else { if … }</code> clippy warning</td></tr>
+<tr><td><code>src/lib.rs</code></td><td>feature table said <code>chai</code>, the flag is <code>chaos</code></td></tr>
+<tr><td><code>src/storage/wal.rs</code></td><td>frame format doc said bincode (it is postcard) and listed only V0/V1</td></tr>
+<tr><td><code>Dockerfile</code>, <code>docker-compose.yml</code></td><td>C-03 and M-01: <code>DATA_DIR</code>, working health probes, OCI labels</td></tr>
+<tr><td><code>.env.example</code></td><td>M-02: all 34 live variables, dead ones called out</td></tr>
+<tr><td><code>README.md</code>, <code>QUICKSTART.md</code>, <code>docs/AUTHENTICATION.md</code>, <code>docs/CONTRIBUTING.md</code>, <code>docs/SETUP.md</code></td><td>M-03: working commands, real MSRV, honest feature claims</td></tr>
+<tr><td><code>Cargo.toml</code></td><td><code>default-run</code>, <code>rust-version</code></td></tr>
+<tr><td><code>docs/SUMMARY.md</code></td><td>publish every document</td></tr>
+<tr><td><code>.gitignore</code></td><td>L-04: drop <code>*.sh</code>, add <code>*.pem</code>/<code>*.key</code>, cover both data-dir spellings</td></tr>
+</tbody></table>
+</div>
+<p><code>cargo test --all-features --workspace</code> remains at 642 passing, and
+<code>cargo clippy --all-targets --all-features</code> is now warning-free.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../WORKFLOWS.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../audit/auditoria-completa.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../WORKFLOWS.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../audit/auditoria-completa.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

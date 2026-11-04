@@ -1,5 +1,5 @@
 <!DOCTYPE HTML>
-<html lang="en" class="light" dir="ltr">
+<html lang="en" class="light sidebar-visible" dir="ltr">
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
@@ -7,7 +7,7 @@
 
 
         <!-- Custom HTML head -->
-        
+
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
@@ -24,26 +24,41 @@
         <link rel="stylesheet" href="fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
-    </head>
-    <body class="sidebar-visible no-js">
-    <div id="body-container">
-        <!-- Provide site root to javascript -->
-        <script>
-            var path_to_root = "";
-            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
-        </script>
 
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
             try {
-                var theme = localStorage.getItem('mdbook-theme');
-                var sidebar = localStorage.getItem('mdbook-sidebar');
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
 
                 if (theme.startsWith('"') && theme.endsWith('"')) {
                     localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
@@ -57,68 +72,51 @@
 
         <!-- Set the theme before any content is loaded, prevents flash -->
         <script>
-            var theme;
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
-            var html = document.querySelector('html');
+            const html = document.documentElement;
             html.classList.remove('light')
             html.classList.add(theme);
-            var body = document.querySelector('body');
-            body.classList.remove('no-js')
-            body.classList.add('js');
+            html.classList.add("js");
         </script>
 
         <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
 
         <!-- Hide / unhide sidebar before it is displayed -->
         <script>
-            var body = document.querySelector('body');
-            var sidebar = null;
-            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            sidebar_toggle.checked = sidebar === 'visible';
-            body.classList.remove('sidebar-visible');
-            body.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
-            <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded "><a href="index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="CONFIGURATION.html"><strong aria-hidden="true">2.</strong> Configuration</a></li><li class="chapter-item expanded "><a href="SETUP.html" class="active"><strong aria-hidden="true">3.</strong> Setup Guide</a></li><li class="chapter-item expanded "><a href="CONTRIBUTING.html"><strong aria-hidden="true">4.</strong> Contributing</a></li></ol>
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
             </div>
-            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
-
-        <!-- Track and set sidebar scroll position -->
-        <script>
-            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
-            sidebarScrollbox.addEventListener('click', function(e) {
-                if (e.target.tagName === 'A') {
-                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
-                }
-            }, { passive: true });
-            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
-            sessionStorage.removeItem('sidebar-scroll');
-            if (sidebarScrollTop) {
-                // preserve sidebar scroll position when navigating via links within sidebar
-                sidebarScrollbox.scrollTop = sidebarScrollTop;
-            } else {
-                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
-                var activeSection = document.querySelector('#sidebar .active');
-                if (activeSection) {
-                    activeSection.scrollIntoView({ block: 'center' });
-                }
-            }
-        </script>
 
         <div id="page-wrapper" class="page-wrapper">
 
             <div class="page">
-                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
                         <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
@@ -128,13 +126,14 @@
                             <i class="fa fa-paint-brush"></i>
                         </button>
                         <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
                             <i class="fa fa-search"></i>
                         </button>
                     </div>
@@ -154,7 +153,12 @@
 
                 <div id="search-wrapper" class="hidden">
                     <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
                     </form>
                     <div id="searchresults-outer" class="searchresults-outer hidden">
                         <div id="searchresults-header" class="searchresults-header"></div>
@@ -202,7 +206,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
 </code></pre>
 <h4 id="verify-installation"><a class="header" href="#verify-installation">Verify Installation</a></h4>
-<pre><code class="language-bash"># Check Rust version (should be 1.70+)
+<pre><code class="language-bash"># Check Rust version (should be 1.96+)
 rustc --version
 # Output: rustc 1.75.0 (or higher)
 
@@ -290,11 +294,11 @@ brew install --cask visual-studio-code
 <h4 id="vs-code-settings"><a class="header" href="#vs-code-settings">VS Code Settings</a></h4>
 <p>Create <code>.vscode/settings.json</code> in project root:</p>
 <pre><code class="language-json">{
-  &quot;rust-analyzer.checkOnSave.command&quot;: &quot;clippy&quot;,
-  &quot;rust-analyzer.cargo.features&quot;: &quot;all&quot;,
-  &quot;editor.formatOnSave&quot;: true,
-  &quot;[rust]&quot;: {
-    &quot;editor.defaultFormatter&quot;: &quot;rust-lang.rust-analyzer&quot;
+  "rust-analyzer.checkOnSave.command": "clippy",
+  "rust-analyzer.cargo.features": "all",
+  "editor.formatOnSave": true,
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
   }
 }
 </code></pre>
@@ -383,8 +387,8 @@ PORT=3000 cargo run --release --features api --bin apexstore-server
 <p><strong>Testing the API</strong>:</p>
 <pre><code class="language-bash"># Insert a key
 curl -X POST http://localhost:8080/keys \
-  -H &quot;Content-Type: application/json&quot; \
-  -d '{&quot;key&quot;: &quot;user:1&quot;, &quot;value&quot;: &quot;Alice&quot;}'
+  -H "Content-Type: application/json" \
+  -d '{"key": "user:1", "value": "Alice"}'
 
 # Get a key
 curl http://localhost:8080/keys/user:1
@@ -456,37 +460,37 @@ docker-compose down
 <li>Create <code>.vscode/launch.json</code>:</li>
 </ol>
 <pre><code class="language-json">{
-  &quot;version&quot;: &quot;0.2.0&quot;,
-  &quot;configurations&quot;: [
+  "version": "0.2.0",
+  "configurations": [
     {
-      &quot;type&quot;: &quot;lldb&quot;,
-      &quot;request&quot;: &quot;launch&quot;,
-      &quot;name&quot;: &quot;Debug CLI&quot;,
-      &quot;cargo&quot;: {
-        &quot;args&quot;: [&quot;build&quot;, &quot;--bin=apexstore&quot;]
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug CLI",
+      "cargo": {
+        "args": ["build", "--bin=apexstore"]
       },
-      &quot;args&quot;: [],
-      &quot;cwd&quot;: &quot;${workspaceFolder}&quot;
+      "args": [],
+      "cwd": "${workspaceFolder}"
     },
     {
-      &quot;type&quot;: &quot;lldb&quot;,
-      &quot;request&quot;: &quot;launch&quot;,
-      &quot;name&quot;: &quot;Debug Server&quot;,
-      &quot;cargo&quot;: {
-        &quot;args&quot;: [&quot;build&quot;, &quot;--features&quot;, &quot;api&quot;, &quot;--bin=apexstore-server&quot;]
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug Server",
+      "cargo": {
+        "args": ["build", "--features", "api", "--bin=apexstore-server"]
       },
-      &quot;args&quot;: [],
-      &quot;cwd&quot;: &quot;${workspaceFolder}&quot;
+      "args": [],
+      "cwd": "${workspaceFolder}"
     },
     {
-      &quot;type&quot;: &quot;lldb&quot;,
-      &quot;request&quot;: &quot;launch&quot;,
-      &quot;name&quot;: &quot;Debug Test&quot;,
-      &quot;cargo&quot;: {
-        &quot;args&quot;: [&quot;test&quot;, &quot;--no-run&quot;, &quot;--lib&quot;]
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug Test",
+      "cargo": {
+        "args": ["test", "--no-run", "--lib"]
       },
-      &quot;args&quot;: [&quot;test_memtable_insert&quot;],
-      &quot;cwd&quot;: &quot;${workspaceFolder}&quot;
+      "args": ["test_memtable_insert"],
+      "cwd": "${workspaceFolder}"
     }
   ]
 }
@@ -500,9 +504,9 @@ docker-compose down
 </span><span class="boring">fn main() {
 </span>// In your code
 pub fn put(&amp;mut self, key: &amp;[u8], value: &amp;str) -&gt; Result&lt;()&gt; {
-    println!(&quot;[DEBUG] Inserting key: {:?}&quot;, String::from_utf8_lossy(key));
+    println!("[DEBUG] Inserting key: {:?}", String::from_utf8_lossy(key));
     self.wal.append(key, value)?;
-    println!(&quot;[DEBUG] WAL append successful&quot;);
+    println!("[DEBUG] WAL append successful");
     self.memtable.insert(key, value);
     Ok(())
 }
@@ -583,8 +587,8 @@ cat &gt; stress_test.sh &lt;&lt; 'EOF'
 #!/bin/bash
 for i in {1..10000}; do
   curl -X POST http://localhost:8080/keys \
-    -H &quot;Content-Type: application/json&quot; \
-    -d &quot;{\&quot;key\&quot;: \&quot;key_$i\&quot;, \&quot;value\&quot;: \&quot;value_$i\&quot;}&quot; &amp;
+    -H "Content-Type: application/json" \
+    -d "{\"key\": \"key_$i\", \"value\": \"value_$i\"}" &amp;
 done
 wait
 EOF
@@ -631,7 +635,7 @@ cargo doc --all-features --open
 ///
 /// ```
 /// let engine = LsmEngine::new(config)?;
-/// engine.put(b&quot;key&quot;, &quot;value&quot;)?;
+/// engine.put(b"key", "value")?;
 /// ```
 ///
 /// # Panics
@@ -682,11 +686,11 @@ cargo cache --autoclean
 <h4 id="issue-slow-compilation"><a class="header" href="#issue-slow-compilation">Issue: Slow Compilation</a></h4>
 <pre><code class="language-bash"># Use faster linker (Linux)
 sudo apt-get install lld
-export RUSTFLAGS=&quot;-C link-arg=-fuse-ld=lld&quot;
+export RUSTFLAGS="-C link-arg=-fuse-ld=lld"
 
 # Or use mold (even faster)
 cargo install mold
-export RUSTFLAGS=&quot;-C link-arg=-fuse-ld=mold&quot;
+export RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 
 # Enable incremental compilation (in Cargo.toml)
 [profile.dev]
@@ -716,11 +720,11 @@ incremental = true
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="CONFIGURATION.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="CONTRIBUTING.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="DEVELOPMENT.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -730,11 +734,11 @@ incremental = true
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="CONFIGURATION.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="CONTRIBUTING.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="DEVELOPMENT.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -758,6 +762,7 @@ incremental = true
         <script src="book.js"></script>
 
         <!-- Custom JS scripts -->
+
 
 
     </div>

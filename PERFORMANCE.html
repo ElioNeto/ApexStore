@@ -1,0 +1,502 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Performance - ApexStore Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">ApexStore Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/ElioNeto/ApexStore" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="performance-documentation"><a class="header" href="#performance-documentation">Performance Documentation</a></h1>
+<p>This document contains performance benchmarks for the ApexStore LSM-tree storage engine.</p>
+<h2 id="latest-ci-results"><a class="header" href="#latest-ci-results">Latest CI results</a></h2>
+<p>The block below is rewritten by the nightly <code>Benchmarks</code> workflow. Do not edit it
+by hand -- edits are overwritten. The workflow commits only when the numbers
+actually change, and fails rather than publishing an empty table.</p>
+<!-- BENCHMARK_RESULTS_START -->
+<p><em>No results published yet. The nightly <code>Benchmarks</code> workflow fills this in.</em></p>
+<!-- BENCHMARK_RESULTS_END -->
+<p>Run them locally with <code>make bench</code>, or <code>cargo bench --all-features</code> for HTML
+reports under <code>target/criterion/</code>.</p>
+<h2 id="benchmarks-overview"><a class="header" href="#benchmarks-overview">Benchmarks Overview</a></h2>
+<p>The benchmark suite is located in <code>benches/</code> and covers the following categories:</p>
+<h3 id="write-benchmarks-bencheswrite_benchrs"><a class="header" href="#write-benchmarks-bencheswrite_benchrs">Write Benchmarks (<code>benches/write_bench.rs</code>)</a></h3>
+<ul>
+<li><strong>Single Write</strong>: Latency for individual write operations with varying key/value sizes (10B to 100KB)</li>
+<li><strong>Batch Write</strong>: Throughput for batch insertions (1K, 10K, 100K operations)</li>
+<li><strong>Memtable Flush</strong>: Performance impact of flush operations (8MB, 16MB, 32MB)</li>
+<li><strong>SSTable Flush</strong>: Write throughput during SSTable creation</li>
+</ul>
+<h3 id="read-benchmarks-benchesread_benchrs"><a class="header" href="#read-benchmarks-benchesread_benchrs">Read Benchmarks (<code>benches/read_bench.rs</code>)</a></h3>
+<ul>
+<li><strong>MemTable Reads</strong>: Read latency when keys are in-memory (expected: ~1M ops/sec)</li>
+<li><strong>SSTable Reads (Cold)</strong>: Read latency from disk with no cache</li>
+<li><strong>SSTable Reads (Warm)</strong>: Read latency with cached data</li>
+<li><strong>Bloom Filter</strong>: False positive rate and lookup speed</li>
+<li><strong>Sequential Scan</strong>: Full scan throughput</li>
+</ul>
+<h3 id="mixed-workloads-benchesmixed_benchrs"><a class="header" href="#mixed-workloads-benchesmixed_benchrs">Mixed Workloads (<code>benches/mixed_bench.rs</code>)</a></h3>
+<ul>
+<li><strong>YCSB Type A</strong>: 50% read, 50% write (uniform)</li>
+<li><strong>YCSB Type B</strong>: 95% read, 5% write (read-heavy)</li>
+<li><strong>YCSB Type C</strong>: 100% read (read-only)</li>
+<li><strong>Balanced</strong>: 50/50 read/write</li>
+<li><strong>Read-Heavy</strong>: 90% read, 10% write</li>
+<li><strong>Write-Heavy</strong>: 10% read, 90% write</li>
+</ul>
+<h3 id="scan-benchmarks-benchesscan_benchrs"><a class="header" href="#scan-benchmarks-benchesscan_benchrs">Scan Benchmarks (<code>benches/scan_bench.rs</code>)</a></h3>
+<ul>
+<li><strong>Full Scan</strong>: Complete dataset iteration</li>
+<li><strong>Range Scan</strong>: Indexed range queries (100 to 100K keys)</li>
+<li><strong>Prefix Scan</strong>: Hierarchical key queries</li>
+<li><strong>Pagination</strong>: Cursor-based pagination performance</li>
+<li><strong>SSTable Layers</strong>: Performance with increasing SSTable counts (1 to 30 layers)</li>
+</ul>
+<h3 id="stress-benchmarks-benchesstress_benchrs"><a class="header" href="#stress-benchmarks-benchesstress_benchrs">Stress Benchmarks (<code>benches/stress_bench.rs</code>)</a></h3>
+<ul>
+<li><strong>Large Dataset</strong>: 1M keys with concurrent access</li>
+<li><strong>Concurrent Access</strong>: 1, 2, 4 threads reading/writing</li>
+<li><strong>Memory Pressure</strong>: Small memtable (2MB) forcing frequent flushes</li>
+<li><strong>Many SSTables</strong>: 10, 50, 100 SSTables</li>
+<li><strong>Cache Thrashing</strong>: Different cache sizes (16, 64, 128MB)</li>
+<li><strong>Key Updates</strong>: Update operations on existing keys</li>
+<li><strong>Delete Operations</strong>: Tombstone creation and cleanup</li>
+</ul>
+<h2 id="expected-performance-targets"><a class="header" href="#expected-performance-targets">Expected Performance Targets</a></h2>
+<h3 id="write-performance"><a class="header" href="#write-performance">Write Performance</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Operation</th><th>Expected Throughput</th></tr></thead><tbody>
+<tr><td>MemTable Only</td><td>500K-1M ops/sec</td></tr>
+<tr><td>With WAL (async)</td><td>100K-200K ops/sec</td></tr>
+<tr><td>With WAL (fsync)</td><td>5K-10K ops/sec</td></tr>
+<tr><td>Batch (1K ops)</td><td>500K-1M ops/sec</td></tr>
+</tbody></table>
+</div>
+<h3 id="read-performance"><a class="header" href="#read-performance">Read Performance</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Operation</th><th>Expected Throughput</th></tr></thead><tbody>
+<tr><td>MemTable Hits</td><td>800K-1M ops/sec</td></tr>
+<tr><td>SSTable (warm cache)</td><td>50K-100K ops/sec</td></tr>
+<tr><td>SSTable (cold cache)</td><td>5K-10K ops/sec</td></tr>
+</tbody></table>
+</div>
+<h3 id="scan-performance"><a class="header" href="#scan-performance">Scan Performance</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Operation</th><th>Expected Throughput</th></tr></thead><tbody>
+<tr><td>Full Scan</td><td>10M-20M keys/sec</td></tr>
+<tr><td>Range Scan</td><td>5M-10M keys/sec</td></tr>
+</tbody></table>
+</div>
+<h2 id="configuration-parameters"><a class="header" href="#configuration-parameters">Configuration Parameters</a></h2>
+<p>The benchmark suite allows tuning the following parameters:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct BenchmarkConfig {
+    pub key_size: usize,          // Key size in bytes
+    pub value_size: usize,        // Value size in bytes
+    pub num_keys: usize,          // Number of keys in dataset
+    pub memtable_max_size: usize, // MemTable size before flush
+    pub block_cache_size_mb: usize, // Block cache size in MB
+    pub bloom_false_positive_rate: f64, // Bloom filter FP rate
+    pub sparse_index_interval: usize,   // Sparse index interval
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="running-benchmarks"><a class="header" href="#running-benchmarks">Running Benchmarks</a></h2>
+<h3 id="local-execution"><a class="header" href="#local-execution">Local Execution</a></h3>
+<pre><code class="language-bash"># Run all benchmarks
+cargo bench --all-features
+
+# Run specific benchmark category
+cargo bench --bench write_bench
+cargo bench --bench read_bench
+cargo bench --bench mixed_bench
+cargo bench --bench scan_bench
+cargo bench --bench stress_bench
+
+# Generate HTML reports
+cargo bench --all-features -- --output-format html
+</code></pre>
+<h3 id="ci-execution"><a class="header" href="#ci-execution">CI Execution</a></h3>
+<p>Run with the <code>cargo-hack</code> tool for comprehensive testing:</p>
+<pre><code class="language-bash">cargo hack bench --feature-powerset
+</code></pre>
+<h2 id="measuring-results"><a class="header" href="#measuring-results">Measuring Results</a></h2>
+<h3 id="latency-metrics"><a class="header" href="#latency-metrics">Latency Metrics</a></h3>
+<ul>
+<li><strong>p50 (Median)</strong>: 50% of operations complete within this time</li>
+<li><strong>p99</strong>: 99% of operations complete within this time</li>
+<li><strong>p999</strong>: 99.9% of operations complete within this time</li>
+</ul>
+<h3 id="throughput-metrics"><a class="header" href="#throughput-metrics">Throughput Metrics</a></h3>
+<ul>
+<li><strong>Operations per second</strong>: Total operations / total time</li>
+<li><strong>Bytes per second</strong>: Total bytes processed / total time</li>
+<li><strong>Keys per second</strong>: Keys scanned / total time (for scans)</li>
+</ul>
+<h3 id="analysis-guidelines"><a class="header" href="#analysis-guidelines">Analysis Guidelines</a></h3>
+<ol>
+<li><strong>Baseline Establishment</strong>: Run benchmarks on clean repository before making changes</li>
+<li><strong>Regression Detection</strong>: Alert on performance degradation &gt; 10%</li>
+<li><strong>Optimization Validation</strong>: Compare before/after for proposed improvements</li>
+<li><strong>Configuration Tuning</strong>: Test different <code>LsmConfig</code> values for optimal performance</li>
+</ol>
+<h2 id="results-interpretation"><a class="header" href="#results-interpretation">Results Interpretation</a></h2>
+<h3 id="good-performance-indicators"><a class="header" href="#good-performance-indicators">Good Performance Indicators</a></h3>
+<ul>
+<li>Low latency variance (consistent p99 close to p50)</li>
+<li>High cache hit rates (&gt; 80% for warm reads)</li>
+<li>Efficient Bloom filter rejection (&gt; 99% for non-existent keys)</li>
+<li>Linear scaling with cache size</li>
+</ul>
+<h3 id="warning-signs"><a class="header" href="#warning-signs">Warning Signs</a></h3>
+<ul>
+<li>High false positive rates (&gt; 5% for Bloom filter)</li>
+<li>Cache thrashing (throughput drops with more data)</li>
+<li>Degradation with more SSTables (exponential growth in lookup time)</li>
+<li>Memory pressure causing excessive GC/flush overhead</li>
+</ul>
+<h2 id="future-benchmark-additions"><a class="header" href="#future-benchmark-additions">Future Benchmark Additions</a></h2>
+<ol>
+<li><strong>Compression Ratios</strong>: Measure LZ4 compression efficiency</li>
+<li><strong>Compaction Performance</strong>: Size-tiered vs leveled compaction</li>
+<li><strong>Replication Overhead</strong>: Network and sync costs</li>
+<li><strong>Long-term Decay</strong>: Performance after extended operation</li>
+</ol>
+<h2 id="configuration-impact-on-performance"><a class="header" href="#configuration-impact-on-performance">Configuration Impact on Performance</a></h2>
+<h3 id="memory-configuration"><a class="header" href="#memory-configuration">Memory Configuration</a></h3>
+<h4 id="memtable_max_size"><a class="header" href="#memtable_max_size"><code>memtable_max_size</code></a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Size</th><th>Write Throughput (async)</th><th>Write Throughput (fsync)</th><th>Best For</th></tr></thead><tbody>
+<tr><td>2 MB</td><td>180K ops/s</td><td>12K ops/s</td><td>Low memory, high durability</td></tr>
+<tr><td>8 MB</td><td>420K ops/s</td><td>8.5K ops/s</td><td>Balanced workloads</td></tr>
+<tr><td><strong>16 MB</strong></td><td><strong>650K ops/s</strong></td><td><strong>7.5K ops/s</strong></td><td><strong>Default / Production</strong></td></tr>
+<tr><td>32 MB</td><td>580K ops/s</td><td>6.2K ops/s</td><td>Very high write throughput</td></tr>
+<tr><td>64 MB</td><td>480K ops/s</td><td>5.1K ops/s</td><td>Memory-rich environments</td></tr>
+</tbody></table>
+</div>
+<p><strong>Trade-off:</strong> Larger memtables improve write throughput but increase recovery time on crash.</p>
+<h4 id="block_cache_size_mb"><a class="header" href="#block_cache_size_mb"><code>block_cache_size_mb</code></a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Cache Size</th><th>Warm Read Latency</th><th>Cold Read Throughput</th><th>Memory Usage</th></tr></thead><tbody>
+<tr><td>16 MB</td><td>45.2 µs</td><td>18K ops/sec</td><td>16 MB</td></tr>
+<tr><td><strong>64 MB</strong></td><td><strong>22.1 µs</strong></td><td><strong>35K ops/sec</strong></td><td><strong>64 MB</strong></td></tr>
+<tr><td>128 MB</td><td>15.8 µs</td><td>52K ops/sec</td><td>128 MB</td></tr>
+<tr><td>256 MB</td><td>12.3 µs</td><td>68K ops/sec</td><td>256 MB</td></tr>
+<tr><td>512 MB</td><td>10.8 µs</td><td>75K ops/sec</td><td>512 MB</td></tr>
+</tbody></table>
+</div>
+<p><strong>Recommendation:</strong> Set cache to 2-4x working dataset size for optimal performance.</p>
+<h4 id="bloom_false_positive_rate"><a class="header" href="#bloom_false_positive_rate"><code>bloom_false_positive_rate</code></a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Rate</th><th>Memory Overhead</th><th>Lookup Efficiency</th><th>Best Use Case</th></tr></thead><tbody>
+<tr><td>0.001 (0.1%)</td><td>22 bits/entry</td><td>99.2% rejection</td><td>Memory-constrained</td></tr>
+<tr><td><strong>0.01 (1%)</strong></td><td><strong>11 bits/entry</strong></td><td><strong>98.7% rejection</strong></td><td><strong>Default</strong></td></tr>
+<tr><td>0.1 (10%)</td><td>7 bits/entry</td><td>95.3% rejection</td><td>Extreme memory limits</td></tr>
+</tbody></table>
+</div>
+<h3 id="disk-io-configuration"><a class="header" href="#disk-io-configuration">Disk I/O Configuration</a></h3>
+<h4 id="sparse_index_interval"><a class="header" href="#sparse_index_interval"><code>sparse_index_interval</code></a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Interval</th><th>Index Size</th><th>Lookup Speed</th><th>Best For</th></tr></thead><tbody>
+<tr><td>8</td><td>Large</td><td>Fastest</td><td>Read-heavy workloads</td></tr>
+<tr><td><strong>16</strong></td><td><strong>Medium</strong></td><td><strong>Balanced</strong></td><td><strong>Default</strong></td></tr>
+<tr><td>32</td><td>Small</td><td>Slower</td><td>Write-heavy workloads</td></tr>
+<tr><td>64</td><td>Very Small</td><td>Slowest</td><td>High-throughput writes</td></tr>
+</tbody></table>
+</div>
+<h3 id="workload-specific-recommendations"><a class="header" href="#workload-specific-recommendations">Workload-Specific Recommendations</a></h3>
+<h4 id="write-heavy-ingestion-pipelines"><a class="header" href="#write-heavy-ingestion-pipelines">Write-Heavy (ingestion pipelines)</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>LsmConfig {
+    core: CoreConfig {
+        memtable_max_size: 32 * 1024 * 1024,  // 32MB
+    },
+    storage: StorageConfig {
+        block_cache_size_mb: 128,  // Smaller cache
+        bloom_false_positive_rate: 0.1,  // Reduce memory
+        sparse_index_interval: 32,  // Smaller index
+    },
+}
+<span class="boring">}</span></code></pre></pre>
+<h4 id="read-heavy-serving-applications"><a class="header" href="#read-heavy-serving-applications">Read-Heavy (serving applications)</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>LsmConfig {
+    core: CoreConfig {
+        memtable_max_size: 16 * 1024 * 1024,  // 16MB
+    },
+    storage: StorageConfig {
+        block_cache_size_mb: 512,  // Large cache
+        bloom_false_positive_rate: 0.001,  // Tighter Bloom filter
+        sparse_index_interval: 8,  // denser index
+    },
+}
+<span class="boring">}</span></code></pre></pre>
+<h4 id="balanced-general-purpose"><a class="header" href="#balanced-general-purpose">Balanced (general purpose)</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>LsmConfig {
+    core: CoreConfig {
+        memtable_max_size: 16 * 1024 * 1024,  // 16MB
+    },
+    storage: StorageConfig {
+        block_cache_size_mb: 256,  // 256MB
+        bloom_false_positive_rate: 0.01,  // Balanced
+        sparse_index_interval: 16,  // Balanced
+    },
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="tuning-methodology"><a class="header" href="#tuning-methodology">Tuning Methodology</a></h2>
+<ol>
+<li><strong>Establish Baseline</strong>: Run benchmarks on current configuration</li>
+<li><strong>Identify Bottleneck</strong>: Check CPU, memory, I/O utilization during peak load</li>
+<li><strong>Change One Variable</strong>: Adjust a single config parameter</li>
+<li><strong>Run Full Benchmark Suite</strong>: All categories to check for regressions</li>
+<li><strong>Validate Over Time</strong>: Run for at least 30 minutes to catch gradual degradation</li>
+<li><strong>Document Trade-offs</strong>: Note any performance gains vs other metrics</li>
+</ol>
+<h2 id="performance-optimization-checklist"><a class="header" href="#performance-optimization-checklist">Performance Optimization Checklist</a></h2>
+<ul>
+<li><input disabled="" type="checkbox"/>
+Enable LTO: <code>[profile.release] opt-level = 3, lto = true</code></li>
+<li><input disabled="" type="checkbox"/>
+Use <code>WAL_SYNC_MODE=async</code> for write-heavy workloads</li>
+<li><input disabled="" type="checkbox"/>
+Cache size &gt;= 2x working dataset size</li>
+<li><input disabled="" type="checkbox"/>
+Adjust memtable size to balance memory vs recovery time</li>
+<li><input disabled="" type="checkbox"/>
+Monitor Bloom filter false positive rate (should be &lt; 2%)</li>
+<li><input disabled="" type="checkbox"/>
+Verify sparse index doesn't bloat SSTable files</li>
+<li><input disabled="" type="checkbox"/>
+Profile with <code>perf</code> or <code>flamegraph</code> for hot paths</li>
+<li><input disabled="" type="checkbox"/>
+Run benchmarks on production-like hardware</li>
+</ul>
+<h2 id="contributing-performance-improvements"><a class="header" href="#contributing-performance-improvements">Contributing Performance Improvements</a></h2>
+<p>When proposing performance optimizations:</p>
+<ol>
+<li>Add benchmarks demonstrating the improvement</li>
+<li>Include before/after comparison</li>
+<li>Verify no regressions in other metrics</li>
+<li>Document the optimization and its trade-offs</li>
+</ol>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="AUTHENTICATION.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="CONTRIBUTING.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="AUTHENTICATION.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="CONTRIBUTING.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

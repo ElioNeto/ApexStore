@@ -1,0 +1,575 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Workflows - ApexStore Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">ApexStore Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/ElioNeto/ApexStore" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="-github-workflows-documentation"><a class="header" href="#-github-workflows-documentation">🔄 GitHub Workflows Documentation</a></h1>
+<p>ApexStore uses automated GitHub Actions workflows to manage the development lifecycle, from features to releases.</p>
+<h2 id="-overview"><a class="header" href="#-overview">📊 Overview</a></h2>
+<pre><code>feature/fix branches → develop → release/vX.Y.Z → main
+       │                │            │              │
+       └── Auto PR    └─ Auto PR  └─ Issues*   └─ Tag + Release
+          + comments*     created      closed*
+          on issues*                   
+
+* = Optional, only when issues are referenced
+</code></pre>
+<h2 id="-available-workflows"><a class="header" href="#-available-workflows">🛠️ Available Workflows</a></h2>
+<h3 id="1-featurefix-workflow"><a class="header" href="#1-featurefix-workflow">1. Feature/Fix Workflow</a></h3>
+<p><strong>File</strong>: <code>.github/workflows/feature-fix-workflow.yml</code></p>
+<p><strong>Trigger</strong>: Push to <code>feature/**</code> or <code>fix/**</code> branches</p>
+<h4 id="what-it-does"><a class="header" href="#what-it-does">What it does:</a></h4>
+<ol>
+<li>
+<p><strong>Build &amp; Test</strong></p>
+<ul>
+<li>Compiles project: <code>cargo build --release --all-features</code></li>
+<li>Runs tests: <code>cargo test --all-features</code></li>
+<li>Checks linting: <code>cargo clippy --all-features -- -D warnings</code></li>
+</ul>
+</li>
+<li>
+<p><strong>Creates PR to develop</strong></p>
+<ul>
+<li>Automatically detects if there are new commits</li>
+<li>Creates PR to <code>develop</code> with:
+<ul>
+<li>List of referenced issues <em>(if any)</em></li>
+<li>Commit summary</li>
+<li>Test status</li>
+</ul>
+</li>
+<li>Doesn't duplicate existing PRs</li>
+</ul>
+</li>
+<li>
+<p><strong>Comments on Issues</strong> <em>(optional)</em></p>
+<ul>
+<li><strong>Only runs if issues are referenced</strong></li>
+<li>Identifies issues mentioned in commits</li>
+<li>Adds <strong>stacked</strong> comments with updates:
+<ul>
+<li>Recent commits</li>
+<li>Branch link</li>
+<li>Development status</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<h4 id="how-to-use"><a class="header" href="#how-to-use">How to use:</a></h4>
+<p><strong>With issues:</strong></p>
+<pre><code class="language-bash">git checkout -b feature/my-feature
+git commit -m "feat: implement X (#123)"
+git commit -m "fix: resolve Y (fixes #124)"
+git push origin feature/my-feature
+</code></pre>
+<p><strong>Without issues (also works!):</strong></p>
+<pre><code class="language-bash">git checkout -b feature/refactoring
+git commit -m "refactor: improve code structure"
+git commit -m "chore: update dependencies"
+git push origin feature/refactoring
+# ✅ PR created normally, without issues section
+</code></pre>
+<hr />
+<h3 id="2-develop-to-release-workflow"><a class="header" href="#2-develop-to-release-workflow">2. Develop to Release Workflow</a></h3>
+<p><strong>File</strong>: <code>.github/workflows/develop-to-release.yml</code></p>
+<p><strong>Triggers</strong>:</p>
+<ul>
+<li>Push to <code>develop</code> → Creates/updates release PR</li>
+<li>PR merged to <code>main</code> → Closes issues automatically <em>(if any)</em></li>
+</ul>
+<h4 id="what-it-does-1"><a class="header" href="#what-it-does-1">What it does:</a></h4>
+<p><strong>On push to develop:</strong></p>
+<ol>
+<li>
+<p><strong>Determines version</strong></p>
+<ul>
+<li>Analyzes commits since last tag</li>
+<li>Calculates bump (major/minor/patch):
+<ul>
+<li><code>BREAKING CHANGE:</code>, <code>feat!:</code>, <code>fix!:</code> → Major</li>
+<li><code>feat:</code> → Minor</li>
+<li>Others → Patch</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p><strong>Creates release branch</strong></p>
+<ul>
+<li><code>release/vX.Y.Z</code></li>
+<li>Syncs with <code>develop</code></li>
+</ul>
+</li>
+<li>
+<p><strong>Creates PR to main</strong></p>
+<ul>
+<li>Title: <code>🚀 Release vX.Y.Z</code></li>
+<li>Draft mode (requires approval)</li>
+<li>Contains:
+<ul>
+<li>Configurable release type (alpha/beta/lts)</li>
+<li>List of resolved issues <em>(if any)</em></li>
+<li>Complete changelog</li>
+<li>Validation checklist</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<p><strong>On release PR merge:</strong></p>
+<ol start="4">
+<li><strong>Closes Issues Automatically</strong> <em>(optional)</em>
+<ul>
+<li><strong>Only runs if issues are referenced</strong></li>
+<li>Extracts referenced issues from commits</li>
+<li>Adds final comment:
+<pre><code>✅ Resolved in Release vX.Y.Z
+
+This issue has been fixed and released.
+Release: [View Release](link)
+</code></pre>
+</li>
+<li>Closes issue with "completed" reason</li>
+<li><strong>If no issues</strong>: workflow completes normally without errors</li>
+</ul>
+</li>
+</ol>
+<hr />
+<h2 id="-issue-reference-optional"><a class="header" href="#-issue-reference-optional">🏷️ Issue Reference (Optional)</a></h2>
+<h3 id="when-to-use-issues"><a class="header" href="#when-to-use-issues">When to Use Issues</a></h3>
+<p>✅ <strong>Use when:</strong></p>
+<ul>
+<li>Fixing a reported bug</li>
+<li>Implementing a requested feature</li>
+<li>Want automatic traceability</li>
+<li>Want automatic notifications</li>
+</ul>
+<p>⚪ <strong>Don't need to use when:</strong></p>
+<ul>
+<li>Internal refactoring</li>
+<li>Dependency updates</li>
+<li>Performance improvements without issue</li>
+<li>Documentation</li>
+<li>Chores and minor tasks</li>
+</ul>
+<h3 id="supported-syntax"><a class="header" href="#supported-syntax">Supported Syntax:</a></h3>
+<pre><code class="language-bash"># Any of these forms are detected:
+git commit -m "feat: add feature (#123)"
+git commit -m "fix: resolve bug (fixes #124)"
+git commit -m "refactor: improve code (closes #125)"
+git commit -m "docs: update (resolved #126)"
+</code></pre>
+<h3 id="recognized-keywords"><a class="header" href="#recognized-keywords">Recognized Keywords:</a></h3>
+<ul>
+<li><code>close</code>, <code>closes</code>, <code>closed</code></li>
+<li><code>fix</code>, <code>fixes</code>, <code>fixed</code></li>
+<li><code>resolve</code>, <code>resolves</code>, <code>resolved</code></li>
+<li>Simple: <code>#123</code></li>
+</ul>
+<hr />
+<h2 id="-flow-examples"><a class="header" href="#-flow-examples">📋 Flow Examples</a></h2>
+<h3 id="example-1-with-issues"><a class="header" href="#example-1-with-issues">Example 1: With Issues</a></h3>
+<pre><code class="language-bash"># Issue: #31 - Implement Bearer Token Authentication
+
+git checkout -b feature/bearer-auth
+git commit -m "feat: add auth module (#31)"
+git commit -m "feat: add auth config (#31)"
+git push origin feature/bearer-auth
+
+# ✅ Workflow runs:
+#    - Build + Tests pass
+#    - PR created: feature/bearer-auth → develop
+#    - Comment added to #31
+#    - Issue listed in PR
+</code></pre>
+<h3 id="example-2-without-issues"><a class="header" href="#example-2-without-issues">Example 2: Without Issues</a></h3>
+<pre><code class="language-bash"># General refactoring - no specific issue
+
+git checkout -b refactor/improve-performance
+git commit -m "refactor: optimize database queries"
+git commit -m "perf: add caching layer"
+git push origin refactor/improve-performance
+
+# ✅ Workflow runs:
+#    - Build + Tests pass
+#    - PR created: refactor/improve-performance → develop
+#    - No issues section (normal!)
+#    - Changelog shows commits normally
+</code></pre>
+<h3 id="example-3-release-with-mix"><a class="header" href="#example-3-release-with-mix">Example 3: Release with Mix</a></h3>
+<pre><code class="language-bash"># Merge to develop (some commits with issues, others without)
+
+git checkout develop
+git merge feature/bearer-auth  # has issue #31
+git merge refactor/performance  # no issue
+git push origin develop
+
+# ✅ Workflow runs:
+#    - Calculates version: v2.1.0 → v2.2.0
+#    - Creates branch: release/v2.2.0
+#    - Creates PR: release/v2.2.0 → main
+#    - Lists only issue #31 (which was referenced)
+#    - Changelog shows ALL commits
+
+# When merging release PR:
+# ✅ Issue #31 closed automatically
+# ✅ Commits without issue ignored (no error)
+</code></pre>
+<hr />
+<h2 id="-workflow-behavior"><a class="header" href="#-workflow-behavior">🔍 Workflow Behavior</a></h2>
+<h3 id="featurefix-workflow"><a class="header" href="#featurefix-workflow">Feature/Fix Workflow</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Situation</th><th>Behavior</th></tr></thead><tbody>
+<tr><td>Commits with issues</td><td>PR created + issues listed + comments on issues</td></tr>
+<tr><td>Commits without issues</td><td>PR created + "No issues referenced"</td></tr>
+<tr><td>Mix</td><td>PR created + only found issues listed</td></tr>
+<tr><td>Non-existent issues</td><td>Ignores and continues (no error)</td></tr>
+<tr><td>Already closed issues</td><td>Doesn't comment (silent skip)</td></tr>
+</tbody></table>
+</div>
+<h3 id="develop-to-release-workflow"><a class="header" href="#develop-to-release-workflow">Develop to Release Workflow</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Situation</th><th>Behavior</th></tr></thead><tbody>
+<tr><td>Commits with issues</td><td>PR lists issues + on merge closes automatically</td></tr>
+<tr><td>Commits without issues</td><td>PR without issues section + on merge completes normally</td></tr>
+<tr><td>Mix</td><td>PR lists only found issues</td></tr>
+<tr><td>Non-existent issues</td><td>Ignores and continues (log warning)</td></tr>
+<tr><td>Already closed issues</td><td>Tries to close but ignores error</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="-logs-and-debugging"><a class="header" href="#-logs-and-debugging">⚙️ Logs and Debugging</a></h2>
+<h3 id="normal-messages-not-errors"><a class="header" href="#normal-messages-not-errors">Normal Messages (not errors)</a></h3>
+<pre><code>ℹ️ No issues referenced in commits - skipping
+</code></pre>
+<p><strong>Meaning</strong>: No issue was mentioned. Normal for commits without tracking.</p>
+<pre><code>⏭️ Skipping issue #123 (state: CLOSED)
+</code></pre>
+<p><strong>Meaning</strong>: Issue was already closed. Workflow automatically skips.</p>
+<pre><code>⚠️ Issue #999 not found - skipping
+</code></pre>
+<p><strong>Meaning</strong>: Issue doesn't exist. May be typo in commit, workflow continues.</p>
+<hr />
+<h2 id="-best-practices"><a class="header" href="#-best-practices">📚 Best Practices</a></h2>
+<h3 id="when-to-reference-issues"><a class="header" href="#when-to-reference-issues">When to Reference Issues</a></h3>
+<p>✅ <strong>Recommended</strong>:</p>
+<pre><code class="language-bash"># Bug fixes
+git commit -m "fix: resolve authentication bug (fixes #54)"
+
+# Requested features
+git commit -m "feat: add JWT support (#31)"
+
+# Specific improvements
+git commit -m "perf: optimize query (closes #67)"
+</code></pre>
+<h3 id="when-not-to-reference"><a class="header" href="#when-not-to-reference">When NOT to Reference</a></h3>
+<p>✅ <strong>Also acceptable</strong>:</p>
+<pre><code class="language-bash"># Internal refactoring
+git commit -m "refactor: restructure auth module"
+
+# Dependency updates
+git commit -m "chore: update dependencies"
+
+# Documentation
+git commit -m "docs: add API examples"
+
+# Small fixes
+git commit -m "style: fix formatting"
+</code></pre>
+<hr />
+<h2 id="-troubleshooting"><a class="header" href="#-troubleshooting">⚠️ Troubleshooting</a></h2>
+<h3 id="workflow-didnt-comment-on-issue"><a class="header" href="#workflow-didnt-comment-on-issue">"Workflow didn't comment on issue"</a></h3>
+<p><strong>Possible causes</strong>:</p>
+<ol>
+<li>✅ <strong>Normal</strong>: Issue wasn't referenced in commit</li>
+<li>✅ <strong>Normal</strong>: Issue was already closed</li>
+<li>⚠️ <strong>Check</strong>: Is issue number correct?</li>
+<li>⚠️ <strong>Check</strong>: Is reference syntax correct?</li>
+</ol>
+<h3 id="issue-didnt-close-after-release"><a class="header" href="#issue-didnt-close-after-release">"Issue didn't close after release"</a></h3>
+<p><strong>Possible causes</strong>:</p>
+<ol>
+<li>✅ <strong>Normal</strong>: Issue wasn't referenced in any commit</li>
+<li>✅ <strong>Normal</strong>: Issue was already closed</li>
+<li>⚠️ <strong>Check</strong>: Was PR merged (not just closed)?</li>
+<li>⚠️ <strong>Check</strong>: Did branch follow <code>release/*</code> pattern?</li>
+</ol>
+<h3 id="workflow-failed"><a class="header" href="#workflow-failed">"Workflow failed"</a></h3>
+<p><strong>Checklist</strong>:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+Build passed locally?</li>
+<li><input disabled="" type="checkbox"/>
+Tests passed?</li>
+<li><input disabled="" type="checkbox"/>
+Clippy without errors?</li>
+<li><input disabled="" type="checkbox"/>
+GitHub Actions permissions enabled?</li>
+</ul>
+<hr />
+<h2 id="-summary"><a class="header" href="#-summary">🎯 Summary</a></h2>
+<h3 id="tldr"><a class="header" href="#tldr">TL;DR</a></h3>
+<ul>
+<li>✅ <strong>Issues are OPTIONAL</strong> - workflows work with or without</li>
+<li>✅ <strong>Use issues for traceability</strong> - automatic closing is bonus</li>
+<li>✅ <strong>Without issues is valid</strong> - for refactoring, chores, etc</li>
+<li>✅ <strong>Mix is accepted</strong> - some commits with, others without issues</li>
+<li>✅ <strong>Workflows are resilient</strong> - don't break due to lack of issues</li>
+</ul>
+<h3 id="minimum-flow-without-issues"><a class="header" href="#minimum-flow-without-issues">Minimum Flow (without issues)</a></h3>
+<pre><code class="language-bash">1. feature/x → develop
+   ✅ Build + Test + PR created
+
+2. develop → release/vX.Y.Z → main
+   ✅ Version + Tag + Changelog
+
+No issue needed!
+</code></pre>
+<h3 id="complete-flow-with-issues"><a class="header" href="#complete-flow-with-issues">Complete Flow (with issues)</a></h3>
+<pre><code class="language-bash">1. feature/x (#123) → develop
+   ✅ Build + Test + PR + Issue commented
+
+2. develop → release/vX.Y.Z → main
+   ✅ Version + Tag + Changelog + Issue #123 closed
+
+Automatic traceability!
+</code></pre>
+<hr />
+<h2 id="-references"><a class="header" href="#-references">📚 References</a></h2>
+<ul>
+<li><a href="https://docs.github.com/en/actions">GitHub Actions Documentation</a></li>
+<li><a href="https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions">Workflow Syntax</a></li>
+<li><a href="https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue">Closing Issues via Commit Messages</a></li>
+<li><a href="https://cli.github.com/manual/">GitHub CLI</a></li>
+</ul>
+<hr />
+<p><strong>Maintainers</strong>: @ElioNeto</p>
+<p><strong>Last updated</strong>: March 6, 2026</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="CONTRIBUTING.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="audit/AUDIT-2026-08.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="CONTRIBUTING.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="audit/AUDIT-2026-08.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

@@ -1,0 +1,772 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Auditoria completa (pt-BR, 2026-03) - ApexStore Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">ApexStore Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/ElioNeto/ApexStore" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="auditoria-completa-de-segurança-resiliência-e-performance--apexstore"><a class="header" href="#auditoria-completa-de-segurança-resiliência-e-performance--apexstore">Auditoria Completa de Segurança, Resiliência e Performance — ApexStore</a></h1>
+<p><strong>Data:</strong> 2026-05-26<br />
+<strong>Versão auditada:</strong> 2.1.63<br />
+<strong>Escopo:</strong> Código-fonte completo (Rust), configurações, dependências, infraestrutura<br />
+<strong>Metodologia:</strong> Análise estática de código + revisão arquitetural + boas práticas OWASP/Cloud Native</p>
+<hr />
+<h2 id="resumo-executivo"><a class="header" href="#resumo-executivo">Resumo Executivo</a></h2>
+<p>A ApexStore é um storage engine LSM-tree embarcado em Rust com maturidade arquitetural impressionante. O código é bem estruturado, com separação clara entre camadas, uso extensivo de <code>tracing</code>, <code>thiserror</code>, testes unitários e de integração, e componentes de resiliência como circuit breaker, retry com backoff, backpressure, disk monitor, watchdog e panic recovery.</p>
+<p><strong>Pontuação geral: 6.5/10</strong> — Código base robusto, mas com vulnerabilidades críticas de segurança na superfície HTTP.</p>
+<h3 id="principais-descobertas"><a class="header" href="#principais-descobertas">Principais descobertas</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Severidade</th><th>Contagem</th><th>Destaques</th></tr></thead><tbody>
+<tr><td>🔴 Crítico</td><td>5</td><td>Auth desabilitado por padrão, CORS permissivo, payload 50MB, sem TLS, injeção via CDC</td></tr>
+<tr><td>🟠 Alto</td><td>8</td><td>N+1 no scan, batch sem limite, GraphQL playground público, WebSocket sem auth, idempotência não integrada</td></tr>
+<tr><td>🟡 Médio</td><td>10</td><td>Workers ilimitados, sem CSRF, rate limiter com Mutex simples, token timing attack parcial, backup sem criptografia</td></tr>
+<tr><td>🔵 Baixo</td><td>5</td><td>CLI sem gestão de tokens, dashboard com auto-refresh, sem auditoria em CI</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="-achados-críticos"><a class="header" href="#-achados-críticos">🔴 Achados Críticos</a></h2>
+<h3 id="c-01-autenticação-desabilitada-por-padrão"><a class="header" href="#c-01-autenticação-desabilitada-por-padrão">C-01: Autenticação Desabilitada por Padrão</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>API_AUTH_ENABLED=false</code> no <code>.env.example</code> e no <code>AuthConfig::default()</code>. Qualquer requisição sem token passa pelo <code>bearer_validator</code> sem verificação.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Todos os endpoints (incluindo <code>/admin/flush</code>, <code>/admin/compact</code>, <code>/keys</code>, <code>/stats</code>) são <strong>publicamente acessíveis</strong> sem qualquer autenticação. Atacante pode ler, escrever, deletar qualquer dado e forçar flush/compaction.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/config.rs:70-73</code>: <code>enabled: false</code>; <code>src/api/auth/middleware.rs:33-35</code>: <code>if !auth_enabled { return Ok(req); }</code></td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Mudar default para <code>true</code> e exigir configuração explícita de <code>API_AUTH_ENABLED=false</code> em ambientes dev. Implementar fallback seguro (deny-by-default).</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste de integração: tentar <code>GET /keys</code> sem <code>Authorization</code> header → deve retornar <code>401</code>.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Imediata</td></tr>
+</tbody></table>
+</div>
+<h3 id="c-02-cors-permissivo-allow-all-origins"><a class="header" href="#c-02-cors-permissivo-allow-all-origins">C-02: CORS Permissivo (Allow All Origins)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>Cors::permissive()</code> é usado quando <code>cors_origins</code> é <code>None</code> (default). Permite qualquer origem, qualquer header, qualquer método com credentials.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Qualquer site pode fazer requisições cross-origin autenticadas (se auth estivesse habilitado). Exfiltração de dados via cookies/session tokens.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/mod.rs:518</code>: <code>None =&gt; actix_cors::Cors::permissive()</code>; <code>src/api/config.rs:61</code>: <code>cors_origins: None</code></td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Nunca usar <code>.permissive()</code> em produção. Exigir lista explícita de origens ou usar validação dinâmica segura.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste: <code>curl -H "Origin: https://evil.com" -H "Authorization: Bearer ..." http://localhost:8080/keys</code> → verificar se <code>Access-Control-Allow-Origin</code> não reflete <code>evil.com</code>.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Imediata</td></tr>
+</tbody></table>
+</div>
+<h3 id="c-03-payload-máximo-de-50mb"><a class="header" href="#c-03-payload-máximo-de-50mb">C-03: Payload Máximo de 50MB</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>MAX_JSON_PAYLOAD_SIZE=52428800</code> (50MB) — extremamente alto para uma API key-value. Ataque DoS trivial com poucas conexões.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>20 requisições simultâneas de 50MB = 1GB de memória. Engine LSM-tree não tem limite de tamanho de valor por chave. Pode causar OOM killer.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/config.rs:50-51</code>: <code>max_json_payload_size: 50 * 1024 * 1024</code></td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Reduzir para 1MB (1048576) como default. Implementar limite configurável por endpoint. Adicionar validação no middleware ANTES de chegar ao handler.</td></tr>
+<tr><td><strong>Validação</strong></td><td><code>curl -X PUT -d "$(python -c 'print("x"*2000000)')" http://localhost:8080/keys/test</code> → deve retornar 413 Payload Too Large.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Imediata</td></tr>
+</tbody></table>
+</div>
+<h3 id="c-04-ausência-de-tlshttps"><a class="header" href="#c-04-ausência-de-tlshttps">C-04: Ausência de TLS/HTTPS</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td>Servidor HTTP puro, sem suporte a TLS. Nenhuma opção de certificado, key ou configuração SSL.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Todas as comunicações (incluindo tokens Bearer, dados de notas, comandos admin) trafegam em texto puro. MITM total.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/bin/server.rs:118</code>: <code>apexstore::api::start_server(engine, server_config)</code> — usa <code>HttpServer::new()</code>, não <code>HttpServer::bind_rustls()</code>. Nenhuma dependência <code>rustls</code> ou <code>openssl</code> no <code>Cargo.toml</code>.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Adicionar suporte a TLS nativo (rustls ou openssl via actix-web). Pelo menos documentar deploy atrás de reverse proxy (nginx/caddy) com requisito obrigatório.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Verificar que <code>curl -k https://localhost:8080/health/liveness</code> funciona ou que docs exigem reverse proxy.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Imediata</td></tr>
+</tbody></table>
+</div>
+<h3 id="c-05-cdc-webhook-sem-autenticação-nem-retry"><a class="header" href="#c-05-cdc-webhook-sem-autenticação-nem-retry">C-05: CDC Webhook sem Autenticação nem Retry</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>WebhookPublisher::publish</code> no <code>cdc.rs</code> faz POST do evento para o endpoint configurado sem qualquer autenticação (Bearer token, HMAC, etc.) e sem retry em caso de falha. Dados sensíveis vazam para qualquer endpoint configurado ou interceptado.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Se um atacante conseguir alterar a variável <code>CDC_ENDPOINT</code> (via env injection, config map, etc.), todas as mutações de dados são enviadas para ele. Sem retry, eventos são perdidos em falha de rede.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/infra/cdc.rs:217-250</code>: função <code>publish</code> faz <code>reqwest::Client::post().json().send().await</code> sem <code>Authorization</code> header, sem retry, sem timeout explícito.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Adicionar <code>Authorization</code> header configurável no <code>CdcConfig</code>. Envolver envio em <code>RetryConfig::default()</code>. Adicionar timeout de 5s. Usar circuit breaker.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste unitário: mock HTTP server que verifica header <code>Authorization</code> no POST de CDC.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Alta</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="-achados-altos"><a class="header" href="#-achados-altos">🟠 Achados Altos</a></h2>
+<h3 id="h-01-n1-query-no-endpoint-scan"><a class="header" href="#h-01-n1-query-no-endpoint-scan">H-01: N+1 Query no Endpoint <code>/scan</code></a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>GET /scan</code> primeiro lista todas as keys via <code>engine.keys()</code>, depois faz uma <code>get_cf</code> para cada key individualmente. Isso é 1 + N queries.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Com 10.000 keys, são 10.001 chamadas ao engine. Latência O(N) em vez de scan eficiente. OOM ao carregar todas as keys em memória ao mesmo tempo.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/mod.rs:439-463</code>: <code>for k in keys { engine.get_cf("default", ...) }</code></td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Usar <code>engine.scan()</code> (prefix scan com iterator) que já existe no engine e retorna key+value em uma única passagem.</td></tr>
+<tr><td><strong>Validação</strong></td><td><code>cargo bench --bench scan_bench</code> — comparar latência antes/depois.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Alta</td></tr>
+</tbody></table>
+</div>
+<h3 id="h-02-batch-insert-sem-limite-de-tamanho"><a class="header" href="#h-02-batch-insert-sem-limite-de-tamanho">H-02: Batch Insert sem Limite de Tamanho</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>POST /keys/batch</code> aceita <code>Vec&lt;FrontendSetBody&gt;</code> sem limite de tamanho. Atacante pode enviar 100.000 registros em uma única requisição.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>DoS via batch gigante. Engine LSM-tree faz <code>put_cf</code> para cada registro individualmente (sem batch transaction). Amplificação de escrita.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/mod.rs:406-431</code>: sem <code>.take()</code> ou <code>max_batch</code> validation.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Adicionar <code>max_batch: usize</code> configurável (default 1000). Validar no middleware. Usar transação atômica do engine se disponível.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste: <code>POST /keys/batch</code> com 10001 registros → deve retornar 413.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Alta</td></tr>
+</tbody></table>
+</div>
+<h3 id="h-03-graphql-playground-acessível-em-produção"><a class="header" href="#h-03-graphql-playground-acessível-em-produção">H-03: GraphQL Playground Acessível em Produção</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>GET /graphql/playground</code> e <code>GET /graphql</code> retornam o Playground interativo (GraphQL IDE). Qualquer um pode executar queries arbitrárias.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Ferramenta de desenvolvimento exposta em produção. Atacante pode explorar schema GraphQL, fazer queries profundas, enumerar dados.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/mod.rs:491-493</code>: playground registrado sem verificação de ambiente.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Desabilitar playground quando <code>env!("PROFILE") != "debug"</code> ou via config <code>graphql_playground_enabled: bool</code>.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste: <code>GET /graphql/playground</code> em modo release → deve retornar 404.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Alta</td></tr>
+</tbody></table>
+</div>
+<h3 id="h-04-websocket-sync-sem-autenticação"><a class="header" href="#h-04-websocket-sync-sem-autenticação">H-04: WebSocket Sync sem Autenticação</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>GET /ws/sync</code> usa <code>actix-ws</code> sem middleware de autenticação. O <code>sync_handler</code> não verifica token.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Qualquer um pode abrir WebSocket, assinar notas, receber mudanças em tempo real e enviar alterações. Vazamento de dados via push.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/sync.rs:187-211</code>: handler <code>sync_handler</code> sem <code>require_permission</code>.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Adicionar validação de token no handshake WebSocket. Extrair token do query param <code>?token=...</code> ou header <code>Sec-WebSocket-Protocol</code>.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste: conectar WebSocket sem token → deve fechar conexão com 4001.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Alta</td></tr>
+</tbody></table>
+</div>
+<h3 id="h-05-rate-limiter-usa-mutex-simples-gargalo"><a class="header" href="#h-05-rate-limiter-usa-mutex-simples-gargalo">H-05: Rate Limiter Usa Mutex Simples (Gargalo)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>RateLimiterState</code> usa <code>Mutex&lt;HashMap&lt;IpAddr, IpTrack&gt;&gt;</code>. Cada requisição adquire o lock global para verificar rate limit. Sob alta concorrência, o mutex se torna gargalo.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Em benchmarks de 500+ conexões concorrentes, o rate limiter pode aumentar latência em 10-50ms por requisição devido à contenção de lock.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/rate_limiter.rs:50</code>: <code>requests: Mutex&lt;HashMap&lt;IpAddr, IpTrack&gt;&gt;</code></td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Usar sharded Mutex (256 shards by hash do IP), ou implementar sliding window com <code>DashMap</code> (dashmap crate), ou usar algoritmo token bucket lock-free com <code>AtomicU64</code>.</td></tr>
+<tr><td><strong>Validação</strong></td><td><code>cargo bench --bench latency_bench</code> — comparar P99 latency antes/depois com 1000 conexões.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Alta</td></tr>
+</tbody></table>
+</div>
+<h3 id="h-06-idempotency-middleware-não-integrado"><a class="header" href="#h-06-idempotency-middleware-não-integrado">H-06: Idempotency Middleware Não Integrado</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>IdempotencyMiddleware</code> existe em <code>src/infra/idempotency.rs</code> mas <strong>nunca é instanciado nem registrado</strong> na cadeia de middleware do actix-web (<code>src/api/mod.rs:569-588</code>).</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Retry de clientes pode causar duplicação de writes. Se um PUT /keys/key for executado duas vezes, o segundo pode sobrescrever dados já atualizados (dependendo do timestamp).</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/mod.rs:569-588</code>: middleware list inclui <code>RequestTimeout</code>, <code>RateLimiter</code>, <code>AccessControl</code>, <code>Logger</code>, <code>Cors</code>, <code>HttpAuthentication</code> — mas não <code>IdempotencyMiddleware</code>.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Integrar <code>IdempotencyMiddleware</code> como middleware global para mutações (PUT, POST, DELETE). Extrair <code>Idempotency-Key</code> header.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste de integração: enviar <code>PUT /keys/k</code> com <code>Idempotency-Key: xyz</code> duas vezes → mesma resposta.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Alta</td></tr>
+</tbody></table>
+</div>
+<h3 id="h-07-variáveis-de-ambiente-sem-validação"><a class="header" href="#h-07-variáveis-de-ambiente-sem-validação">H-07: Variáveis de Ambiente Sem Validação</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>ServerConfig::from_env()</code> faz parse de variáveis com <code>unwrap_or(default)</code> genérico. Valores maliciosos ou inválidos são silenciosamente trocados pelo default sem warning.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Se <code>WORKERS=-1</code> for injetado, silenciosamente vira <code>workers: None</code> (auto). Se <code>PORT=0</code> (porta aleatória), servidor pode ligar em porta inesperada. Falta de validação de range.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/config.rs:77-170</code>: todos os <code>parse::&lt;T&gt;()</code> usam <code>unwrap_or(default_value)</code> sem log de warning.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Adicionar logging warning quando env var é inválida. Validar ranges (porta 1-65535, workers 1-64, etc.).</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste: <code>WORKERS=-1 cargo run</code> → log warning no startup. <code>WORKERS=0</code> → erro de validação.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Alta</td></tr>
+</tbody></table>
+</div>
+<h3 id="h-08-scan-de-keys-carrega-tudo-em-memória"><a class="header" href="#h-08-scan-de-keys-carrega-tudo-em-memória">H-08: Scan de Keys Carrega Tudo em Memória</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>GET /keys</code> (sem prefix) chama <code>engine.keys()</code> que retorna <strong>todas as keys</strong> do banco em um <code>Vec&lt;Vec&lt;u8&gt;&gt;</code>. Para bancos com milhões de keys, isso causa OOM.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Com 5M de keys de 32 bytes = 160MB só de keys em memória. Antes de serializar JSON.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/mod.rs:156-163</code>: <code>engine.keys()?.into_iter().take(limit)</code> — <code>take</code> limita output mas o vetor inteiro já foi alocado.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Implementar <code>engine.keys_with_limit(limit)</code> que usa inner iterator e para após <code>limit</code> itens. Ou modificar <code>search_prefix</code> com prefixo vazio.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste com 1M keys: consumo de memória &lt; 50MB.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Alta</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="-achados-médios"><a class="header" href="#-achados-médios">🟡 Achados Médios</a></h2>
+<h3 id="m-01-workers-ilimitados-auto--cpu-cores"><a class="header" href="#m-01-workers-ilimitados-auto--cpu-cores">M-01: Workers Ilimitados (Auto = CPU Cores)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>WORKERS</code> vazio = auto-detect. Em servidores com muitos cores (32, 64), isso cria dezenas de workers que competem pelo lock do engine (<code>Mutex</code> no core).</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Contenção alta no lock do engine (cada operação adquire <code>parking_lot::Mutex</code> no core). Workers extras gastam CPU em spinning.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/bin/server.rs:594-596</code>: <code>if let Some(workers) = config.workers { server_builder = server_builder.workers(workers); }</code></td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Recomendar default de 4 workers. Documentar que engine lock-bound. Adicionar warning se <code>workers &gt; 8</code>.</td></tr>
+<tr><td><strong>Validação</strong></td><td><code>cargo bench --bench mixed_bench</code> com 4 vs 32 workers.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Média</td></tr>
+</tbody></table>
+</div>
+<h3 id="m-02-ausência-de-proteção-csrf"><a class="header" href="#m-02-ausência-de-proteção-csrf">M-02: Ausência de Proteção CSRF</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td>Nenhum token CSRF, SameSite cookie, ou verificação de origem/Referer nas mutações. Embora actix-web exija <code>Content-Type: application/json</code> para <code>web::Json</code>, navegadores não enviam automaticamente.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Se auth estivesse habilitado com cookie-based (não é o caso atual, mas arquiteturalmente), CSRF seria possível.</td></tr>
+<tr><td><strong>Evidência</strong></td><td>Todo o <code>src/api/mod.rs</code> — nenhuma verificação de <code>Origin</code>, <code>Referer</code>, ou token CSRF.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Adicionar middleware de verificação de origem para mutações. Exigir header <code>X-CSRF-Token</code> ou <code>Origin</code> check.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste: POST sem <code>Origin</code> header → 403.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Média</td></tr>
+</tbody></table>
+</div>
+<h3 id="m-03-token-timing-attack-parcial"><a class="header" href="#m-03-token-timing-attack-parcial">M-03: Token Timing Attack Parcial</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>constant_time_compare</code> compara strings hex (SHA-256) byte a byte, o que é constant-time. Porém, a comparação de tamanho (<code>a.len() != b.len()</code>) vaza informação de tamanho do hash.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Extremamente baixo em prática (atacante precisaria de &gt;10^6 requisições para extrair 64 chars). Mas quebra a premissa de constant-time.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/auth/token.rs:131-138</code>: <code>if a.len() != b.len() { return false; }</code></td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Usar crate <code>subtle</code> ou <code>constant_time_eq</code> para comparação de bytes. Hash tokens armazenados como <code>[u8; 32]</code> em vez de hex string.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste: <code>validate_token</code> com tokens de diferentes tamanhos deve levar o mesmo tempo (±5%).</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Média</td></tr>
+</tbody></table>
+</div>
+<h3 id="m-04-backup-sem-criptografia"><a class="header" href="#m-04-backup-sem-criptografia">M-04: Backup sem Criptografia</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>BackupScheduler::backup_now()</code> copia snapshots para diretório de backup sem qualquer criptografia. Dados sensíveis ficam em texto puro no disco.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Se o diretório de backup for comprometido, todos os dados são expostos. Backups em S3/NFS sem criptografia violam compliance (GDPR, HIPAA, SOC2).</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/infra/backup_scheduler.rs:170-208</code>: nenhuma chamada a <code>encrypt_block</code> ou similar. Backup é cópia literal dos arquivos SSTable.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Integrar <code>Encryptor</code> no backup. Usar AES-256-GCM com chave separada (rotação periódica).</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste: backup → arquivos .encrypted. Tentar ler sem chave → dados ininteligíveis.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Média</td></tr>
+</tbody></table>
+</div>
+<h3 id="m-05-compactação-usa-stdthreadsleep-dentro-de-lock"><a class="header" href="#m-05-compactação-usa-stdthreadsleep-dentro-de-lock">M-05: Compactação Usa <code>std::thread::sleep</code> Dentro de Lock</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td>(Verificar engine internals) O <code>retry_with_backoff</code> usa <code>std::thread::sleep(Duration::from_millis(...))</code> que bloqueia a thread atual. Se chamado dentro de um lock no compaction, bloqueia outros workers.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Thread pool bloqueada durante sleep de até 5s (max_delay_ms). Redução de throughput.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/infra/retry.rs:102</code>: <code>std::thread::sleep(Duration::from_millis(actual_delay_ms))</code></td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Usar <code>tokio::time::sleep</code> para async contexts. Separar retry de blocking IO.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste de estresse: 1000 writes concorrentes durante compactação → sem starvation.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Média</td></tr>
+</tbody></table>
+</div>
+<h3 id="m-06-cdc-publisher-sem-timeout"><a class="header" href="#m-06-cdc-publisher-sem-timeout">M-06: CDC Publisher sem Timeout</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>WebhookPublisher::publish</code> não especifica timeout na requisição HTTP. Se o endpoint CDC travar, a goroutine fica bloqueada indefinidamente.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Escrita no engine fica bloqueada aguardando CDC. Degeneração para completa indisponibilidade.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/infra/cdc.rs</code>: reqwest post sem <code>.timeout()</code>.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Adicionar <code>reqwest::Client::builder().timeout(Duration::from_secs(5))</code>. Usar circuit breaker para CDC.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste: configurar CDC endpoint que não responde → timeout após 5s.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Média</td></tr>
+</tbody></table>
+</div>
+<h3 id="m-07-falta-de-auditoria-access-log"><a class="header" href="#m-07-falta-de-auditoria-access-log">M-07: Falta de Auditoria (Access Log)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td>O logger <code>actix_web::middleware::Logger::default()</code> registra apenas método, path, status, duração. <strong>Não registra</strong>: quem fez a requisição (principal), o recurso acessado (key), o resultado detalhado.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Impossível fazer auditoria forense: quem deletou qual key, quando.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/mod.rs:574</code>: <code>.wrap(actix_web::middleware::Logger::default())</code> — formato de log não customizado.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Customizar <code>Logger</code> para incluir <code>X-User-Id</code> (do token), <code>X-Request-Id</code>, key do path, response status. Adicionar log estruturado em formato JSON.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Verificar logs: <code>{"method":"DELETE","path":"/keys/secret","user":"alice","status":200}</code></td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Média</td></tr>
+</tbody></table>
+</div>
+<h3 id="m-08-degradation-manager-não-integrado-com-api"><a class="header" href="#m-08-degradation-manager-não-integrado-com-api">M-08: Degradation Manager Não Integrado com API</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>DegradationManager</code> existe mas não é verificado nos handlers da API. Writes continuam mesmo quando o disco está crítico.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Escrita em disco cheio causa corrupção de SSTable e perda de dados.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/infra/degradation.rs</code> — implementação completa mas não há chamada a <code>check_write_allowed()</code> nos handlers <code>put_key</code>, <code>post_key</code>, <code>delete_key</code>, <code>batch_keys</code>.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Integrar <code>DegradationManager::check_write_allowed()</code> em todos os handlers de mutação. Conectar <code>DiskMonitor::on_critical</code> para setar ReadOnly.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste: encher disco → POST /keys → retorna 503 Service Unavailable.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Média</td></tr>
+</tbody></table>
+</div>
+<h3 id="m-09-sem-limite-de-conexões-por-ip"><a class="header" href="#m-09-sem-limite-de-conexões-por-ip">M-09: Sem Limite de Conexões por IP</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td>Rate limiter é baseado em requisições/minuto, não em conexões simultâneas. <code>max_connections=10000</code> é global, não por IP.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Um único IP pode abrir 10000 conexões simultâneas e exaurir o file descriptor pool.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/rate_limiter.rs</code>: rastreia requisições em janela de 60s, mas não limita conexões simultâneas por IP.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Adicionar <code>max_connections_per_ip: usize</code> (default 100). Usar <code>HashMap&lt;IpAddr, AtomicUsize&gt;</code> para tracking de conexões ativas.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Teste: 200 conexões simultâneas do mesmo IP → 100 aceitas, 100 rejeitadas com 429.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Média</td></tr>
+</tbody></table>
+</div>
+<h3 id="m-10-dependência-bincode-unmaintained"><a class="header" href="#m-10-dependência-bincode-unmaintained">M-10: Dependência Bincode UNMAINTAINED</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>bincode</code> 1.3.3 é marcado como UNMAINTAINED (RUSTSEC-2025-0141), mas está como dependência (aparentemente removida — verificar Cargo.toml atual).</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Se presente, bugs de segurança não serão corrigidos.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>SECURITY_REPORT.md:64</code> — mas não aparece no <code>Cargo.toml</code> atual (<code>postcard</code> substituiu?). Verificar <code>Cargo.lock</code>.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Confirmar que <code>bincode</code> não está em nenhuma dependência transitiva. Executar <code>cargo audit</code> regularmente.</td></tr>
+<tr><td><strong>Validação</strong></td><td><code>cargo audit</code> não deve reportar <code>bincode</code>.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Média</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="-achados-baixos"><a class="header" href="#-achados-baixos">🔵 Achados Baixos</a></h2>
+<h3 id="l-01-cli-sem-gestão-de-tokens"><a class="header" href="#l-01-cli-sem-gestão-de-tokens">L-01: CLI sem Gestão de Tokens</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td>CLI (<code>apexstore-cli</code>) não tem comandos para criar, listar, revogar tokens de API.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Administradores precisam criar tokens manualmente via API <code>POST /admin/tokens</code> (que nem existe como endpoint documentado).</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/bin/cli.rs</code>: comandos get/put/delete/scan — sem subcomando <code>token</code>.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Adicionar <code>apexstore-cli token create/list/revoke</code> com persistência no engine.</td></tr>
+<tr><td><strong>Validação</strong></td><td><code>apexstore-cli token create --name "ci-user" --permission read</code> → retorna token.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Baixa</td></tr>
+</tbody></table>
+</div>
+<h3 id="l-02-admin-dashboard-auto-refresh-sem-cache-bust"><a class="header" href="#l-02-admin-dashboard-auto-refresh-sem-cache-bust">L-02: Admin Dashboard Auto-Refresh sem Cache Bust</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td>Dashboard HTML auto-refresh a cada 5s via <code>location.reload()</code>, não via <code>fetch()</code>. Causa flash visual e perde estado.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Experiência de monitoração ruim. Pequena sobrecarga de CPU/rendering.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/admin/dashboard.rs:216</code>: <code>setInterval(updateTime, 1000); setTimeout(function() { location.reload(); }, 5000);</code></td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Substituir por <code>fetch('/stats/all')</code> com atualização parcial do DOM.</td></tr>
+<tr><td><strong>Validação</strong></td><td>Dashboard atualiza sem flash visual.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Baixa</td></tr>
+</tbody></table>
+</div>
+<h3 id="l-03-sem-cargo-audit-no-ci"><a class="header" href="#l-03-sem-cargo-audit-no-ci">L-03: Sem <code>cargo audit</code> no CI</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td>Workflow CI (<code>ci.yml</code>) não executa <code>cargo audit</code> para detectar vulnerabilidades em dependências.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Vulnerabilidades em dependências só são descobertas manualmente.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>SECURITY_REPORT.md:105</code>: <code>#183 — No cargo audit in CI</code>. Workflow não tem step de audit.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Adicionar <code>cargo audit</code> ao CI. Usar <code>cargo-audit</code> com <code>--deny warnings</code>.</td></tr>
+<tr><td><strong>Validação</strong></td><td>CI passa com <code>cargo audit</code>.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Baixa</td></tr>
+</tbody></table>
+</div>
+<h3 id="l-04-endpoints-frontend-duplicados"><a class="header" href="#l-04-endpoints-frontend-duplicados">L-04: Endpoints Frontend Duplicados</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td><code>POST /keys</code> (frontend) e <code>PUT /keys/{key}</code> fazem a mesma coisa com APIs diferentes. <code>GET /stats/all</code> e <code>GET /stats</code> são redundantes.</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Superfície de ataque maior sem necessidade. Manutenção duplicada.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/mod.rs:345-369</code> (post_key) vs <code>73-99</code> (put_key). <code>319-342</code> (get_stats_all) vs <code>193-217</code> (get_stats).</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Consolidar: remover endpoints duplicados ou fazê-los redirecionar. Versionar API (<code>/v1/keys</code>).</td></tr>
+<tr><td><strong>Validação</strong></td><td>Testes existentes continuam passando após remoção dos duplicados.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Baixa</td></tr>
+</tbody></table>
+</div>
+<h3 id="l-05-sem-health-check-de-dependências-externas"><a class="header" href="#l-05-sem-health-check-de-dependências-externas">L-05: Sem Health Check de Dependências Externas</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>
+<tr><td><strong>Problema</strong></td><td>Health checks (<code>/health/liveness</code>, <code>/health/readiness</code>) verificam apenas o engine local, não dependências externas (CDC endpoint, Webhook, OTLP collector).</td></tr>
+<tr><td><strong>Impacto</strong></td><td>Readiness retorna 200 mesmo quando todas as dependências externas estão down. K8s não mata pod.</td></tr>
+<tr><td><strong>Evidência</strong></td><td><code>src/api/health.rs</code>: liveness e readiness só verificam engine stats.</td></tr>
+<tr><td><strong>Recomendação</strong></td><td>Adicionar health checks para dependências: CDC endpoint (ping), OTLP (gRPC health check), disk space.</td></tr>
+<tr><td><strong>Validação</strong></td><td>CDC endpoint retornando 503 → <code>/health/readiness</code> retorna 503.</td></tr>
+<tr><td><strong>Prioridade</strong></td><td>Baixa</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="-riscos-do-banco-de-dados-lsm-tree"><a class="header" href="#-riscos-do-banco-de-dados-lsm-tree">🗄️ Riscos do Banco de Dados (LSM-tree)</a></h2>
+<h3 id="db-01-write-amplification-sem-monitoramento-médio"><a class="header" href="#db-01-write-amplification-sem-monitoramento-médio">DB-01: Write Amplification sem Monitoramento (Médio)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Problema</th><th>O LSM-tree tem write amplification inerente (cada write é reescrito múltiplas vezes na compactação). <code>write_amplification.rs</code> bench existe mas não há métrica exposta no Prometheus.</th></tr></thead><tbody>
+<tr><td>Impacto</td><td>Sem monitorar write amplification, usuários podem configurar tamanhos de nível errados e ter 20-50x write amplification, reduzindo vida de SSD.</td></tr>
+<tr><td>Recomendação</td><td>Adicionar métrica <code>apexstore_write_amplification_ratio</code> ao Prometheus. Basear em <code>compaction_bytes_written / user_bytes_written</code>.</td></tr>
+</tbody></table>
+</div>
+<h3 id="db-02-read-amplification-em-get-sem-bloom-filter-médio"><a class="header" href="#db-02-read-amplification-em-get-sem-bloom-filter-médio">DB-02: Read Amplification em GET sem Bloom Filter (Médio)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Problema</th><th>Se o Bloom Filter não for configurado (ou <code>BLOOM_FALSE_POSITIVE_RATE</code> muito alto), cada <code>GET</code> precisa verificar todos os níveis (L0..Ln). Com 10 níveis, cada GET faz até 10 reads de SSTable.</th></tr></thead><tbody>
+<tr><td>Impacto</td><td>Latência P99 pode disparar de 1ms para 50ms em bancos com muitos níveis e sem bloom filter efetivo.</td></tr>
+<tr><td>Recomendação</td><td>Exigir Bloom Filter (default 1% false positive). Monitorar <code>bloom_filter_negatives_total</code> para detectar filtros ineficazes.</td></tr>
+</tbody></table>
+</div>
+<h3 id="db-03-compaction-pode-causar-write-stalls-baixo"><a class="header" href="#db-03-compaction-pode-causar-write-stalls-baixo">DB-03: Compaction Pode Causar Write Stalls (Baixo)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Problema</th><th>Se a taxa de escrita excede a capacidade de compactação, o memtable enche e o engine bloqueia writes. <code>CompactionBackpressure</code> existe mas não está integrado com o rate limiter da API.</th></tr></thead><tbody>
+<tr><td>Impacto</td><td>Writes bloqueados por segundos. Picos de latência.</td></tr>
+<tr><td>Recomendação</td><td>Integrar <code>CompactionBackpressure</code> com <code>RateLimiterState</code> da API. Quando backpressure &gt; threshold, reduzir rate limit da API dinamicamente.</td></tr>
+</tbody></table>
+</div>
+<h3 id="db-04-sem-range-deletions-otimizadas-baixo"><a class="header" href="#db-04-sem-range-deletions-otimizadas-baixo">DB-04: Sem Range Deletions Otimizadas (Baixo)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Problema</th><th><code>delete_cf</code> deleta uma chave por vez. Não há suporte a range delete (<code>delete_range(start, end)</code>) que eliminaria toda uma faixa com uma única operação lógica.</th></tr></thead><tbody>
+<tr><td>Impacto</td><td>Deletar 1M keys com prefixo requer 1M operações. Write stall.</td></tr>
+<tr><td>Recomendação</td><td>Implementar <code>delete_range()</code> no engine com tombstone de range (já há <code>range_start</code>/<code>range_end</code> no <code>LogRecord</code>).</td></tr>
+</tbody></table>
+</div>
+<h3 id="db-05-block-cache-tamanho-fixo-baixo"><a class="header" href="#db-05-block-cache-tamanho-fixo-baixo">DB-05: Block Cache Tamanho Fixo (Baixo)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Problema</th><th><code>GlobalBlockCache::new(64, 4096)</code> — tamanho fixo de 64MB. Sem resize dinâmico ou adaptive cache.</th></tr></thead><tbody>
+<tr><td>Impacto</td><td>Cache pode estar superdimensionado (desperdício de memória) ou subdimensionado (cache miss rate alto).</td></tr>
+<tr><td>Recomendação</td><td>Monitorar <code>cache_hits_total / (cache_hits_total + cache_misses_total)</code>. Adicionar resize via API admin.</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="-plano-de-correção"><a class="header" href="#-plano-de-correção">📋 Plano de Correção</a></h2>
+<h3 id="fase-1--imediata-semanas-1-2"><a class="header" href="#fase-1--imediata-semanas-1-2">Fase 1 — Imediata (Semanas 1-2)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Prioridade</th><th>ID</th><th>Ação</th><th>Esforço</th></tr></thead><tbody>
+<tr><td>🔴 P0</td><td>C-01</td><td>Mudar default auth para <code>true</code>. Adicionar middleware obrigatório.</td><td>2h</td></tr>
+<tr><td>🔴 P0</td><td>C-02</td><td>Remover <code>Cors::permissive()</code>. Exigir origens explícitas.</td><td>1h</td></tr>
+<tr><td>🔴 P0</td><td>C-03</td><td>Reduzir payload max para 1MB default. Adicionar <code>json_payload</code> middleware.</td><td>1h</td></tr>
+<tr><td>🔴 P0</td><td>C-04</td><td>Adicionar suporte TLS (rustls) ou documentar reverse proxy obrigatório.</td><td>8h</td></tr>
+<tr><td>🟠 P1</td><td>H-01</td><td>Refatorar <code>/scan</code> para usar <code>engine.scan()</code> em vez de N+1 queries.</td><td>3h</td></tr>
+<tr><td>🟠 P1</td><td>H-02</td><td>Adicionar <code>max_batch_size</code> limit (default 1000).</td><td>1h</td></tr>
+</tbody></table>
+</div>
+<h3 id="fase-2--curto-prazo-semanas-3-4"><a class="header" href="#fase-2--curto-prazo-semanas-3-4">Fase 2 — Curto Prazo (Semanas 3-4)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Prioridade</th><th>ID</th><th>Ação</th><th>Esforço</th></tr></thead><tbody>
+<tr><td>🟠 P1</td><td>H-03</td><td>Desabilitar GraphQL playground em produção.</td><td>1h</td></tr>
+<tr><td>🟠 P1</td><td>H-04</td><td>Adicionar auth no WebSocket sync.</td><td>4h</td></tr>
+<tr><td>🟠 P1</td><td>H-05</td><td>Substituir <code>Mutex&lt;HashMap&gt;</code> por sharded ou lock-free rate limiter.</td><td>6h</td></tr>
+<tr><td>🟠 P1</td><td>H-06</td><td>Integrar <code>IdempotencyMiddleware</code> na cadeia de middleware.</td><td>3h</td></tr>
+<tr><td>🟠 P1</td><td>H-07</td><td>Adicionar validação de env vars com logging de warning.</td><td>2h</td></tr>
+<tr><td>🟠 P1</td><td>H-08</td><td>Implementar <code>keys_with_limit()</code> para evitar OOM em scans.</td><td>4h</td></tr>
+</tbody></table>
+</div>
+<h3 id="fase-3--médio-prazo-semanas-5-6"><a class="header" href="#fase-3--médio-prazo-semanas-5-6">Fase 3 — Médio Prazo (Semanas 5-6)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Prioridade</th><th>ID</th><th>Ação</th><th>Esforço</th></tr></thead><tbody>
+<tr><td>🔴 P0</td><td>C-05</td><td>Adicionar auth + retry + timeout no CDC Webhook.</td><td>4h</td></tr>
+<tr><td>🟡 P2</td><td>M-01</td><td>Fixar default workers=4. Documentar engine lock-bound.</td><td>1h</td></tr>
+<tr><td>🟡 P2</td><td>M-02</td><td>Adicionar CSRF protection middleware.</td><td>3h</td></tr>
+<tr><td>🟡 P2</td><td>M-03</td><td>Usar <code>subtle::ConstantTimeEq</code> para token comparison.</td><td>1h</td></tr>
+<tr><td>🟡 P2</td><td>M-04</td><td>Criptografar backups com AES-256-GCM.</td><td>4h</td></tr>
+<tr><td>🟡 P2</td><td>M-06</td><td>Adicionar timeout no CDC HTTP client.</td><td>1h</td></tr>
+<tr><td>🟡 P2</td><td>M-07</td><td>Customizar Logger para auditoria (principal, path, status).</td><td>2h</td></tr>
+<tr><td>🟡 P2</td><td>M-08</td><td>Integrar DegradationManager nos handlers de mutação.</td><td>3h</td></tr>
+<tr><td>🟡 P2</td><td>M-09</td><td>Adicionar <code>max_connections_per_ip</code>.</td><td>3h</td></tr>
+</tbody></table>
+</div>
+<h3 id="fase-4--contínuo-sprints"><a class="header" href="#fase-4--contínuo-sprints">Fase 4 — Contínuo (Sprints)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Prioridade</th><th>ID</th><th>Ação</th><th>Esforço</th></tr></thead><tbody>
+<tr><td>🔵 P3</td><td>L-01..L-05</td><td>Melhorias de CLI, dashboard, CI audit, consolidar endpoints, health checks</td><td>12h</td></tr>
+<tr><td>🟡 P2</td><td>M-05</td><td>Refatorar retry para async com tokio::time::sleep</td><td>3h</td></tr>
+<tr><td>🟡 P2</td><td>M-10</td><td>Confirmar remoção de bincode, adicionar <code>cargo audit</code> ao CI</td><td>1h</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="-plano-de-testes"><a class="header" href="#-plano-de-testes">🧪 Plano de Testes</a></h2>
+<h3 id="testes-de-segurança"><a class="header" href="#testes-de-segurança">Testes de Segurança</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Teste</th><th>Ferramenta</th><th>Critério</th></tr></thead><tbody>
+<tr><td>Auth bypass</td><td>curl / httpx</td><td><code>GET /keys</code> sem token → 401</td></tr>
+<tr><td>CORS reflection</td><td>curl -H "Origin: https://evil.com"</td><td>Response não deve refletir <code>Origin</code></td></tr>
+<tr><td>Payload oversized</td><td>curl -X PUT -d @50MB.json</td><td>413 Payload Too Large</td></tr>
+<tr><td>Path traversal</td><td>GET /keys/../../../etc/passwd</td><td>404 (não 200 com conteúdo)</td></tr>
+<tr><td>Rate limit bypass</td><td>101 req/min de mesmo IP</td><td>429 na 101ª</td></tr>
+<tr><td>Token fuzzing</td><td>1000 tokens aleatórios</td><td>401 para todos</td></tr>
+<tr><td>WebSocket auth</td><td>ws sem token</td><td>Conexão rejeitada</td></tr>
+<tr><td>GraphQL iD</td><td>query <code>{__schema{types{name}}}</code> com profundidade 10</td><td>Limitada a 3 níveis</td></tr>
+<tr><td>Batch DoS</td><td>POST /keys/batch com 10001 registros</td><td>413 ou 429</td></tr>
+<tr><td>CDC injection</td><td>Configurar CDC_ENDPOINT para servidor do atacante</td><td>Dados não devem vazar</td></tr>
+<tr><td>TLS check</td><td>curl sem <code>-k</code></td><td>Handshake TLS bem-sucedido</td></tr>
+</tbody></table>
+</div>
+<h3 id="testes-de-resiliência"><a class="header" href="#testes-de-resiliência">Testes de Resiliência</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Teste</th><th>Cenário</th><th>Critério</th></tr></thead><tbody>
+<tr><td>Kill + recovery</td><td>Matar processo, reiniciar</td><td>WAL recovery, dados íntegros</td></tr>
+<tr><td>Disk fill</td><td>Preencher disco até threshold</td><td>Engine entra em ReadOnly</td></tr>
+<tr><td>Conexões em massa</td><td>2000 conexões simultâneas</td><td>2000 processadas, demais rejeitadas ordeiramente</td></tr>
+<tr><td>Compactação + writes</td><td>1000 writes/s durante compactação</td><td>Writes não bloqueiam &gt; 1s</td></tr>
+<tr><td>CDC offline</td><td>Endpoint CDC fora do ar</td><td>Engine continua operacional</td></tr>
+<tr><td>Panic em worker</td><td>Forçar panic em thread de compactação</td><td>Thread reinicia, engine continua</td></tr>
+</tbody></table>
+</div>
+<h3 id="testes-de-performance"><a class="header" href="#testes-de-performance">Testes de Performance</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Teste</th><th>Métrica</th><th>Alvo</th></tr></thead><tbody>
+<tr><td>GET latency (P50/P99/P999)</td><td><code>latency_bench</code></td><td>&lt; 500µs / &lt; 5ms / &lt; 50ms</td></tr>
+<tr><td>PUT latency (P50/P99)</td><td><code>latency_bench</code></td><td>&lt; 1ms / &lt; 10ms</td></tr>
+<tr><td>Scan throughput (1000 keys)</td><td><code>scan_bench</code></td><td>&gt; 1000 keys/s</td></tr>
+<tr><td>Mixed workload</td><td><code>mixed_bench</code></td><td>&gt; 5000 ops/s</td></tr>
+<tr><td>Write amplification</td><td><code>write_amplification</code></td><td>&lt; 10x</td></tr>
+<tr><td>Concurrent connections</td><td><code>stress_bench</code></td><td>&gt; 500 conexões simultâneas sem erro</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="-checklist-final-para-produção"><a class="header" href="#-checklist-final-para-produção">✅ Checklist Final para Produção</a></h2>
+<h3 id="configuração-obrigatória"><a class="header" href="#configuração-obrigatória">Configuração Obrigatória</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<code>API_AUTH_ENABLED=true</code> — autenticação ativa</li>
+<li><input disabled="" type="checkbox"/>
+Token de admin criado via <code>POST /admin/tokens</code> (ou CLI)</li>
+<li><input disabled="" type="checkbox"/>
+<code>CORS_ORIGINS</code> configurado com origens específicas (nunca vazio)</li>
+<li><input disabled="" type="checkbox"/>
+<code>MAX_JSON_PAYLOAD_SIZE</code> reduzido para 1MB</li>
+<li><input disabled="" type="checkbox"/>
+Deploy atrás de TLS (nginx, caddy, ou TLS nativo)</li>
+<li><input disabled="" type="checkbox"/>
+<code>REQUEST_TIMEOUT_SECONDS</code> configurado (30s default)</li>
+<li><input disabled="" type="checkbox"/>
+<code>RATE_LIMIT_REQUESTS_PER_MINUTE</code> configurado (100 default)</li>
+</ul>
+<h3 id="configuração-recomendada"><a class="header" href="#configuração-recomendada">Configuração Recomendada</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<code>WORKERS=4</code> (não auto)</li>
+<li><input disabled="" type="checkbox"/>
+<code>BLOCK_CACHE_SIZE_MB=256</code> (ou mais, dependendo da carga)</li>
+<li><input disabled="" type="checkbox"/>
+<code>BLOOM_FALSE_POSITIVE_RATE=0.01</code> (1%)</li>
+<li><input disabled="" type="checkbox"/>
+<code>PREFIX_COMPRESSION_ENABLED=true</code> (se keys têm prefixos comuns)</li>
+<li><input disabled="" type="checkbox"/>
+<code>WAL_ARCHIVE_ENABLED=true</code> com <code>WAL_MAX_SIZE=67108864</code> (64MB)</li>
+<li><input disabled="" type="checkbox"/>
+<code>BACKUP_SCHEDULER</code> configurado com <code>retention_count &gt;= 10</code></li>
+</ul>
+<h3 id="monitoramento"><a class="header" href="#monitoramento">Monitoramento</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+Prometheus <code>/metrics</code> integrado ao scraping</li>
+<li><input disabled="" type="checkbox"/>
+OTLP export configurado (<code>OTEL_EXPORTER_OTLP_ENDPOINT</code>)</li>
+<li><input disabled="" type="checkbox"/>
+Dashboard de latency P50/P99/P95 configurado</li>
+<li><input disabled="" type="checkbox"/>
+Alerta de <code>apexstore_errors_total &gt; 0</code> em 5 min</li>
+<li><input disabled="" type="checkbox"/>
+Alerta de <code>apexstore_cache_hits_total &lt; 0.8 * apexstore_gets_total</code> (hit rate &lt; 80%)</li>
+<li><input disabled="" type="checkbox"/>
+Alerta de <code>disk_available_bytes &lt; warn_threshold</code> (1GB)</li>
+</ul>
+<h3 id="pipeline-cicd"><a class="header" href="#pipeline-cicd">Pipeline CI/CD</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<code>cargo audit</code> executado em cada PR</li>
+<li><input disabled="" type="checkbox"/>
+<code>cargo clippy -- -D warnings</code> passa</li>
+<li><input disabled="" type="checkbox"/>
+<code>cargo test --all-features</code> passa</li>
+<li><input disabled="" type="checkbox"/>
+<code>cargo bench</code> sem regressão &gt; 10%</li>
+<li><input disabled="" type="checkbox"/>
+<code>cargo fmt --check</code> passa</li>
+</ul>
+<h3 id="documentação"><a class="header" href="#documentação">Documentação</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<code>docs/SECURITY.md</code> atualizado com procedimentos de incidentes</li>
+<li><input disabled="" type="checkbox"/>
+<code>docs/OPS.md</code> com runbooks de recovery</li>
+<li><input disabled="" type="checkbox"/>
+<code>.env.example</code> com valores seguros (auth=true, CORS configurado)</li>
+<li><input disabled="" type="checkbox"/>
+Variáveis de produção documentadas</li>
+</ul>
+<hr />
+<h2 id="suposições-explicitas"><a class="header" href="#suposições-explicitas">Suposições Explicitas</a></h2>
+<ol>
+<li><strong>Auth stateless</strong>: Usei tokens Bearer armazenados no engine como única fonte de verdade. Não há OAuth2, OIDC, SAML ou provedor externo.</li>
+<li><strong>Deployment</strong>: Assumo deploy em container (Docker/K8s) com reverse proxy (nginx). Recomendo fortemente TLS no proxy.</li>
+<li><strong>Monitoração</strong>: Assumo Prometheus + Grafana para métricas, e OTLP collector opcional para tracing.</li>
+<li><strong>Backup</strong>: Assumo backup periódico via <code>BackupScheduler</code> para diretório local ou volume montado (NFS/S3 via CSI).</li>
+<li><strong>Dados sensíveis</strong>: Considerei notas, tags e values como dados sensíveis que precisam de criptografia em repouso e em trânsito.</li>
+<li><strong>Escala</strong>: Análise considera até 10M keys, 1000 writes/s, 10000 conexões simultâneas.</li>
+<li><strong>Regulatory</strong>: Não assumi compliance específico (LGPD/GDPR/HIPAA), mas recomendações seguem boas práticas gerais.</li>
+</ol>
+<hr />
+<h2 id="apêndice-arquivos-analisados"><a class="header" href="#apêndice-arquivos-analisados">Apêndice: Arquivos Analisados</a></h2>
+<pre><code>src/api/mod.rs                 → Handlers, rotas, configuração CORS
+src/api/auth/*                 → Token, middleware, manager, errors
+src/api/config.rs              → Configuração do servidor
+src/api/health.rs              → Health checks
+src/api/rate_limiter.rs        → Rate limiting (IP-based)
+src/api/access_control.rs      → Access control middleware
+src/api/timeout_middleware.rs  → Timeout middleware
+src/api/admin/*                → Dashboard, configuração admin
+src/api/sync.rs                → WebSocket sync
+src/api/graphql/mod.rs         → GraphQL schema e playground
+src/bin/server.rs              → Entrypoint do servidor
+src/infra/retry.rs             → Retry com backoff
+src/infra/circuit_breaker.rs   → Circuit breaker pattern
+src/infra/idempotency.rs       → Idempotency middleware (não integrado)
+src/infra/backpressure.rs      → Compaction backpressure
+src/infra/backup_scheduler.rs  → Backup automático
+src/infra/telemetry.rs         → OpenTelemetry tracing + metrics
+src/infra/metrics.rs           → Engine metrics (Prometheus + OTel)
+src/infra/panic_recovery.rs    → Panic recovery
+src/infra/disk_monitor.rs      → Disk space monitor
+src/infra/scrubber.rs          → Data integrity scrubber
+src/infra/degradation.rs       → Degradation modes
+src/infra/cdc.rs               → Change Data Capture
+src/infra/error.rs             → Error types (LsmError)
+src/infra/memory_limiter.rs    → Memory budget
+src/infra/watchdog.rs          → Health watchdog
+src/infra/access_control.rs    → Policy engine
+src/storage/encryption.rs      → AES-256-GCM encryption at rest
+src/storage/wal.rs             → Write-Ahead Log
+src/storage/blob_store.rs      → Blob storage
+src/core/engine/mod.rs         → Core engine (amostra)
+Cargo.toml                     → Dependências
+.env.example                   → Configuração de ambiente
+SECURITY_REPORT.md             → Relatório de segurança anterior
+</code></pre>
+<hr />
+<p><em>Auditoria gerada em 2026-05-26. Revisar a cada 6 meses ou após mudanças significativas na stack.</em></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../audit/AUDIT-2026-08.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../audit/auditoria-tecnica-profunda.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../audit/AUDIT-2026-08.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../audit/auditoria-tecnica-profunda.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>
