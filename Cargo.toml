@@ -83,7 +83,7 @@ tracing-opentelemetry = "0.25"
 opentelemetry = "0.24"
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.17", features = ["trace", "metrics", "grpc-tonic"] }
-rand = "0.8"
+rand = "0.10"
 fs2 = "0.4"
 # TUI dependencies
 ratatui = "0.29"

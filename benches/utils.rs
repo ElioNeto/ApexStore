@@ -224,7 +224,7 @@ pub fn generate_random_keys(count: usize, key_size: usize) -> Vec<String> {
     (0..count)
         .map(|_| {
             (0..key_size)
-                .map(|_| hex_chars.chars().collect::<Vec<_>>()[rand::random::<usize>() % 16])
+                .map(|_| hex_chars.chars().collect::<Vec<_>>()[rand::random_range(0usize..16)])
                 .collect::<String>()
         })
         .collect()

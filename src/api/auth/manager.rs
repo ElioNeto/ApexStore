@@ -54,7 +54,7 @@ impl TokenManager {
         expires_at: Option<u128>,
         permissions: Vec<Permission>,
     ) -> Result<(String, ApiToken), AuthError> {
-        let raw_token = generate_token();
+        let raw_token = generate_token()?;
         let token = ApiToken::new(name, &raw_token, expires_at, permissions)?;
 
         let mut tokens = self

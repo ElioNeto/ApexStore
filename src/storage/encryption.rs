@@ -16,8 +16,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use rand::rngs::OsRng;
-use rand::RngCore;
+use rand::{rngs::SysRng, TryCryptoRng};
 use serde::{Deserialize, Serialize};
 
 /// Configuration for encryption at rest.
@@ -141,6 +140,14 @@ impl Encryptor {
     /// [12-byte random IV (nonce)][AES-256-GCM ciphertext + tag (16 bytes)]
     /// ```
     pub fn encrypt_block(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
+        self.encrypt_block_with_rng(plaintext, &mut SysRng)
+    }
+
+    fn encrypt_block_with_rng(
+        &self,
+        plaintext: &[u8],
+        rng: &mut impl TryCryptoRng,
+    ) -> Result<Vec<u8>> {
         if !self.enabled {
             return Ok(plaintext.to_vec());
         }
@@ -149,7 +156,9 @@ impl Encryptor {
         })?;
 
         let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
+        rng.try_fill_bytes(&mut nonce_bytes).map_err(|e| {
+            LsmError::CompactionFailed(format!("Secure nonce randomness unavailable: {e}"))
+        })?;
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         let ciphertext = cipher.encrypt(nonce, plaintext).map_err(|e| {
@@ -209,6 +218,47 @@ impl std::fmt::Debug for Encryptor {
 mod tests {
     use super::*;
 
+    struct FailingRng;
+
+    impl rand::TryRng for FailingRng {
+        type Error = std::io::Error;
+
+        fn try_next_u32(&mut self) -> std::io::Result<u32> {
+            Err(std::io::Error::other("entropy unavailable"))
+        }
+
+        fn try_next_u64(&mut self) -> std::io::Result<u64> {
+            Err(std::io::Error::other("entropy unavailable"))
+        }
+
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> std::io::Result<()> {
+            // A failed source may have partially written the destination.
+            dest[0] = 0xAB;
+            Err(std::io::Error::other("entropy unavailable"))
+        }
+    }
+
+    impl rand::TryCryptoRng for FailingRng {}
+
+    #[test]
+    fn test_encryption_rejects_entropy_failure() {
+        let encryptor = Encryptor::new(&test_config());
+        let error = encryptor
+            .encrypt_block_with_rng(b"secret", &mut FailingRng)
+            .unwrap_err();
+        assert!(
+            matches!(error, LsmError::CompactionFailed(message) if message.contains("entropy unavailable"))
+        );
+    }
+
+    #[test]
+    fn test_disabled_encryption_does_not_require_entropy() {
+        let result = Encryptor::disabled()
+            .encrypt_block_with_rng(b"plaintext", &mut FailingRng)
+            .unwrap();
+        assert_eq!(result, b"plaintext");
+    }
+
     fn test_config() -> EncryptionConfig {
         EncryptionConfig {
             key: [0xABu8; 32],
@@ -225,7 +275,7 @@ mod tests {
             ciphertext, plaintext,
             "ciphertext should differ from plaintext"
         );
-        assert!(ciphertext.len() > 12, "ciphertext should contain IV");
+        assert_eq!(ciphertext.len(), 12 + plaintext.len() + 16);
 
         let decrypted = encryptor.decrypt_block(&ciphertext).unwrap();
         assert_eq!(
@@ -240,6 +290,7 @@ mod tests {
         let plaintext = b"same data";
         let c1 = encryptor.encrypt_block(plaintext).unwrap();
         let c2 = encryptor.encrypt_block(plaintext).unwrap();
+        assert_ne!(&c1[..12], &c2[..12], "each encryption needs a fresh nonce");
         // With random IVs, the two ciphertexts should differ
         assert_ne!(c1, c2, "different IVs should produce different ciphertexts");
     }
