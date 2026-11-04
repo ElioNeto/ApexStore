@@ -108,6 +108,9 @@ futures = "0.3"
 tempfile = "3.24"
 
 [dev-dependencies]
+opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic", "trace", "metrics"] }
+tonic = { version = "0.14", default-features = false, features = ["transport", "codegen", "router"] }
+tokio-stream = { version = "0.1", features = ["net"] }
 rcgen = "0.14"
 criterion = { version = "0.5", features = ["html_reports"] }
 fail = "0.4"

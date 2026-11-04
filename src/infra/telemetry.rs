@@ -1,8 +1,29 @@
+//! OTLP tracing and engine metrics with OpenTelemetry 0.33 and
+//! tracing-opentelemetry 0.34.
+//!
+//! `OTEL_EXPORTER_OTLP_ENDPOINT` enables gRPC export. An unset or empty value
+//! keeps console tracing and disables OTLP metrics. Export timeouts are five
+//! seconds and metrics are collected every sixty seconds.
+//!
+//! # Provider lifecycle
+//!
+//! Since the OpenTelemetry 0.33 migration, [`init_tracing`] and [`init_metrics`]
+//! return `Result<Option<Provider>, TelemetryError>` instead of `()`. Initialize
+//! them inside a Tokio/Actix runtime, handle initialization errors, and retain
+//! both returned providers. After stopping application work, await [`shutdown`]
+//! **before** dropping the runtime, including when application startup fails.
+//! Shutdown drains both signals and reports export failures; it moves blocking
+//! SDK calls off the runtime thread so tonic can complete its I/O.
+//!
+//! Embedders that flush providers directly must likewise use `spawn_blocking`
+//! for `force_flush()` on a current-thread runtime.
+
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::trace as sdk_trace;
 use opentelemetry_sdk::Resource;
 use std::sync::Arc;
@@ -32,47 +53,59 @@ fn otlp_endpoint() -> Option<String> {
 /// registered as a `tracing` layer alongside `EnvFilter`.
 ///
 /// Otherwise the standard `tracing_subscriber::fmt` layer is used (console).
-pub fn init_tracing() {
+/// Returns the provider when OTLP is enabled; retain it for [`shutdown`].
+/// Exporter configuration and subscriber installation failures are returned.
+/// Call once, inside a Tokio/Actix runtime when OTLP is enabled.
+pub fn init_tracing() -> Result<Option<sdk_trace::SdkTracerProvider>, TelemetryError> {
     if let Some(endpoint) = otlp_endpoint() {
-        let provider = opentelemetry_otlp::new_pipeline()
-            .tracing()
-            .with_exporter(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_endpoint(&endpoint)
-                    .with_timeout(Duration::from_secs(5)),
-            )
-            .with_trace_config(
-                sdk_trace::Config::default()
-                    .with_resource(Resource::new(vec![
-                        KeyValue::new("service.name", "apexstore"),
-                        KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
-                    ]))
-                    .with_sampler(sdk_trace::Sampler::AlwaysOn),
-            )
-            .install_batch(opentelemetry_sdk::runtime::Tokio)
-            .expect("Failed to install OTLP trace exporter");
-
+        let provider = build_tracer_provider(&endpoint)?;
         let tracer = provider.tracer("apexstore");
-        global::set_tracer_provider(provider);
         let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-
         let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
         tracing_subscriber::registry()
             .with(filter)
             .with(telemetry_layer)
-            .init();
+            .try_init()
+            .map_err(|error| TelemetryError::Subscriber(Box::new(error)))?;
+        global::set_tracer_provider(provider.clone());
+        Ok(Some(provider))
     } else {
-        // Fallback: standard console logging
+        // Fallback: standard console logging.
         tracing_subscriber::fmt()
             .with_env_filter(
                 EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
             )
             .with_target(false)
             .with_level(true)
-            .init();
+            .try_init()
+            .map_err(TelemetryError::Subscriber)?;
+        Ok(None)
     }
+}
+
+fn service_resource() -> Resource {
+    Resource::builder_empty()
+        .with_attributes([
+            KeyValue::new("service.name", "apexstore"),
+            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+        ])
+        .build()
+}
+
+fn build_tracer_provider(endpoint: &str) -> Result<sdk_trace::SdkTracerProvider, TelemetryError> {
+    let exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint(endpoint)
+        .with_timeout(Duration::from_secs(5))
+        .build()
+        .map_err(TelemetryError::TraceExporter)?;
+
+    Ok(sdk_trace::SdkTracerProvider::builder()
+        .with_batch_exporter(exporter)
+        .with_resource(service_resource())
+        .with_sampler(sdk_trace::Sampler::AlwaysOn)
+        .build())
 }
 
 // ---------------------------------------------------------------------------
@@ -88,38 +121,77 @@ pub fn otel_meter() -> Option<&'static Meter> {
 }
 
 /// Initialise the OpenTelemetry metrics pipeline (no-op when OTLP is not
-/// configured).
-pub fn init_metrics() {
-    let endpoint = match otlp_endpoint() {
-        Some(ep) => ep,
-        None => return, // no-op: OTel not configured
+/// configured). Retain the provider to flush and shut down before runtime exit.
+pub fn init_metrics() -> Result<Option<SdkMeterProvider>, TelemetryError> {
+    let Some(endpoint) = otlp_endpoint() else {
+        return Ok(None);
     };
+    let provider = build_meter_provider(&endpoint)?;
+    global::set_meter_provider(provider.clone());
+    let _ = OTEL_METER.set(global::meter("apexstore"));
+    Ok(Some(provider))
+}
 
-    let resource = Resource::new(vec![
-        KeyValue::new("service.name", "apexstore"),
-        KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
-    ]);
-
-    // Build the OTLP metric exporter using the tonic (gRPC) protocol.
-    let exporter = opentelemetry_otlp::new_exporter()
-        .tonic()
-        .with_endpoint(&endpoint)
-        .with_timeout(Duration::from_secs(5));
-
-    let provider = opentelemetry_otlp::new_pipeline()
-        .metrics(opentelemetry_sdk::runtime::Tokio)
-        .with_exporter(exporter)
-        .with_resource(resource)
-        .with_period(Duration::from_secs(60))
+fn build_meter_provider(endpoint: &str) -> Result<SdkMeterProvider, TelemetryError> {
+    let exporter = opentelemetry_otlp::MetricExporter::builder()
+        .with_tonic()
+        .with_endpoint(endpoint)
         .with_timeout(Duration::from_secs(5))
         .build()
-        .expect("Failed to build OTLP metrics pipeline");
+        .map_err(TelemetryError::MetricExporter)?;
+    let reader = PeriodicReader::builder(exporter)
+        .with_interval(Duration::from_secs(60))
+        .build();
+    Ok(SdkMeterProvider::builder()
+        .with_reader(reader)
+        .with_resource(service_resource())
+        .build())
+}
 
-    // Register as the global meter provider so that `global::meter()` works.
-    global::set_meter_provider(provider.clone());
+/// Errors initializing or draining the telemetry pipelines.
+#[derive(Debug, thiserror::Error)]
+pub enum TelemetryError {
+    #[error("failed to build OTLP trace exporter: {0}")]
+    TraceExporter(#[source] opentelemetry_otlp::ExporterBuildError),
+    #[error("failed to build OTLP metrics exporter: {0}")]
+    MetricExporter(#[source] opentelemetry_otlp::ExporterBuildError),
+    #[error("failed to install tracing subscriber: {0}")]
+    Subscriber(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("telemetry shutdown failed (traces: {traces:?}, metrics: {metrics:?})")]
+    Shutdown {
+        traces: Option<opentelemetry_sdk::error::OTelSdkError>,
+        metrics: Option<opentelemetry_sdk::error::OTelSdkError>,
+    },
+    #[error("telemetry shutdown task failed: {0}")]
+    ShutdownTask(#[from] tokio::task::JoinError),
+}
 
-    let meter = global::meter("apexstore");
-    let _ = OTEL_METER.set(meter);
+/// Export buffered telemetry and shut down both providers before the runtime exits.
+///
+/// The SDK shutdown calls block. Run them off the Actix current-thread runtime
+/// so that the tonic channel can finish its I/O while shutdown waits for it.
+/// Both signals are shut down even if one exporter fails.
+pub async fn shutdown(
+    traces: Option<sdk_trace::SdkTracerProvider>,
+    metrics: Option<SdkMeterProvider>,
+) -> Result<(), TelemetryError> {
+    tokio::task::spawn_blocking(move || {
+        let traces = traces.and_then(|provider| {
+            // BatchSpanProcessor::shutdown does not propagate its final export
+            // result. Flush explicitly so a rejected batch is reported, and
+            // always shut down the worker even when that flush fails.
+            let flush = provider.force_flush();
+            let shutdown = provider.shutdown();
+            flush.and(shutdown).err()
+        });
+        let metrics = metrics.and_then(|provider| provider.shutdown().err());
+        if traces.is_some() || metrics.is_some() {
+            Err(TelemetryError::Shutdown { traces, metrics })
+        } else {
+            Ok(())
+        }
+    })
+    .await?
 }
 
 // ---------------------------------------------------------------------------
@@ -156,14 +228,16 @@ impl OtelInstruments {
     /// Returns `None` when OTel has not been initialised (i.e.
     /// `OTEL_EXPORTER_OTLP_ENDPOINT` was not set at startup).
     pub fn try_register() -> Option<Arc<Self>> {
-        let meter = otel_meter()?;
+        Some(Arc::new(Self::from_meter(otel_meter()?)))
+    }
 
+    fn from_meter(meter: &Meter) -> Self {
         /// Helper: register a u64 counter instrument.
         fn init(meter: &Meter, name: &'static str, desc: &'static str) -> Counter<u64> {
-            meter.u64_counter(name).with_description(desc).init()
+            meter.u64_counter(name).with_description(desc).build()
         }
 
-        Some(Arc::new(Self {
+        Self {
             sets: init(meter, "apexstore.sets", "Total number of set operations"),
             gets: init(meter, "apexstore.gets", "Total number of get operations"),
             deletes: init(
@@ -234,6 +308,9 @@ impl OtelInstruments {
                 "Bloom filter negatives",
             ),
             errors: init(meter, "apexstore.errors", "Total number of errors"),
-        }))
+        }
     }
 }
+
+#[cfg(test)]
+mod tests;
