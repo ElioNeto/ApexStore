@@ -132,32 +132,16 @@ jobs:
       # Results go to docs/PERFORMANCE.md, not README.md. Generated content in a
       # hand-maintained file is what created the commit churn, and PERFORMANCE.md
       # is published to the docs site via docs/SUMMARY.md.
-      - name: Inject the table into docs/PERFORMANCE.md
+      - name: Update measurements in docs/PERFORMANCE.md
+        env:
+          BENCHMARK_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BENCHMARK_COMMIT: ${{ github.sha }}
+          BENCHMARK_RUNNER: ${{ runner.os }}
         run: |
-          DATE=$(date -u '+%Y-%m-%d %H:%M UTC')
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          {
-            echo "<!-- BENCHMARK_RESULTS_START -->"
-            echo "> Auto-updated by CI on **${DATE}** — [view run](${RUN_URL})"
-            echo "> Runner: \`${{ runner.os }}\` (GitHub-hosted). Commit: \`${{ github.sha }}\`."
-            echo ""
-            cat bench_table.txt
-            echo ""
-            echo "<!-- BENCHMARK_RESULTS_END -->"
-          } > bench_block.txt
-          python3 - <<'PY'
-          import pathlib, sys
-          block = pathlib.Path("bench_block.txt").read_text(encoding="utf-8")
-          target = pathlib.Path("docs/PERFORMANCE.md")
-          text = target.read_text(encoding="utf-8")
-          start = "<!-- BENCHMARK_RESULTS_START -->"
-          end = "<!-- BENCHMARK_RESULTS_END -->"
-          if start not in text or end not in text:
-              sys.exit(f"{target} is missing the {start} / {end} markers")
-          head, _, rest = text.partition(start)
-          _, _, tail = rest.partition(end)
-          target.write_text(head + block.rstrip("\n") + tail, encoding="utf-8")
-          PY
+          python3 scripts/update_benchmark_report.py \
+            --report docs/PERFORMANCE.md --table bench_table.txt \
+            --run-url "$BENCHMARK_RUN_URL" --commit "$BENCHMARK_COMMIT" \
+            --runner "$BENCHMARK_RUNNER"
 
       # Only commit when the content actually changed. The previous version
       # committed unconditionally, so an unchanged placeholder still produced a
