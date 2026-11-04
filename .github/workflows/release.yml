@@ -27,6 +27,10 @@ concurrency:
 jobs:
   validation:
     if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      issues: write
+      actions: read
     uses: ./.github/workflows/ci.yml
     secrets: inherit
 
@@ -143,6 +147,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Report job status
