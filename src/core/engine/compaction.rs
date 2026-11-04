@@ -6,7 +6,7 @@ use crate::infra::config::StorageConfig;
 use crate::infra::error::Result;
 use crate::storage::builder::SstableBuilder;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// Metrics collected during a compaction operation.
 #[derive(Debug, Clone, Default)]
@@ -14,6 +14,7 @@ pub struct CompactionMetrics {
     pub bytes_read: u64,
     pub bytes_written: u64,
     pub files_merged: usize,
+    /// Elapsed whole milliseconds; submillisecond compactions report zero.
     pub duration_ms: u64,
 }
 
@@ -98,7 +99,7 @@ fn execute_compaction(
     level: Option<usize>,
     range_tombstones: &[RangeTombstone],
 ) -> Result<(Vec<Table>, CompactionMetrics)> {
-    let start_time = SystemTime::now();
+    let start_time = Instant::now();
     let mut metrics = CompactionMetrics {
         files_merged: tables.len(),
         ..Default::default()
@@ -184,6 +185,7 @@ fn execute_compaction(
 
     if merged_data.is_empty() {
         // All data was tombstones, no output
+        metrics.duration_ms = start_time.elapsed().as_millis() as u64;
         return Ok((Vec::new(), metrics));
     }
 
@@ -202,10 +204,7 @@ fn execute_compaction(
     }
 
     // Update duration
-    metrics.duration_ms = SystemTime::now()
-        .duration_since(start_time)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    metrics.duration_ms = start_time.elapsed().as_millis() as u64;
 
     Ok((vec![new_table], metrics))
 }

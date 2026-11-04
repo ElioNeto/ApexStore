@@ -3449,13 +3449,24 @@ mod tests {
         let storage_config = crate::infra::config::StorageConfig::default();
         let dir = tempdir().unwrap();
         let output_dir = dir.path().to_path_buf();
-        let (_, metrics) = strategy
+        let expected_bytes: u64 = tables.iter().map(|table| table.size() as u64).sum();
+        let started = std::time::Instant::now();
+        let (output, metrics) = strategy
             .execute(tables, &options, &storage_config, &output_dir, &[])
             .unwrap();
 
-        assert!(metrics.bytes_read > 0, "Should track bytes read");
-        assert!(metrics.files_merged > 0, "Should track files merged");
-        assert!(metrics.duration_ms > 0, "Duration should be positive");
+        assert_eq!(metrics.bytes_read, expected_bytes);
+        assert_eq!(metrics.files_merged, 3);
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].data.len(), 300);
+        let written: u64 = std::fs::read_dir(&output_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().metadata().unwrap().len())
+            .sum();
+        assert_eq!(metrics.bytes_written, written);
+        assert!(written > 0);
+        // Truncation to whole milliseconds legitimately reports zero for fast runs.
+        assert!(u128::from(metrics.duration_ms) <= started.elapsed().as_millis());
     }
 
     #[test]
