@@ -389,5 +389,5 @@ Programmatic configuration uses `LsmConfig.storage.encryption_enabled` and
 drop; they are not serialized into layout configuration.
 
 Legacy zero-key databases require the explicit offline `migrate-encryption`
-command documented in [the migration guide](../MIGRATION_GUIDE.md). Do not delete
+command documented in [the migration guide](https://github.com/ElioNeto/ApexStore/blob/main/MIGRATION_GUIDE.md). Do not delete
 WALs or SSTables to work around a key/configuration error.
