@@ -9,119 +9,119 @@ by hand -- edits are overwritten. The workflow commits only when the numbers
 actually change, and fails rather than publishing an empty table.
 
 <!-- BENCHMARK_RESULTS_START -->
-> Auto-updated by CI on **2026-11-07 08:33 UTC** — [view run](https://github.com/ElioNeto/ApexStore/actions/runs/42355695912)
-> Runner: `Linux` (GitHub-hosted). Commit: `ee83a077267ffdefbf2d4e940a54a1fcfb462d72`.
+> Auto-updated by CI on **2026-11-08 08:47 UTC** — [view run](https://github.com/ElioNeto/ApexStore/actions/runs/42464115599)
+> Runner: `Linux` (GitHub-hosted). Commit: `4c8760cfd086ffefea95967d238e07ddfbb313f2`.
 
 **📝 Write**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `write_single/10` | 49.232 µs | 🟡 |
-| `write_single/1024` | 62.211 µs | 🟡 |
-| `write_batch_1000/1000` | 48.628 ms | 🟠 |
-| `write_batch_10000/10000` | 472.38 ms | 🔴 |
-| `memtable_flush_8/8` | 45.275 ms | 🟠 |
-| `sstable_flush/10000` | 9.0748 ms | 🟠 |
-| `write_size_10_100/10x100` | 46.973 µs | 🟡 |
-| `write_size_100_10000/100x10000` | 67.598 µs | 🟡 |
-| `key_updates/10k_keys` | 423.17 ms | 🔴 |
-| `delete_operations/10k_keys` | 409.38 ms | 🔴 |
+| `write_single/10` | 54.936 µs | 🟡 |
+| `write_single/1024` | 67.813 µs | 🟡 |
+| `write_batch_1000/1000` | 54.626 ms | 🟠 |
+| `write_batch_10000/10000` | 541.61 ms | 🔴 |
+| `memtable_flush_8/8` | 73.111 ms | 🟠 |
+| `sstable_flush/10000` | 16.155 ms | 🟠 |
+| `write_size_10_100/10x100` | 54.610 µs | 🟡 |
+| `write_size_100_10000/100x10000` | 102.61 µs | 🟡 |
+| `key_updates/10k_keys` | 435.33 ms | 🔴 |
+| `delete_operations/10k_keys` | 437.37 ms | 🔴 |
 
 **📚 Read**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `read_memtable/1000` | 188.04 µs | 🟡 |
-| `read_memtable/10000` | 192.87 µs | 🟡 |
-| `read_sstable_cold/1000` | 316.76 µs | 🟡 |
-| `read_sstable_cold/10000` | 326.80 µs | 🟡 |
-| `read_sstable_warm/1000` | 318.86 µs | 🟡 |
-| `read_sstable_warm/10000` | 384.93 µs | 🟡 |
-| `read_latency/memtable_1k` | 177.51 µs | 🟡 |
-| `read_latency/sstable_cold_1k` | 326.08 µs | 🟡 |
-| `read_memtable_latency/memtable_1k` | 176.17 µs | 🟡 |
-| `read_sstable_warm_latency/sstable_warm_1k` | 318.34 µs | 🟡 |
-| `read_latency_memtable_1k/memtable_1k` | 234.51 µs | 🟡 |
-| `read_latency_memtable_100k/memtable_100k` | 45.537 ms | 🟠 |
-| `read_latency_sstable_1k/sstable_warm_1k` | 389.08 µs | 🟡 |
-| `read_latency_sstable_100k/sstable_warm_100k` | 160.42 ms | 🔴 |
+| `read_memtable/1000` | 266.77 µs | 🟡 |
+| `read_memtable/10000` | 272.40 µs | 🟡 |
+| `read_sstable_cold/1000` | 486.69 µs | 🟡 |
+| `read_sstable_cold/10000` | 499.91 µs | 🟡 |
+| `read_sstable_warm/1000` | 484.82 µs | 🟡 |
+| `read_sstable_warm/10000` | 560.46 µs | 🟡 |
+| `read_latency/memtable_1k` | 246.56 µs | 🟡 |
+| `read_latency/sstable_cold_1k` | 495.27 µs | 🟡 |
+| `read_memtable_latency/memtable_1k` | 247.51 µs | 🟡 |
+| `read_sstable_warm_latency/sstable_warm_1k` | 487.28 µs | 🟡 |
+| `read_latency_memtable_1k/memtable_1k` | 321.32 µs | 🟡 |
+| `read_latency_memtable_100k/memtable_100k` | 50.576 ms | 🟠 |
+| `read_latency_sstable_1k/sstable_warm_1k` | 558.47 µs | 🟡 |
+| `read_latency_sstable_100k/sstable_warm_100k` | 237.84 ms | 🔴 |
 
 **🔍 Scan**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `scan_sequential/1000` | 332.56 µs | 🟡 |
-| `scan_sequential/10000` | 3.5082 ms | 🟠 |
-| `full_scan/1000` | 269.93 µs | 🟡 |
-| `full_scan/10000` | 3.8498 ms | 🟠 |
-| `range_scan_100/100` | 2.7673 ms | 🟠 |
-| `prefix_scan_100/100` | 2.8542 ms | 🟠 |
-| `prefix_scan_1000/1000` | 2.8341 ms | 🟠 |
-| `iteration_sorted/1000` | 340.43 µs | 🟡 |
-| `iteration_sorted/10000` | 4.0416 ms | 🟠 |
-| `scan_limit_10/10` | 2.4058 ms | 🟠 |
-| `scan_limit_100/100` | 2.5232 ms | 🟠 |
-| `scan_pagination/10` | 24.554 ms | 🟠 |
-| `scan_pagination/100` | 275.89 ms | 🔴 |
+| `scan_sequential/1000` | 548.30 µs | 🟡 |
+| `scan_sequential/10000` | 6.5909 ms | 🟠 |
+| `full_scan/1000` | 373.22 µs | 🟡 |
+| `full_scan/10000` | 4.8000 ms | 🟠 |
+| `range_scan_100/100` | 3.5739 ms | 🟠 |
+| `prefix_scan_100/100` | 3.6918 ms | 🟠 |
+| `prefix_scan_1000/1000` | 3.6921 ms | 🟠 |
+| `iteration_sorted/1000` | 397.90 µs | 🟡 |
+| `iteration_sorted/10000` | 4.8566 ms | 🟠 |
+| `scan_limit_10/10` | 3.1502 ms | 🟠 |
+| `scan_limit_100/100` | 3.1591 ms | 🟠 |
+| `scan_pagination/10` | 31.919 ms | 🟠 |
+| `scan_pagination/100` | 359.80 ms | 🔴 |
 
 **🌐 YCSB**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `ycsb_type_a/10000` | 21.441 ms | 🟠 |
-| `ycsb_type_b/10000` | 3.5891 ms | 🟠 |
-| `ycsb_type_c/10000` | 740.46 µs | 🟡 |
-| `ycsb_type_c/100000` | 2.4863 ms | 🟠 |
+| `ycsb_type_a/10000` | 22.610 ms | 🟠 |
+| `ycsb_type_b/10000` | 3.1183 ms | 🟠 |
+| `ycsb_type_c/10000` | 555.00 µs | 🟡 |
+| `ycsb_type_c/100000` | 2.0077 ms | 🟠 |
 
 **⚡ Mixed Workload**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `workload_balanced/10000` | 23.633 ms | 🟠 |
-| `workload_read_heavy/10000` | 5.7181 ms | 🟠 |
-| `workload_write_heavy/10000` | 39.083 ms | 🟠 |
+| `workload_balanced/10000` | 23.104 ms | 🟠 |
+| `workload_read_heavy/10000` | 5.4642 ms | 🟠 |
+| `workload_write_heavy/10000` | 40.719 ms | 🟠 |
 
 **🏗️ SSTable**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `sstable_layer_1/1` | 3.6364 ms | 🟠 |
-| `many_sstables_10/10` | 412.48 µs | 🟡 |
+| `sstable_layer_1/1` | 4.5272 ms | 🟠 |
+| `many_sstables_10/10` | 416.95 µs | 🟡 |
 
 **🧵 Bloom Filter**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `bloom_filter/10000` | 5.7778 ms | 🟠 |
+| `bloom_filter/10000` | 8.9677 ms | 🟠 |
 
 **💾 Cache**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `cache_thrash_64MB/64` | 74.978 µs | 🟡 |
+| `cache_thrash_64MB/64` | 75.707 µs | 🟡 |
 
 **🧵 Concurrency**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `concurrent_1_threads/1` | 2.5973 ms | 🟠 |
+| `concurrent_1_threads/1` | 2.6504 ms | 🟠 |
 
 **💡 Memory**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `memory_pressure/small_memtable` | 202.14 µs | 🟡 |
+| `memory_pressure/small_memtable` | 203.04 µs | 🟡 |
 
 **⚙️ Other**
 
 | Benchmark | Median | Perf |
 |-----------|:------:|:----:|
-| `read_negative_bloom/negative_bloom_10k` | 799.33 µs | 🟡 |
-| `scan_1000_keys/scan_1k` | 328.78 µs | 🟡 |
-| `write_latency_1k/write_1k` | 54.103 ms | 🟠 |
-| `write_latency_100k/write_100k` | 5.8357 s | 🔴 |
-| `write_amplification_leveled/leveled_10k_keys` | 905.50 ms | 🔴 |
-| `write_amplification_size_tiered/size_tiered_10k_keys` | 906.01 ms | 🔴 |
+| `read_negative_bloom/negative_bloom_10k` | 939.41 µs | 🟡 |
+| `scan_1000_keys/scan_1k` | 549.49 µs | 🟡 |
+| `write_latency_1k/write_1k` | 41.420 ms | 🟠 |
+| `write_latency_100k/write_100k` | 4.3730 s | 🔴 |
+| `write_amplification_leveled/leveled_10k_keys` | 622.31 ms | 🔴 |
+| `write_amplification_size_tiered/size_tiered_10k_keys` | 618.57 ms | 🔴 |
 
 <!-- BENCHMARK_RESULTS_END -->
 
