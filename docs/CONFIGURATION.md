@@ -77,6 +77,42 @@ not a concrete key URL. A zero endpoint cap disables only that additional cap.
 The admin rate-limit summary reports both per-IP and per-route accepted counts
 in the last 60 seconds; requests with both caps disabled are not tracked.
 
+Tracking memory is bounded independently from the request budgets:
+
+| Variable | Default | Scope |
+|----------|---------|-------|
+| `RATE_LIMIT_MAX_IPS_PER_SHARD` | `1024` | Each of 16 rate-limit shards, shared across workers |
+| `CONNECTION_MAX_TRACKED_IPS` | `16384` | Distinct IPs with in-flight requests, shared across workers |
+
+A full rate-limit shard responds with 429 for a new peer until a tracked peer's
+entire accepted-request window expires. Existing peers retain their budgets;
+new addresses cannot evict a live budget and reset its counter. Expiration uses
+an ordered index with one entry per peer, avoiding a full-map scan on each
+request. Uneven hashing can fill one shard before the total reaches 16,384.
+
+The connection guard also returns 429 for new peers at capacity. Existing peers
+can acquire slots up to their per-IP limit. An IP's entry is removed only when
+its last in-flight request completes, is cancelled, or unwinds. Active counts
+are never evicted. Raising these capacities increases memory use; setting either
+to `0` refuses new tracked peers, rather than disabling protection. Unset or
+invalid numeric values use the finite defaults above. Requests with both rate
+caps disabled remain untracked by the rate limiter.
+
+`GET /admin/rate_limits` preserves its existing fields and adds
+`tracked_ip_count`, `max_ips_per_shard`, `shard_count`, `expired_ips`, and
+`capacity_rejections`. Its `connections` object reports `tracked_ip_count`,
+`max_tracked_ips`, `active_requests`, `max_per_ip`, and `capacity_rejections`.
+Counters are process-local and reset on restart. Capacity rejections count only
+new peers refused because tracking is full, not ordinary per-IP limit failures.
+Expired IPs are removals after the full window, not evictions of live budgets.
+The endpoint still requires Admin permission when authentication is enabled.
+
+Embedded applications can use `RateLimiterState::with_capacity` and
+`IpConnectionGuard::with_capacity`. `ServerConfig` now has
+`rate_limit_max_ips_per_shard` and `connection_max_tracked_ips` fields; serialized
+configurations that omit them receive defaults, while exhaustive Rust struct
+literals must supply them or use `..ServerConfig::default()`.
+
 The current rate limiter identifies clients by the TCP peer address, matching
 the concurrent connection guard. It ignores `X-Forwarded-For` and `Forwarded`,
 including malformed values. Clients cannot reset their budget by changing a
