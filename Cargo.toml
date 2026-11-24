@@ -75,7 +75,7 @@ async-graphql-actix-web = { version = "7", default-features = false }
 tokio = { version = "1.49", features = ["full"] }
 dotenvy = "0.15"
 sha2 = "0.10"
-base64 = "0.22"
+base64 = "0.23"
 parking_lot = "0.12"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
