@@ -703,16 +703,27 @@ async fn get_stats(req: HttpRequest, engine: web::Data<LsmEngine>) -> impl Respo
     }
 }
 
+#[derive(serde::Serialize)]
+struct AdminRateLimitSummary {
+    #[serde(flatten)]
+    rate_limits: rate_limiter::RateLimitSummary,
+    connections: Option<connection_guard::ConnectionLimitSummary>,
+}
+
 /// Handler for `GET /admin/rate_limits` — view current rate limit state.
 #[get("/admin/rate_limits")]
 async fn admin_rate_limits(
     req: HttpRequest,
     rate_limiter: web::Data<RateLimiterState>,
+    connections: Option<web::Data<IpConnectionGuard>>,
 ) -> impl Responder {
     if let Err(e) = require_permission(&req, Permission::Admin) {
         return *e;
     }
-    let summary = rate_limiter.get_state();
+    let summary = AdminRateLimitSummary {
+        rate_limits: rate_limiter.get_state(),
+        connections: connections.map(|guard| guard.get_state()),
+    };
     HttpResponse::Ok()
         .content_type("application/json")
         .json(summary)
@@ -1767,7 +1778,10 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     engine.set_cdc_publisher(cdc_publisher);
 
     let engine_data = web::Data::from(engine.clone());
-    let mut rl_state = RateLimiterState::new(config.rate_limit_requests_per_minute);
+    let mut rl_state = RateLimiterState::with_capacity(
+        config.rate_limit_requests_per_minute,
+        config.rate_limit_max_ips_per_shard,
+    );
     rl_state.set_endpoint_limit("/admin/compact", 5);
     rl_state.set_endpoint_limit("/admin/flush", 5);
     let rate_limiter_state = web::Data::new(rl_state);
@@ -1783,7 +1797,10 @@ pub async fn start_server(engine: Arc<LsmEngine>, config: ServerConfig) -> std::
     let sync_manager = web::Data::new(sync::SyncManager::new());
     let txn_manager = web::Data::new(TransactionManager::new());
     let idempotency = web::Data::new(IdempotencyMiddleware::new(Duration::from_secs(3600)));
-    let ip_connection_guard = web::Data::new(IpConnectionGuard::new(config.max_connections_per_ip));
+    let ip_connection_guard = web::Data::new(IpConnectionGuard::with_capacity(
+        config.max_connections_per_ip,
+        config.connection_max_tracked_ips,
+    ));
 
     let cors_enabled = config.cors_enabled;
     let cors_origins = config.cors_origins.clone();

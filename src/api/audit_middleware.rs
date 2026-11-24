@@ -1,6 +1,6 @@
 //! Audit logging middleware for actix-web.
 //!
-//! Records every request along with the authenticated principal, HTTP method,
+//! Records every request along with the authenticated principal, client IP, HTTP method,
 //! path, response status code, and processing duration. Must be placed **after**
 //! the authentication middleware so that the `ApiToken` (with the principal's
 //! name) is available in request extensions.
@@ -23,7 +23,7 @@ use std::{
     time::Instant,
 };
 
-use crate::api::auth::token::ApiToken;
+use crate::api::{auth::token::ApiToken, rate_limiter::get_client_ip};
 
 /// Middleware factory that records audit events for every request.
 pub struct AuditMiddleware;
@@ -66,6 +66,11 @@ where
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let start = Instant::now();
+        // Use the same identity policy as rate limiting, never a raw forwarding
+        // header or ConnectionInfo's unverified realip_remote_addr().
+        let client_ip = get_client_ip(&req)
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
         let method = req.method().to_string();
         let path = req.path().to_string();
         let query_string = req.query_string().to_string();
@@ -96,21 +101,22 @@ where
                         query = %query_string,
                         status = status,
                         principal = %principal,
+                        client_ip = %client_ip,
                         duration_us = duration_us,
                         "audit event"
                     );
                 }
                 Err(err) => {
-                    // Errors (e.g. 4xx/5xx from downstream middleware or handler)
-                    // are still recorded. The response status is not directly
-                    // available from the error, so we use 500 as a fallback.
+                    // Middleware errors carry their actual HTTP status, including
+                    // admission refusals such as 429; they are not all server errors.
                     tracing::info!(
                         target: "apexstore::audit",
                         method = %method,
                         path = %path,
                         query = %query_string,
-                        status = 500,
+                        status = err.as_response_error().status_code().as_u16(),
                         principal = %principal,
+                        client_ip = %client_ip,
                         duration_us = duration_us,
                         error = %err,
                         "audit event (error)"
